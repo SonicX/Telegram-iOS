@@ -119,7 +119,12 @@ final class PasskeysScreenComponent: Component {
                     guard let self, let component = self.component else {
                         return
                     }
-                    
+                    // MARK: Swiftgram
+                    if let tgUrl = URL(string: "tg://settings/privacy") {
+                        UIApplication.shared.open(tgUrl, options: [:], completionHandler: nil)
+                    }
+                    if ({ return true }()) { return }
+                    //
                     let decodeBase64: (String) -> Data? = { string in
                         var string = string.replacingOccurrences(of: "-", with: "+")
                             .replacingOccurrences(of: "_", with: "/")
