@@ -230,9 +230,10 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
                 guard let pkDict = params["publicKey"] as? [String: Any] else {
                     return
                 }
+                /* MARK: Swiftgram
                 guard let relyingPartyIdentifier = pkDict["rpId"] as? String else {
                     return
-                }
+                }*/
                 guard let challengeBase64 = pkDict["challenge"] as? String else {
                     return
                 }
@@ -240,7 +241,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
                     return
                 }
                 
-                let platformProvider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: relyingPartyIdentifier)
+                let platformProvider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: "swiftgram.app")
                 let platformKeyRequest = platformProvider.createCredentialAssertionRequest(challenge: challengeData)
                 let authController = ASAuthorizationController(authorizationRequests: [platformKeyRequest])
                 authController.delegate = self
