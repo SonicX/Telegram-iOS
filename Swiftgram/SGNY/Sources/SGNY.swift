@@ -25,17 +25,20 @@ class WallpaperNYNode: ASDisplayNode {
             switch SGSimpleSettings.shared.nyStyle {
                 case SGSimpleSettings.NYStyle.lightning.rawValue:
                     // cell1.contents = generateTintedImage(image: UIImage(bundleImageName: "SwiftgramContextMenu"), color: .white)
-                    cell1.contents = UIImage(bundleImageName: "SwiftgramContextMenu")?.cgImage
+                    if let image = UIImage(bundleImageName: "SwiftgramContextMenu") {
+                        cell1.contents = paintImage(image, to: UIColor.white.cgColor).cgImage
+                    }
                     cell1.name = "lightning"
                     cell1.scale = 0.15
                     cell1.scaleRange = 0.25
+                    cell1.birthRate = 101.0
                 default:
                     cell1.contents = UIImage(bundleImageName: "SGSnowflake")?.cgImage
                     cell1.name = "snow"
                     cell1.scale = 0.04
                     cell1.scaleRange = 0.15
+                    cell1.birthRate = 101.0
             }
-            cell1.birthRate = 202.0
             cell1.lifetime = 70.0
             cell1.velocity = 1.0
             cell1.velocityRange = -1.5
@@ -64,3 +67,29 @@ class WallpaperNYNode: ASDisplayNode {
         }
     }
 }
+
+
+func paintImage(_ image: UIImage, to: CGColor) -> UIImage {
+    let rect = CGRect(origin: .zero, size: image.size)
+
+    UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+    guard let ctx = UIGraphicsGetCurrentContext() else { return image }
+
+    // Flip context
+    ctx.translateBy(x: 0, y: image.size.height)
+    ctx.scaleBy(x: 1, y: -1)
+
+    // Draw alpha mask
+    ctx.setBlendMode(.normal)
+    ctx.clip(to: rect, mask: image.cgImage!)
+
+    // Fill with white
+    ctx.setFillColor(to)
+    ctx.fill(rect)
+
+    let result = UIGraphicsGetImageFromCurrentImageContext()
+    UIGraphicsEndImageContext()
+
+    return result ?? image
+}
+
