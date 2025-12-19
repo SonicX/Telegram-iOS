@@ -262,3 +262,10 @@
 
 "AppBadge.Title" = "App Badge";
 "AppBadge.Notice" = "Customize App Badge shown on screenshots";
+
+"Settings.NY.Header" = "HOLIDAY EFFECTS";
+"Settings.NY.Style" = "Style";
+"Settings.NY.Style.default" = "Disabled";
+"Settings.NY.Style.snow" = "Snow";
+"Settings.NY.Style.lightning" = "Swiftgram";
+"Settings.NY.Notice" = "Available for a limited time only!";

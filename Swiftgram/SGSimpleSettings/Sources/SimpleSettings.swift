@@ -152,6 +152,8 @@ public class SGSimpleSettings {
         case transcriptionBackend
         case translationBackend
         case customAppBadge
+        case canUseNY
+        case nyStyle
     }
     
     public enum DownloadSpeedBoostValues: String, CaseIterable {
@@ -211,6 +213,12 @@ public class SGSimpleSettings {
         case `default`
         case silenced
         case disabled
+    }
+
+    public enum NYStyle: String, CaseIterable {
+        case `default`
+        case snow
+        case lightning
     }
     
     public static let defaultValues: [String: Any] = [
@@ -282,6 +290,8 @@ public class SGSimpleSettings {
         Keys.transcriptionBackend.rawValue: TranscriptionBackend.default.rawValue,
         Keys.translationBackend.rawValue: TranslationBackend.default.rawValue,
         Keys.customAppBadge.rawValue: "",
+        Keys.canUseNY.rawValue: false,
+        Keys.nyStyle.rawValue: NYStyle.snow.rawValue,
     ]
     
     public static let groupDefaultValues: [String: Any] = [
@@ -518,6 +528,12 @@ public class SGSimpleSettings {
 
     @UserDefault(key: Keys.customAppBadge.rawValue)
     public var customAppBadge: String
+
+    @UserDefault(key: Keys.canUseNY.rawValue)
+    public var canUseNY: Bool
+
+    @UserDefault(key: Keys.nyStyle.rawValue)
+    public var nyStyle: String
 }
 
 extension SGSimpleSettings {
@@ -537,6 +553,12 @@ extension SGSimpleSettings {
     
     public var transcriptionBackendEnum: SGSimpleSettings.TranscriptionBackend {
         return TranscriptionBackend(rawValue: transcriptionBackend) ?? .default
+    }
+}
+
+extension SGSimpleSettings {
+    public var isNYEnabled: Bool {
+        return /*canUseNY && */ NYStyle(rawValue: nyStyle) != .default
     }
 }
 

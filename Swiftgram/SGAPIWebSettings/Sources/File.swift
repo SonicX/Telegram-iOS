@@ -15,6 +15,7 @@ public func updateSGWebSettingsInteractivelly(context: AccountContext) {
             SGLogger.shared.log("SGAPI", "New SGWebSettings for id \(context.account.peerId.id._internalGetInt64Value()): \(webSettings) ")
             SGSimpleSettings.shared.canUseStealthMode = webSettings.global.storiesAvailable
             SGSimpleSettings.shared.duckyAppIconAvailable = webSettings.global.duckyAppIconAvailable
+            SGSimpleSettings.shared.canUseNY = webSettings.global.nyAvailable
             let _ = (context.account.postbox.transaction { transaction in
                 updateAppConfiguration(transaction: transaction, { configuration -> AppConfiguration in
                     var configuration = configuration

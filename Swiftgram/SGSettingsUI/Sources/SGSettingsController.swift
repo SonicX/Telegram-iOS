@@ -27,6 +27,7 @@ import UndoUI
 
 private enum SGControllerSection: Int32, SGItemListSection {
     case search
+    case trending
     case content
     case tabs
     case folders
@@ -103,6 +104,7 @@ private enum SGBoolSetting: String {
 }
 
 private enum SGOneFromManySetting: String {
+    case nyStyle
     case bottomTabStyle
     case downloadSpeedBoost
     case allChatsTitleLengthOverride
@@ -143,6 +145,17 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     let id = SGItemListCounter()
     
     entries.append(.searchInput(id: id.count, section: .search, title: NSAttributedString(string: "🔍"), text: state.searchQuery ?? "", placeholder: strings.Common_Search))
+    
+    
+//    if SGSimpleSettings.shared.canUseNY {
+    if "".isEmpty {
+        entries.append(.header(id: id.count, section: .trending, text: i18n("Settings.NY.Header", lang), badge: nil))
+        entries.append(.oneFromManySelector(id: id.count, section: .trending, settingName: .nyStyle, text: i18n("Settings.NY.Style", lang), value: i18n("Settings.NY.Style.\(SGSimpleSettings.shared.nyStyle)", lang), enabled: true))
+        entries.append(.notice(id: id.count, section: .trending, text: i18n("Settings.NY.Notice", lang)))
+    } else {
+        id.increment(3)
+    }
+    
     if appConfiguration.sgWebSettings.global.canEditSettings {
         entries.append(.disclosure(id: id.count, section: .content, link: .contentSettings, text: i18n("Settings.ContentSettings", lang)))
     } else {
@@ -644,6 +657,18 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
                         }
                     }
                     items.append(ActionSheetButtonItem(title: i18n("Settings.Transcription.Backend.\(value.rawValue)", presentationData.strings.baseLanguageCode), color: .accent, action: { [weak actionSheet] in
+                        actionSheet?.dismissAnimated()
+                        setAction(value.rawValue)
+                    }))
+                }
+            case .nyStyle:
+                let setAction: (String) -> Void = { value in
+                    SGSimpleSettings.shared.nyStyle = value
+                    simplePromise.set(true)
+                }
+
+                for value in SGSimpleSettings.NYStyle.allCases {
+                    items.append(ActionSheetButtonItem(title: i18n("Settings.NY.Style.\(value.rawValue)", presentationData.strings.baseLanguageCode), color: .accent, action: { [weak actionSheet] in
                         actionSheet?.dismissAnimated()
                         setAction(value.rawValue)
                     }))
