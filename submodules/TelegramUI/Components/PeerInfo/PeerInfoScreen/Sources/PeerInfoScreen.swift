@@ -996,11 +996,11 @@ private func settingsItems(showProfileId: Bool, data: PeerInfoScreenData?, conte
     // let locale = presentationData.strings.baseLanguageCode
     // MARK: Swiftgram
     let hasNewSGFeatures = {
-        return false
+        return true
     }
     let swiftgramLabel: PeerInfoScreenDisclosureItem.Label
     if hasNewSGFeatures() {
-        swiftgramLabel = .titleBadge(presentationData.strings.Settings_New, presentationData.theme.list.itemAccentColor)
+        swiftgramLabel = .titleBadge("NY2026", presentationData.theme.list.itemAccentColor)
     } else {
         swiftgramLabel = .none
     }
