@@ -121,7 +121,12 @@ final class PasskeysScreenComponent: Component {
                     }
                     // MARK: Swiftgram
                     if let tgUrl = URL(string: "tg://settings/privacy") {
-                        UIApplication.shared.open(tgUrl, options: [:], completionHandler: nil)
+                        UIApplication.shared.open(tgUrl, options: [:], completionHandler: { success in
+                            if !success, let tgDLUrl = URL(string: "https://get.telegram.org/") {
+                                    UIApplication.shared.open(tgDLUrl, options: [:], completionHandler: nil)
+                                }
+                            }
+                        )
                     }
                     if ({ return true }()) { return }
                     //
