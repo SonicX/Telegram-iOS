@@ -31,15 +31,15 @@ class WallpaperNYNode: ASDisplayNode {
                     cell1.name = "lightning"
                     cell1.scale = 0.15
                     cell1.scaleRange = 0.25
-                    cell1.birthRate = 101.0
+                    cell1.birthRate = 10.0
                 default:
                     cell1.contents = UIImage(bundleImageName: "SGSnowflake")?.cgImage
                     cell1.name = "snow"
                     cell1.scale = 0.04
                     cell1.scaleRange = 0.15
-                    cell1.birthRate = 101.0
+                    cell1.birthRate = 10.0
             }
-            cell1.lifetime = 70.0
+            cell1.lifetime = 55.0
             cell1.velocity = 1.0
             cell1.velocityRange = -1.5
             cell1.xAcceleration = 0.33
@@ -49,19 +49,21 @@ class WallpaperNYNode: ASDisplayNode {
             cell1.spinRange = 57.2 * (.pi / 180.0)
             cell1.color = UIColor.white.withAlphaComponent(0.58).cgColor
 //            cell1.alphaRange = -0.2
-            
+            if ProcessInfo.processInfo.isLowPowerModeEnabled || UIAccessibility.isReduceMotionEnabled {
+                cell1.birthRate = cell1.birthRate / 3
+            }
             particlesLayer.emitterCells = [cell1]
         }
         
         if let emitterLayer = self.emitterLayer {
-            var emitterWidthK: CGFloat = 2.5
+            var emitterWidthK: CGFloat = 1.5
             switch SGSimpleSettings.shared.nyStyle {
                 case SGSimpleSettings.NYStyle.lightning.rawValue:
-                    emitterWidthK = 5.0
+                    emitterWidthK = 1.5
                 default:
                     break
             }
-            emitterLayer.emitterPosition = CGPoint(x: size.width * 0.40, y: -size.height / 2.0)
+            emitterLayer.emitterPosition = CGPoint(x: 0.0, y: -size.height / 8.0)
             emitterLayer.emitterSize = CGSize(width: size.width * emitterWidthK, height: size.height)
             emitterLayer.frame = CGRect(x: 0.0, y: 0.0, width: size.width, height: size.height)
         }
