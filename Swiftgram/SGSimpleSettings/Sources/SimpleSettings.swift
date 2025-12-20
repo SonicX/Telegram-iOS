@@ -291,7 +291,7 @@ public class SGSimpleSettings {
         Keys.translationBackend.rawValue: TranslationBackend.default.rawValue,
         Keys.customAppBadge.rawValue: "",
         Keys.canUseNY.rawValue: false,
-        Keys.nyStyle.rawValue: NYStyle.snow.rawValue,
+        Keys.nyStyle.rawValue: NYStyle.default.rawValue,
     ]
     
     public static let groupDefaultValues: [String: Any] = [
