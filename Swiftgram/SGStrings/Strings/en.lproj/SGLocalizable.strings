@@ -5,7 +5,7 @@
 "Settings.Tabs.ShowContacts" = "Show Contacts Tab";
 "Settings.Tabs.ShowNames" = "Show Tab Names";
 "Settings.Tabs.WideTabBar" = "Wide Tab bar";
-"Settings.Tabs.WideTabBar.Notice" = "When enabled, the Tab bar keeps full width even when one or more tabs are hidden.";
+"Settings.Tabs.WideTabBar.Notice" = "Keeps the Tab bar full width even if some tabs are hidden.";
 
 "Settings.Folders.BottomTab" = "Folders at Bottom";
 "Settings.Folders.BottomTabStyle" = "Bottom Folders Style";
