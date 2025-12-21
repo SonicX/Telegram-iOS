@@ -154,6 +154,7 @@ public class SGSimpleSettings {
         case customAppBadge
         case canUseNY
         case nyStyle
+        case wideTabBar
     }
     
     public enum DownloadSpeedBoostValues: String, CaseIterable {
@@ -292,6 +293,7 @@ public class SGSimpleSettings {
         Keys.customAppBadge.rawValue: "",
         Keys.canUseNY.rawValue: false,
         Keys.nyStyle.rawValue: NYStyle.default.rawValue,
+        Keys.wideTabBar.rawValue: false,
     ]
     
     public static let groupDefaultValues: [String: Any] = [
@@ -534,6 +536,9 @@ public class SGSimpleSettings {
 
     @UserDefault(key: Keys.nyStyle.rawValue)
     public var nyStyle: String
+
+    @UserDefault(key: Keys.wideTabBar.rawValue)
+    public var wideTabBar: Bool
 }
 
 extension SGSimpleSettings {

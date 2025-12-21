@@ -50,6 +50,7 @@ private enum SGBoolSetting: String {
     case showTabNames
     case showContactsTab
     case showCallsTab
+    case wideTabBar
     case foldersAtBottom
     case startTelescopeWithRearCam
     case hideStories
@@ -166,6 +167,8 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     entries.append(.toggle(id: id.count, section: .tabs, settingName: .showContactsTab, value: callListSettings.showContactsTab, text: i18n("Settings.Tabs.ShowContacts", lang), enabled: !SGSimpleSettings.shared.hideTabBar))
     entries.append(.toggle(id: id.count, section: .tabs, settingName: .showCallsTab, value: callListSettings.showTab, text: strings.CallSettings_TabIcon, enabled: !SGSimpleSettings.shared.hideTabBar))
     entries.append(.toggle(id: id.count, section: .tabs, settingName: .showTabNames, value: SGSimpleSettings.shared.showTabNames, text: i18n("Settings.Tabs.ShowNames", lang), enabled: !SGSimpleSettings.shared.hideTabBar))
+    entries.append(.toggle(id: id.count, section: .tabs, settingName: .wideTabBar, value: SGSimpleSettings.shared.wideTabBar, text: i18n("Settings.Tabs.WideTabBar", lang), enabled: !SGSimpleSettings.shared.hideTabBar))
+    entries.append(.notice(id: id.count, section: .tabs, text: i18n("Settings.Tabs.WideTabBar.Notice", lang)))
     
     entries.append(.header(id: id.count, section: .folders, text: strings.Settings_ChatFolders.uppercased(), badge: nil))
     entries.append(.toggle(id: id.count, section: .folders, settingName: .foldersAtBottom, value: experimentalUISettings.foldersTabAtBottom, text: i18n("Settings.Folders.BottomTab", lang), enabled: true))
@@ -373,6 +376,9 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
                     accountManager: context.sharedContext.accountManager, { $0.withUpdatedShowTab(value) }
                 )
             ).start()
+        case .wideTabBar:
+            SGSimpleSettings.shared.wideTabBar = value
+            askForRestart?()
         case .foldersAtBottom:
             let _ = (
                 updateExperimentalUISettingsInteractively(accountManager: context.sharedContext.accountManager, { settings in
