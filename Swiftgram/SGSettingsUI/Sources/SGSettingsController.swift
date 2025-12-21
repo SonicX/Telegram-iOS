@@ -102,6 +102,8 @@ private enum SGBoolSetting: String {
     case confirmCalls
     case swipeForVideoPIP
     case enableVoipTcp
+    case nyStyleSnow
+    case nyStyleLightning
 }
 
 private enum SGOneFromManySetting: String {
@@ -150,7 +152,9 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     
     if SGSimpleSettings.shared.canUseNY {
         entries.append(.header(id: id.count, section: .trending, text: i18n("Settings.NY.Header", lang), badge: newStr))
-        entries.append(.oneFromManySelector(id: id.count, section: .trending, settingName: .nyStyle, text: i18n("Settings.NY.Style", lang), value: i18n("Settings.NY.Style.\(SGSimpleSettings.shared.nyStyle)", lang), enabled: true))
+        entries.append(.toggle(id: id.count, section: .trending, settingName: .nyStyleSnow, value: SGSimpleSettings.shared.nyStyle == SGSimpleSettings.NYStyle.snow.rawValue, text: i18n("Settings.NY.Style.snow", lang), enabled: true))
+        entries.append(.toggle(id: id.count, section: .trending, settingName: .nyStyleLightning, value: SGSimpleSettings.shared.nyStyle == SGSimpleSettings.NYStyle.lightning.rawValue, text: i18n("Settings.NY.Style.lightning", lang), enabled: true))
+        // entries.append(.oneFromManySelector(id: id.count, section: .trending, settingName: .nyStyle, text: i18n("Settings.NY.Style", lang), value: i18n("Settings.NY.Style.\(SGSimpleSettings.shared.nyStyle)", lang), enabled: true))
         entries.append(.notice(id: id.count, section: .trending, text: i18n("Settings.NY.Notice", lang)))
     } else {
         id.increment(3)
@@ -527,6 +531,12 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
                     }
                 )
             ).start()
+        case .nyStyleSnow:
+            SGSimpleSettings.shared.nyStyle = value ? SGSimpleSettings.NYStyle.snow.rawValue : SGSimpleSettings.NYStyle.default.rawValue
+            simplePromise.set(true) // Trigger update for 'enabled' field of other toggles
+        case .nyStyleLightning:
+            SGSimpleSettings.shared.nyStyle = value ? SGSimpleSettings.NYStyle.lightning.rawValue : SGSimpleSettings.NYStyle.default.rawValue
+            simplePromise.set(true) // Trigger update for 'enabled' field of other toggles
         }
     }, updateSliderValue: { setting, value in
         switch (setting) {
