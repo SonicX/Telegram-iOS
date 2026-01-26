@@ -489,10 +489,7 @@ official_unrestricted_voip_fragment = """
 """
 unrestricted_voip_fragment = official_unrestricted_voip_fragment if telegram_bundle_id in official_bundle_ids else ""
 
-official_carplay_fragment = """
-<key>com.apple.developer.carplay-messaging</key>
-<true/>
-"""
+official_carplay_fragment = ""
 carplay_fragment = official_carplay_fragment # MARK: Swiftgram if telegram_bundle_id in official_bundle_ids else ""
 
 icloud_fragment = "" if not telegram_enable_icloud else """
@@ -728,6 +725,18 @@ plist_fragment(
     )
 )
 
+local_provisioning_profile(
+    name = "WatchApp_local_profile",
+    profile_name = "watchOS Team Provisioning Profile: {}.watchkitapp".format(telegram_bundle_id),
+    team_id = telegram_team_id,
+)
+
+xcode_provisioning_profile(
+    name = "WatchApp_xcode_profile",
+    managed_by_xcode = True,
+    provisioning_profile = ":WatchApp_local_profile",
+)
+
 watchos_application(
     name = "TelegramWatchApp",
     bundle_id = "{telegram_bundle_id}.watchkitapp".format(
@@ -744,7 +753,7 @@ watchos_application(
     minimum_os_version = minimum_watchos_version,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
-        "//conditions:default": ":Telegram_xcode_profile" if telegram_use_xcode_managed_codesigning else "@build_configuration//provisioning:WatchApp.mobileprovision",
+        "//conditions:default": ":WatchApp_xcode_profile" if telegram_use_xcode_managed_codesigning else "@build_configuration//provisioning:WatchApp.mobileprovision",
     }),
     resources = [
         ":TelegramWatchAppResources",
@@ -762,6 +771,24 @@ watchos_application(
     ],
 )
 #
+
+plist_fragment(
+    name = "TelegramWatchAppEntitlements",
+    extension = "entitlements",
+    template = "".join([
+        """
+        <key>com.apple.security.application-groups</key>
+        <array>
+            <string>group.{telegram_bundle_id}</string>
+        </array>
+        <key>application-identifier</key>
+        <string>{telegram_team_id}.{telegram_bundle_id}.watchkitapp</string>
+        """.format(
+            telegram_bundle_id = telegram_bundle_id,
+            telegram_team_id = telegram_team_id
+        )
+    ])
+)
 
 plist_fragment(
     name = "MtProtoKitInfoPlist",

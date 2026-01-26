@@ -1,0 +1,19 @@
+{
+    "bundle_id": "ru.rm.tolfoContact",
+    "watch_bundle_id": "ru.rm.tolfoContact.watchkitapp",
+    "watch_extension_bundle_id": "ru.rm.tolfoContact.watchkitapp.watchkitextension",
+    "api_id": "39542670",
+    "api_hash": "c13d71ff814c13949e290f04b2967203",
+    "team_id": "U95EM6ZJRW",
+    "development_certificate_name": "iPhone Developer: Yuriy Tereshchenko (P29FBAEM2N)",
+    "app_center_id": "0",
+    "is_internal_build": "true",
+    "is_appstore_build": "false",
+    "appstore_id": "0",
+    "app_specific_url_scheme": "tg",
+    "premium_iap_product_id": "",
+    "enable_siri": false,
+    "enable_icloud": false,
+    "sg_config": "",
+    "telegram_use_xcode_managed_codesigning": false
+}
