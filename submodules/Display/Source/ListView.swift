@@ -5314,6 +5314,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     
     public var accessibilityPageScrolledString: ((String, String) -> String)?
     
+    /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
+    public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
+    
     public func scrollWithDirection(_ direction: ListViewScrollDirection, distance: CGFloat) -> Bool {
         var accessibilityFocusedNode: (ASDisplayNode, CGRect)?
         for itemNode in self.itemNodes {
@@ -5364,6 +5367,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     }
                     break
                 }
+            }
+        }
+        if UIAccessibility.isVoiceOverRunning, let announceContent = self.accessibilityAnnouncementForBottomVisibleItem {
+            let visibleRect = CGRect(origin: self.scroller.contentOffset, size: self.scroller.bounds.size)
+            let visibleNodes = self.itemNodes.filter { $0.frame.intersects(visibleRect) }
+            let bottommostNode: ListViewItemNode?
+            if self.rotated {
+                bottommostNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
+            } else {
+                bottommostNode = visibleNodes.max(by: { $0.frame.maxY < $1.frame.maxY })
+            }
+            if let node = bottommostNode, let text = announceContent(node), !text.isEmpty {
+                UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: text)
             }
         }
         return true

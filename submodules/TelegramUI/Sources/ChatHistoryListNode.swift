@@ -918,6 +918,15 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 return ""
             }
         }
+        self.accessibilityAnnouncementForBottomVisibleItem = { [weak self] node in
+            guard self != nil else { return nil }
+            let label = node.view.accessibilityLabel ?? ""
+            let value = node.view.accessibilityValue ?? ""
+            if label.isEmpty && value.isEmpty { return nil }
+            if value.isEmpty { return label }
+            if label.isEmpty { return value }
+            return "\(label). \(value)"
+        }
         
         self.dynamicBounceEnabled = !self.currentPresentationData.disableAnimations
         self.experimentalSnapScrollToItem = false

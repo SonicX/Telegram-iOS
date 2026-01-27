@@ -105,6 +105,19 @@ ERROR: Skipping '@rules_xcodeproj_generated//generator/Telegram/Telegram_xcodepr
 
 If you encounter this issue, re-run the project generation steps in the README.
 
+## Permission denied when building for device
+
+When building for a physical iPhone (not simulator), you may see:
+```
+error: unable to write file '.../Info.plist': Permission denied (13)
+```
+
+Bazel creates framework outputs read-only; Xcode needs to write into them for the device build. Fix by running:
+```
+sh scripts/fix-build-permissions.sh
+```
+Then build for device again. Close Xcode before running the script if the error persists.
+
 
 # Tips
 
