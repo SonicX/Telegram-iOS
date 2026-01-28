@@ -201,11 +201,18 @@ private final class NavigationButtonItemNode: ImmediateTextNode {
         self.verticalAlignment = .middle
         
         self.accessibilityTraits = .button
+        
+        // Устанавливаем высокий zPosition для приоритета VoiceOver
+        self.layer.zPosition = 200
     }
     
     override func didLoad() {
         super.didLoad()
         self.updatePointerInteraction()
+        
+        // Гарантируем, что view имеет правильные настройки accessibility
+        self.view.isAccessibilityElement = true
+        self.view.accessibilityTraits = .button
     }
     
     func updatePointerInteraction() {
@@ -389,6 +396,9 @@ public final class NavigationButtonNode: ContextControllerSourceNode {
         
         self.isAccessibilityElement = false
         self.isGestureEnabled = false
+        
+        // Увеличиваем zPosition для приоритета VoiceOver
+        self.layer.zPosition = 100
     }
     
     var manualText: String {
