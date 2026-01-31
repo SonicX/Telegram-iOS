@@ -1439,7 +1439,21 @@ public final class ChatListNode: ListView {
         self.verticalScrollIndicatorFollowsOverscroll = true
         
         self.keepMinimalScrollHeightWithTopInset = self.scrollHeightTopInset
-        
+
+        self.accessibilityPageScrolledString = { [weak self] row, count in
+            guard let self else { return "" }
+            let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+            return presentationData.strings.VoiceOver_ScrollStatus(row, count).string
+        }
+        self.accessibilityAnnouncementForBottomVisibleItem = { node in
+            let label = node.view.accessibilityLabel ?? ""
+            let value = node.view.accessibilityValue ?? ""
+            if label.isEmpty && value.isEmpty { return nil }
+            if value.isEmpty { return label }
+            if label.isEmpty { return value }
+            return "\(label). \(value)"
+        }
+
         let nodeInteraction = ChatListNodeInteraction(context: context, animationCache: self.animationCache, animationRenderer: self.animationRenderer, activateSearch: { [weak self] in
             if let strongSelf = self, let activateSearch = strongSelf.activateSearch {
                 activateSearch()

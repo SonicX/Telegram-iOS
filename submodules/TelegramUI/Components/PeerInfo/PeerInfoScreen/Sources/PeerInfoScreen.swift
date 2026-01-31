@@ -130,6 +130,43 @@ public enum PeerInfoAvatarEditingMode {
     case fallback
 }
 
+private final class PeerInfoScrollNode: ASScrollNode {
+    var itemNodesInVisibleArea: (() -> [ASDisplayNode])?
+
+    override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
+        let scrollView = self.view
+        let pageHeight = scrollView.bounds.height - scrollView.adjustedContentInset.top - scrollView.adjustedContentInset.bottom
+        var offset = scrollView.contentOffset
+        switch direction {
+        case .down:
+            offset.y = min(offset.y + pageHeight, scrollView.contentSize.height - scrollView.bounds.height)
+        default:
+            offset.y = max(offset.y - pageHeight, -scrollView.adjustedContentInset.top)
+        }
+        guard offset.y != scrollView.contentOffset.y else { return false }
+        scrollView.setContentOffset(offset, animated: false)
+
+        if let nodes = itemNodesInVisibleArea?() {
+            let target = direction == .down ? nodes.last : nodes.first
+            if let target = target {
+                UIAccessibility.post(notification: .layoutChanged, argument: target.view)
+                let label = target.view.accessibilityLabel ?? ""
+                let value = target.view.accessibilityValue ?? ""
+                let announcement: String
+                if !label.isEmpty && !value.isEmpty {
+                    announcement = "\(label). \(value)"
+                } else {
+                    announcement = label.isEmpty ? value : label
+                }
+                if !announcement.isEmpty {
+                    UIAccessibility.post(notification: .announcement, argument: announcement)
+                }
+            }
+        }
+        return true
+    }
+}
+
 protocol PeerInfoScreenItem: AnyObject {
     var id: AnyHashable { get }
     func node() -> PeerInfoScreenItemNode
@@ -3389,7 +3426,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
         self.switchToGiftsTarget = switchToGiftsTarget
         self.sharedMediaFromForumTopic = sharedMediaFromForumTopic
         
-        self.scrollNode = ASScrollNode()
+        self.scrollNode = PeerInfoScrollNode()
         self.scrollNode.view.delaysContentTouches = false
         self.scrollNode.canCancelAllTouchesInViews = true
         
@@ -3414,7 +3451,25 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
         super.init()
         
         self.paneContainerNode.parentController = controller
-        
+
+        if let peerInfoScrollNode = self.scrollNode as? PeerInfoScrollNode {
+            peerInfoScrollNode.itemNodesInVisibleArea = { [weak self] in
+                guard let self else { return [] }
+                let visibleRect = self.scrollNode.view.bounds
+                var visible: [ASDisplayNode] = []
+                let sections = self.state.isEditing ? self.editingSections : self.regularSections
+                for (_, section) in sections {
+                    for (_, itemNode) in section.itemNodes {
+                        let frameInScroll = itemNode.view.convert(itemNode.bounds, to: self.scrollNode.view)
+                        if visibleRect.intersects(frameInScroll) {
+                            visible.append(itemNode)
+                        }
+                    }
+                }
+                return visible.sorted { $0.view.convert(CGPoint.zero, to: self.scrollNode.view).y < $1.view.convert(CGPoint.zero, to: self.scrollNode.view).y }
+            }
+        }
+
         self._interaction = PeerInfoInteraction(
             notifyTextCopied: { [weak self] in
                 let presentationData = context.sharedContext.currentPresentationData.with { $0 }

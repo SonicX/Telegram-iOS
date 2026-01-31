@@ -250,7 +250,15 @@ final class CallListControllerNode: ASDisplayNode {
         self.listNode.accessibilityPageScrolledString = { row, count in
             return presentationData.strings.VoiceOver_ScrollStatus(row, count).string
         }
-        
+        self.listNode.accessibilityAnnouncementForBottomVisibleItem = { node in
+            let label = node.view.accessibilityLabel ?? ""
+            let value = node.view.accessibilityValue ?? ""
+            if label.isEmpty && value.isEmpty { return nil }
+            if value.isEmpty { return label }
+            if label.isEmpty { return value }
+            return "\(label). \(value)"
+        }
+
         self.leftOverlayNode = ASDisplayNode()
         self.leftOverlayNode.backgroundColor = self.presentationData.theme.list.blocksBackgroundColor
         self.rightOverlayNode = ASDisplayNode()
