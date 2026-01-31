@@ -5,7 +5,8 @@
       "Bash(.build/debug/makeproject:*)",
       "Bash(mkdir:*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(ls:*)"
     ],
     "deny": []
   }

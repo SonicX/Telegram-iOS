@@ -757,34 +757,11 @@ open class NavigationBar: ASDisplayNode {
     private func updateAccessibilityElements() {
     }
     
-    // Отслеживание состояния VoiceOver для управления поведением при скролле
-    private var isVoiceOverScrolling: Bool = false
-    private var lastAccessibilityFocusCheckTime: TimeInterval = 0
-    private var voiceOverScrollStartTime: TimeInterval = 0
-    private var activeGestureRecognizer: UIGestureRecognizer?
-    
     override open var accessibilityElements: [Any]? {
         get {
-            // Если происходит скролл VoiceOver (свайп тремя пальцами),
-            // временно возвращаем nil, чтобы навбар не перехватывал фокус
-            // Но даем небольшое окно времени (0.1 сек) после начала скролла,
-            // чтобы не блокировать прямые касания
-            let currentTime = Date().timeIntervalSince1970
-            if self.isVoiceOverScrolling && (currentTime - self.voiceOverScrollStartTime) > 0.1 {
-                return nil
-            }
-            
             var accessibilityElements: [Any] = []
             if self.backButtonNode.supernode != nil {
                 addAccessibilityChildren(of: self.backButtonNode, container: self, to: &accessibilityElements)
-                // Принудительно устанавливаем accessibility frame для кнопки "Назад"
-                // чтобы VoiceOver правильно определял её расположение
-                if let backButtonView = self.backButtonNode.view.subviews.first {
-                    backButtonView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(
-                        self.backButtonNode.bounds,
-                        in: self.backButtonNode.view
-                    )
-                }
             }
             if self.leftButtonNode.supernode != nil {
                 addAccessibilityChildren(of: self.leftButtonNode, container: self, to: &accessibilityElements)
@@ -810,130 +787,17 @@ open class NavigationBar: ASDisplayNode {
             if let secondaryContentNode = self.secondaryContentNode {
                 addAccessibilityChildren(of: secondaryContentNode, container: self, to: &accessibilityElements)
             }
-            return accessibilityElements
+            return accessibilityElements.isEmpty ? nil : accessibilityElements
         } set(value) {
         }
     }
     
     override open func didLoad() {
         super.didLoad()
-        
-        // Убедимся, что навбар имеет приоритет для VoiceOver
-        self.view.accessibilityViewIsModal = false
-        self.isAccessibilityElement = false
-        self.view.shouldGroupAccessibilityChildren = true
-        
-        // Устанавливаем более высокий zPosition для правильной работы VoiceOver
-        self.zPosition = 1000
-        
-        // Добавляем gesture recognizer для отслеживания свайпов тремя пальцами
-        let threeFingerSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(self.handleThreeFingerSwipe(_:)))
-        threeFingerSwipeUp.numberOfTouchesRequired = 3
-        threeFingerSwipeUp.direction = .up
-        threeFingerSwipeUp.cancelsTouchesInView = false
-        threeFingerSwipeUp.delaysTouchesBegan = false
-        self.view.addGestureRecognizer(threeFingerSwipeUp)
-        
-        let threeFingerSwipeDown = UISwipeGestureRecognizer(target: self, action: #selector(self.handleThreeFingerSwipe(_:)))
-        threeFingerSwipeDown.numberOfTouchesRequired = 3
-        threeFingerSwipeDown.direction = .down
-        threeFingerSwipeDown.cancelsTouchesInView = false
-        threeFingerSwipeDown.delaysTouchesBegan = false
-        self.view.addGestureRecognizer(threeFingerSwipeDown)
-        
-        // Подписываемся на уведомления VoiceOver о скролле
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(self.handleAccessibilityScroll(_:)),
-            name: UIAccessibility.pageScrolledNotification,
-            object: nil
-        )
-        
-        // Отслеживаем изменения фокуса VoiceOver
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(self.handleAccessibilityElementFocused(_:)),
-            name: UIAccessibility.elementFocusedNotification,
-            object: nil
-        )
-        
-        // Дополнительно отслеживаем начало и конец анимации скролла
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(self.handleScrollViewWillBeginDragging(_:)),
-            name: NSNotification.Name("UIScrollViewWillBeginDragging"),
-            object: nil
-        )
-        
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(self.handleScrollViewDidEndScrolling(_:)),
-            name: NSNotification.Name("UIScrollViewDidEndDecelerating"),
-            object: nil
-        )
-        
+
         self.updateAccessibilityElements()
     }
-    
-    @objc private func handleThreeFingerSwipe(_ gesture: UISwipeGestureRecognizer) {
-        // Обработка свайпа тремя пальцами (жест VoiceOver для скролла)
-        if UIAccessibility.isVoiceOverRunning && gesture.state == .began {
-            self.voiceOverScrollStartTime = Date().timeIntervalSince1970
-            self.isVoiceOverScrolling = true
-            
-            // Восстанавливаем через большее время
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                self?.isVoiceOverScrolling = false
-            }
-        }
-    }
-    
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-    
-    @objc private func handleScrollViewWillBeginDragging(_ notification: Notification) {
-        // Дополнительная проверка для начала скролла
-        if UIAccessibility.isVoiceOverRunning {
-            self.voiceOverScrollStartTime = Date().timeIntervalSince1970
-            self.isVoiceOverScrolling = true
-        }
-    }
-    
-    @objc private func handleScrollViewDidEndScrolling(_ notification: Notification) {
-        // Когда скролл завершен, восстанавливаем accessibility навбара
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.isVoiceOverScrolling = false
-        }
-    }
-    
-    @objc private func handleAccessibilityScroll(_ notification: Notification) {
-        // Когда происходит скролл VoiceOver (свайп тремя пальцами),
-        // временно отключаем accessibility элементы навбара
-        self.voiceOverScrollStartTime = Date().timeIntervalSince1970
-        self.isVoiceOverScrolling = true
-        
-        // Через короткое время восстанавливаем их
-        // Используем больший интервал для уверенности, что скролл завершен
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.isVoiceOverScrolling = false
-        }
-    }
-    
-    @objc private func handleAccessibilityElementFocused(_ notification: Notification) {
-        // Отслеживаем когда элемент получает фокус
-        // Если фокус на элементе навбара, сбрасываем флаг скролла
-        if let focusedElement = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey] as? NSObject {
-            if focusedElement === self || 
-               focusedElement === self.backButtonNode || 
-               focusedElement === self.leftButtonNode || 
-               focusedElement === self.rightButtonNode ||
-               focusedElement === self.titleNode {
-                self.isVoiceOverScrolling = false
-            }
-        }
-    }
-    
+
     public var enableAutomaticBackButton: Bool = true
     
     var _previousItem: NavigationPreviousAction?
@@ -1436,16 +1300,8 @@ open class NavigationBar: ASDisplayNode {
             self.requestedLayout = false
             self.updateLayout(size: validLayout.size, defaultHeight: validLayout.defaultHeight, additionalTopHeight: validLayout.additionalTopHeight, additionalContentHeight: validLayout.additionalContentHeight, additionalBackgroundHeight: validLayout.additionalBackgroundHeight, additionalCutout: validLayout.additionalCutout, leftInset: validLayout.leftInset, rightInset: validLayout.rightInset, appearsHidden: validLayout.appearsHidden, isLandscape: validLayout.isLandscape, transition: .immediate)
         }
-        
-        // Обновляем accessibility frames после layout для правильной работы VoiceOver
-        DispatchQueue.main.async { [weak self] in
-            guard let _ = self else { return }
-            if UIAccessibility.isVoiceOverRunning {
-                UIAccessibility.post(notification: .layoutChanged, argument: nil)
-            }
-        }
     }
-    
+
     func updateLayout(size: CGSize, defaultHeight: CGFloat, additionalTopHeight: CGFloat, additionalContentHeight: CGFloat, additionalBackgroundHeight: CGFloat, additionalCutout: CGSize?, leftInset: CGFloat, rightInset: CGFloat, appearsHidden: Bool, isLandscape: Bool, transition: ContainedViewLayoutTransition) {
         if self.layoutSuspended {
             return
@@ -1985,72 +1841,4 @@ open class NavigationBar: ASDisplayNode {
         
         return result
     }
-    
-    // Переопределяем accessibilityHitTest для правильной работы со скроллом VoiceOver
-    override open func accessibilityHitTest(_ point: CGPoint, with event: UIEvent?) -> Any? {
-        // Если происходит скролл VoiceOver, не перехватываем фокус
-        if self.isVoiceOverScrolling {
-            return nil
-        }
-        
-        // Конвертируем точку в локальные координаты
-        let localPoint = self.view.convert(point, from: nil)
-        
-        // Проверяем, попадает ли точка в область навбара
-        guard self.bounds.contains(localPoint) else {
-            return nil
-        }
-        
-        // Проверяем попадание в кнопку "Назад" с расширенной областью
-        if self.backButtonNode.supernode != nil && !self.backButtonNode.isHidden {
-            let backButtonPoint = self.backButtonNode.view.convert(localPoint, from: self.view)
-            let expandedBackButtonBounds = self.backButtonNode.bounds.insetBy(dx: -20.0, dy: -10.0)
-            
-            if expandedBackButtonBounds.contains(backButtonPoint) {
-                // Возвращаем первый accessibility элемент кнопки "Назад"
-                if let backButtonElements = self.backButtonNode.accessibilityElements as? [Any],
-                   let firstElement = backButtonElements.first {
-                    return firstElement
-                }
-                return self.backButtonNode
-            }
-        }
-        
-        // Проверяем попадание в левую кнопку
-        if self.leftButtonNode.supernode != nil && !self.leftButtonNode.isHidden {
-            let leftButtonPoint = self.leftButtonNode.view.convert(localPoint, from: self.view)
-            if self.leftButtonNode.bounds.insetBy(dx: -10.0, dy: -10.0).contains(leftButtonPoint) {
-                if let leftButtonElements = self.leftButtonNode.accessibilityElements as? [Any],
-                   let firstElement = leftButtonElements.first {
-                    return firstElement
-                }
-                return self.leftButtonNode
-            }
-        }
-        
-        // Проверяем попадание в правую кнопку
-        if self.rightButtonNode.supernode != nil && !self.rightButtonNode.isHidden {
-            let rightButtonPoint = self.rightButtonNode.view.convert(localPoint, from: self.view)
-            if self.rightButtonNode.bounds.insetBy(dx: -10.0, dy: -10.0).contains(rightButtonPoint) {
-                if let rightButtonElements = self.rightButtonNode.accessibilityElements as? [Any],
-                   let firstElement = rightButtonElements.first {
-                    return firstElement
-                }
-                return self.rightButtonNode
-            }
-        }
-        
-        // Проверяем попадание в заголовок
-        if self.titleNode.supernode != nil && !self.titleNode.alpha.isZero {
-            let titlePoint = self.titleNode.view.convert(localPoint, from: self.view)
-            if self.titleNode.bounds.contains(titlePoint) {
-                return self.titleNode
-            }
-        }
-        
-        // Если точка в области навбара, но не в конкретном элементе,
-        // возвращаем nil, чтобы система искала элементы под навбаром
-        return nil
-    }
 }
-

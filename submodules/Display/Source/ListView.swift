@@ -455,16 +455,30 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
     }
     
-    /*override open var accessibilityElements: [Any]? {
+    override open var accessibilityElements: [Any]? {
         get {
             var accessibilityElements: [Any] = []
+            let contentOffset = self.scroller.contentOffset
+            let visibleTop: CGFloat
+            let visibleBottom: CGFloat
+            if self.rotated {
+                visibleTop = contentOffset.y + self.insets.bottom
+                visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.top
+            } else {
+                visibleTop = contentOffset.y + self.insets.top
+                visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
+            }
+            let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
             self.forEachItemNode({ itemNode in
-                addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+                let intersection = itemNode.frame.intersection(visibleRect)
+                if !intersection.isNull && intersection.height > itemNode.frame.height * 0.5 {
+                    addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+                }
             })
-            return accessibilityElements
+            return accessibilityElements.isEmpty ? nil : accessibilityElements
         } set(value) {
         }
-    }*/
+    }
 
     override public init() {
         class DisplayLinkProxy: NSObject {
@@ -5318,13 +5332,6 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
     
     public func scrollWithDirection(_ direction: ListViewScrollDirection, distance: CGFloat) -> Bool {
-        var accessibilityFocusedNode: (ASDisplayNode, CGRect)?
-        for itemNode in self.itemNodes {
-            if findAccessibilityFocus(itemNode) {
-                accessibilityFocusedNode = (itemNode, itemNode.frame)
-                break
-            }
-        }
         let initialOffset = self.scroller.contentOffset
         switch direction {
             case .up:
@@ -5352,26 +5359,40 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     return false
                 }
         }
-        if let (_, frame) = accessibilityFocusedNode {
-            for itemNode in self.itemNodes {
-                if frame.intersects(itemNode.frame) {
-                    UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: itemNode.view)
-                    if let index = itemNode.index {
-                        let scrollStatus: String
-                        if let accessibilityPageScrolledString = self.accessibilityPageScrolledString {
-                            scrollStatus = accessibilityPageScrolledString("\(index + 1)", "\(self.items.count)")
-                        } else {
-                            scrollStatus = "Row \(index + 1) of \(self.items.count)"
-                        }
-                        UIAccessibility.post(notification: UIAccessibility.Notification.pageScrolled, argument: scrollStatus)
-                    }
-                    break
+
+        let visibleRect = CGRect(origin: self.scroller.contentOffset, size: self.scroller.bounds.size)
+        let visibleNodes = self.itemNodes.filter { $0.frame.intersects(visibleRect) }
+
+        let targetNode: ListViewItemNode?
+        switch direction {
+            case .up:
+                if self.rotated {
+                    targetNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
+                } else {
+                    targetNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
                 }
+            case .down:
+                if self.rotated {
+                    targetNode = visibleNodes.max(by: { $0.frame.maxY < $1.frame.maxY })
+                } else {
+                    targetNode = visibleNodes.max(by: { $0.frame.maxY < $1.frame.maxY })
+                }
+        }
+
+        if let node = targetNode {
+            UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: node.view)
+            if let index = node.index {
+                let scrollStatus: String
+                if let accessibilityPageScrolledString = self.accessibilityPageScrolledString {
+                    scrollStatus = accessibilityPageScrolledString("\(index + 1)", "\(self.items.count)")
+                } else {
+                    scrollStatus = "Row \(index + 1) of \(self.items.count)"
+                }
+                UIAccessibility.post(notification: UIAccessibility.Notification.pageScrolled, argument: scrollStatus)
             }
         }
+
         if UIAccessibility.isVoiceOverRunning, let announceContent = self.accessibilityAnnouncementForBottomVisibleItem {
-            let visibleRect = CGRect(origin: self.scroller.contentOffset, size: self.scroller.bounds.size)
-            let visibleNodes = self.itemNodes.filter { $0.frame.intersects(visibleRect) }
             let bottommostNode: ListViewItemNode?
             if self.rotated {
                 bottommostNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
