@@ -457,27 +457,31 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     
     override open var accessibilityElements: [Any]? {
         get {
-            var accessibilityElements: [Any] = []
-            let contentOffset = self.scroller.contentOffset
-            let visibleTop: CGFloat
-            let visibleBottom: CGFloat
-            if self.rotated {
-                visibleTop = contentOffset.y + self.insets.bottom
-                visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.top
-            } else {
-                visibleTop = contentOffset.y + self.insets.top
-                visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
-            }
-            let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
-            self.forEachItemNode({ itemNode in
-                let intersection = itemNode.frame.intersection(visibleRect)
-                if !intersection.isNull && intersection.height > itemNode.frame.height * 0.5 {
-                    addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
-                }
-            })
-            return accessibilityElements.isEmpty ? nil : accessibilityElements
+            return self.customAccessibilityElements()
         } set(value) {
         }
+    }
+
+    @objc open func customAccessibilityElements() -> [Any]? {
+        var accessibilityElements: [Any] = []
+        let contentOffset = self.scroller.contentOffset
+        let visibleTop: CGFloat
+        let visibleBottom: CGFloat
+        if self.rotated {
+            visibleTop = contentOffset.y + self.insets.bottom
+            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.top
+        } else {
+            visibleTop = contentOffset.y + self.insets.top
+            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
+        }
+        let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
+        self.forEachItemNode({ itemNode in
+            let intersection = itemNode.frame.intersection(visibleRect)
+            if !intersection.isNull && intersection.height > itemNode.frame.height * 0.5 {
+                addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+            }
+        })
+        return accessibilityElements.isEmpty ? nil : accessibilityElements
     }
 
     override public init() {

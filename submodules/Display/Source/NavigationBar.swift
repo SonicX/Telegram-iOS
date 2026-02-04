@@ -759,37 +759,41 @@ open class NavigationBar: ASDisplayNode {
     
     override open var accessibilityElements: [Any]? {
         get {
-            var accessibilityElements: [Any] = []
-            if self.backButtonNode.supernode != nil {
-                addAccessibilityChildren(of: self.backButtonNode, container: self, to: &accessibilityElements)
-            }
-            if self.leftButtonNode.supernode != nil {
-                addAccessibilityChildren(of: self.leftButtonNode, container: self, to: &accessibilityElements)
-            }
-            if self.titleNode.supernode != nil {
-                addAccessibilityChildren(of: self.titleNode, container: self, to: &accessibilityElements)
-                accessibilityElements.append(self.titleNode)
-            }
-            if let titleView = self.titleView, titleView.superview != nil {
-                titleView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(titleView.bounds, in: titleView)
-                accessibilityElements.append(titleView)
-            }
-            if self.rightButtonNode.supernode != nil {
-                addAccessibilityChildren(of: self.rightButtonNode, container: self, to: &accessibilityElements)
-            }
-            if let customHeaderContentView = self.customHeaderContentView, customHeaderContentView.superview != nil {
-                customHeaderContentView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(customHeaderContentView.bounds, in: customHeaderContentView)
-                accessibilityElements.append(customHeaderContentView)
-            }
-            if let contentNode = self.contentNode {
-                addAccessibilityChildren(of: contentNode, container: self, to: &accessibilityElements)
-            }
-            if let secondaryContentNode = self.secondaryContentNode {
-                addAccessibilityChildren(of: secondaryContentNode, container: self, to: &accessibilityElements)
-            }
-            return accessibilityElements.isEmpty ? nil : accessibilityElements
+            return self.customAccessibilityElements()
         } set(value) {
         }
+    }
+
+    @objc open func customAccessibilityElements() -> [Any]? {
+        var accessibilityElements: [Any] = []
+        if self.backButtonNode.supernode != nil {
+            addAccessibilityChildren(of: self.backButtonNode, container: self, to: &accessibilityElements)
+        }
+        if self.leftButtonNode.supernode != nil {
+            addAccessibilityChildren(of: self.leftButtonNode, container: self, to: &accessibilityElements)
+        }
+        if self.titleNode.supernode != nil {
+            addAccessibilityChildren(of: self.titleNode, container: self, to: &accessibilityElements)
+            accessibilityElements.append(self.titleNode)
+        }
+        if let titleView = self.titleView, titleView.superview != nil {
+            titleView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(titleView.bounds, in: titleView)
+            accessibilityElements.append(titleView)
+        }
+        if self.rightButtonNode.supernode != nil {
+            addAccessibilityChildren(of: self.rightButtonNode, container: self, to: &accessibilityElements)
+        }
+        if let customHeaderContentView = self.customHeaderContentView, customHeaderContentView.superview != nil {
+            customHeaderContentView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(customHeaderContentView.bounds, in: customHeaderContentView)
+            accessibilityElements.append(customHeaderContentView)
+        }
+        if let contentNode = self.contentNode {
+            addAccessibilityChildren(of: contentNode, container: self, to: &accessibilityElements)
+        }
+        if let secondaryContentNode = self.secondaryContentNode {
+            addAccessibilityChildren(of: secondaryContentNode, container: self, to: &accessibilityElements)
+        }
+        return accessibilityElements.isEmpty ? nil : accessibilityElements
     }
     
     override open func didLoad() {

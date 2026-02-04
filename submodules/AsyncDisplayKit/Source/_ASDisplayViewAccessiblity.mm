@@ -289,11 +289,23 @@ static void CollectAccessibilityElementsForView(UIView *view, NSMutableArray *el
 - (NSArray *)accessibilityElements
 {
   ASDisplayNodeAssertMainThread();
-  
+
   ASDisplayNode *viewNode = self.asyncdisplaykit_node;
   if (viewNode == nil) {
     return @[];
   }
+
+  // ListView and NavigationBar override accessibilityElements in Swift, but ObjC category
+  // methods on ASDisplayNode shadow Swift overrides. Check if the subclass provides a
+  // custom implementation via customAccessibilityElements and use it instead.
+  if ([viewNode respondsToSelector:@selector(customAccessibilityElements)]) {
+    NSArray *custom = [(id)viewNode customAccessibilityElements];
+    if (custom != nil) {
+      _accessibilityElements = custom;
+      return _accessibilityElements;
+    }
+  }
+
   _accessibilityElements = [viewNode accessibilityElements];
   return _accessibilityElements;
 }
