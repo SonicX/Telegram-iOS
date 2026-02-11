@@ -918,15 +918,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 return ""
             }
         }
-        self.accessibilityAnnouncementForBottomVisibleItem = { [weak self] node in
-            guard self != nil else { return nil }
-            let label = node.view.accessibilityLabel ?? ""
-            let value = node.view.accessibilityValue ?? ""
-            if label.isEmpty && value.isEmpty { return nil }
-            if value.isEmpty { return label }
-            if label.isEmpty { return value }
-            return "\(label). \(value)"
+        self.accessibilityPageScrolledRangeString = { from, to, count in
+            return "Сообщения с \(from) по \(to) из \(count)"
         }
+        self.accessibilityInterruptSpeechOnUserAction = true
+        self.accessibilityLayoutChangedOnScroll = false
+        self.accessibilityStatusAnnouncementOnScroll = false
         
         self.dynamicBounceEnabled = !self.currentPresentationData.disableAnimations
         self.experimentalSnapScrollToItem = false
@@ -1243,6 +1240,53 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.genericReactionEffectDisposable?.dispose()
         self.adMessagesDisposable?.dispose()
         self.presentationDataDisposable?.dispose()
+    }
+    
+    private func makeMessageAccessibilityElement(for itemNode: ASDisplayNode) -> UIAccessibilityElement? {
+        let label = itemNode.view.accessibilityLabel ?? ""
+        let value = itemNode.view.accessibilityValue ?? ""
+        guard !label.isEmpty || !value.isEmpty else {
+            return nil
+        }
+        
+        let element = UIAccessibilityElement(accessibilityContainer: self)
+        element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+        element.accessibilityLabel = label
+        element.accessibilityValue = value
+        element.accessibilityTraits = itemNode.view.accessibilityTraits
+        element.accessibilityHint = itemNode.view.accessibilityHint
+        element.accessibilityIdentifier = itemNode.view.accessibilityIdentifier
+        return element
+    }
+    
+    override public func customAccessibilityElements() -> [Any]? {
+        var accessibilityElements: [Any] = []
+        let contentOffset = self.scroller.contentOffset
+        let visibleTop: CGFloat
+        let visibleBottom: CGFloat
+        if self.rotated {
+            visibleTop = contentOffset.y + self.insets.bottom
+            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.top
+        } else {
+            visibleTop = contentOffset.y + self.insets.top
+            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
+        }
+        
+        let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
+        self.forEachItemNode({ itemNode in
+            let intersection = itemNode.frame.intersection(visibleRect)
+            guard !intersection.isNull, intersection.height > itemNode.frame.height * 0.5 else {
+                return
+            }
+            
+            if let element = self.makeMessageAccessibilityElement(for: itemNode) {
+                accessibilityElements.append(element)
+            } else {
+                addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+            }
+        })
+        
+        return accessibilityElements.isEmpty ? nil : accessibilityElements
     }
     
     public func updateTag(tag: HistoryViewInputTag?) {

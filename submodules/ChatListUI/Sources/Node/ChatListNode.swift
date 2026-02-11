@@ -1445,6 +1445,7 @@ public final class ChatListNode: ListView {
             let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
             return presentationData.strings.VoiceOver_ScrollStatus(row, count).string
         }
+        self.accessibilityInterruptSpeechOnUserAction = true
         self.accessibilityAnnouncementForBottomVisibleItem = { node in
             let label = node.view.accessibilityLabel ?? ""
             let value = node.view.accessibilityValue ?? ""

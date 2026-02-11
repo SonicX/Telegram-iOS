@@ -15,5 +15,5 @@
     "enable_siri": false,
     "enable_icloud": false,
     "sg_config": "",
-    "telegram_use_xcode_managed_codesigning": false
+    "telegram_use_xcode_managed_codesigning": true
 }

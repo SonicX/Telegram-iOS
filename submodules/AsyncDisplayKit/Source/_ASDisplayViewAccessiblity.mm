@@ -16,6 +16,7 @@
 #import "ASDisplayNodeInternal.h"
 
 #import <queue>
+#import <objc/message.h>
 
 NS_INLINE UIAccessibilityTraits InteractiveAccessibilityTraitsMask() {
   return UIAccessibilityTraitLink | UIAccessibilityTraitKeyboardKey | UIAccessibilityTraitButton;
@@ -298,8 +299,9 @@ static void CollectAccessibilityElementsForView(UIView *view, NSMutableArray *el
   // ListView and NavigationBar override accessibilityElements in Swift, but ObjC category
   // methods on ASDisplayNode shadow Swift overrides. Check if the subclass provides a
   // custom implementation via customAccessibilityElements and use it instead.
-  if ([viewNode respondsToSelector:@selector(customAccessibilityElements)]) {
-    NSArray *custom = [(id)viewNode customAccessibilityElements];
+  SEL customElementsSelector = NSSelectorFromString(@"customAccessibilityElements");
+  if ([viewNode respondsToSelector:customElementsSelector]) {
+    NSArray *custom = ((NSArray *(*)(id, SEL))objc_msgSend)(viewNode, customElementsSelector);
     if (custom != nil) {
       _accessibilityElements = custom;
       return _accessibilityElements;

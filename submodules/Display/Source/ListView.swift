@@ -870,6 +870,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        self.interruptAccessibilitySpeechIfNeeded()
         self.lastContentOffsetTimestamp = 0.0
         self.resetHeaderItemsFlashTimer(start: false)
         self.updateHeaderItemsFlashing(animated: true)
@@ -4857,6 +4858,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     override open func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        self.interruptAccessibilitySpeechIfNeeded()
         let touchesPosition = touches.first!.location(in: self.view)
         
         if let index = self.itemIndexAtPoint(touchesPosition) {
@@ -5245,6 +5247,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     @objc func trackingGesture(_ recognizer: UIPanGestureRecognizer) {
         switch recognizer.state {
             case .began:
+                self.interruptAccessibilitySpeechIfNeeded()
                 self.isTracking = true
                 self.trackingOffset = 0.0
             case .changed:
@@ -5331,9 +5334,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     public var accessibilityPageScrolledString: ((String, String) -> String)?
+    public var accessibilityPageScrolledRangeString: ((String, String, String) -> String)?
+    public var accessibilityPageScrolledUsesVisibleRange = true
+    public var accessibilityLayoutChangedOnScroll = true
+    public var accessibilityStatusAnnouncementOnScroll = false
+    public var accessibilityInterruptSpeechOnUserAction = false
     
     /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
+    
+    private func interruptAccessibilitySpeechIfNeeded() {
+        guard self.accessibilityInterruptSpeechOnUserAction, UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: "")
+    }
     
     public func scrollWithDirection(_ direction: ListViewScrollDirection, distance: CGFloat) -> Bool {
         let initialOffset = self.scroller.contentOffset
@@ -5383,15 +5398,32 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 }
         }
 
-        if let node = targetNode {
+        let visibleIndices = visibleNodes.compactMap(\.index).sorted()
+        let scrollStatus: String?
+        if self.accessibilityPageScrolledUsesVisibleRange, let firstVisibleIndex = visibleIndices.first, let lastVisibleIndex = visibleIndices.last {
+            if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
+                scrollStatus = accessibilityPageScrolledRangeString("\(firstVisibleIndex + 1)", "\(lastVisibleIndex + 1)", "\(self.items.count)")
+            } else {
+                let rangeFormat = Bundle.main.localizedString(forKey: "VoiceOver.ScrollStatusRange", value: "Items from %1$@ to %2$@ of %3$@", table: nil)
+                scrollStatus = String(format: rangeFormat, "\(firstVisibleIndex + 1)", "\(lastVisibleIndex + 1)", "\(self.items.count)")
+            }
+        } else if let index = targetNode?.index {
+            if let accessibilityPageScrolledString = self.accessibilityPageScrolledString {
+                scrollStatus = accessibilityPageScrolledString("\(index + 1)", "\(self.items.count)")
+            } else {
+                scrollStatus = "Row \(index + 1) of \(self.items.count)"
+            }
+        } else {
+            scrollStatus = nil
+        }
+        
+        if let node = targetNode, self.accessibilityLayoutChangedOnScroll {
             UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: node.view)
-            if let index = node.index {
-                let scrollStatus: String
-                if let accessibilityPageScrolledString = self.accessibilityPageScrolledString {
-                    scrollStatus = accessibilityPageScrolledString("\(index + 1)", "\(self.items.count)")
-                } else {
-                    scrollStatus = "Row \(index + 1) of \(self.items.count)"
-                }
+        }
+        if let scrollStatus {
+            if self.accessibilityStatusAnnouncementOnScroll {
+                UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: scrollStatus)
+            } else {
                 UIAccessibility.post(notification: UIAccessibility.Notification.pageScrolled, argument: scrollStatus)
             }
         }
