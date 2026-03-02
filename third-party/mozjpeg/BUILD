@@ -47,7 +47,17 @@ genrule(
     CMAKE_DIR="$$(pwd)/$$BUILD_DIR/cmake"
     rm -rf "$$CMAKE_DIR"
     mkdir -p "$$CMAKE_DIR"
-    tar -xzf "$(location @cmake_tar_gz//file)" -C "$$CMAKE_DIR"
+
+    CMAKE_BIN=""
+    if command -v cmake >/dev/null 2>&1; then
+        CMAKE_BIN="$$(command -v cmake)"
+    elif [ -x "/opt/homebrew/bin/cmake" ]; then
+        CMAKE_BIN="/opt/homebrew/bin/cmake"
+    else
+        COPYFILE_DISABLE=1 tar --no-mac-metadata -xzf "$(location @cmake_tar_gz//file)" -C "$$CMAKE_DIR" 2>/dev/null || \
+        tar -xzf "$(location @cmake_tar_gz//file)" -C "$$CMAKE_DIR"
+        CMAKE_BIN="$$CMAKE_DIR/cmake-4.1.2-macos-universal/CMake.app/Contents/bin/cmake"
+    fi
 
     cp $(location :build-mozjpeg-bazel.sh) "$$BUILD_DIR/"
 
@@ -57,7 +67,7 @@ genrule(
 
     mkdir -p "$$BUILD_DIR/Public/mozjpeg"
 
-    PATH="$$PATH:$$CMAKE_DIR/cmake-4.1.2-macos-universal/CMake.app/Contents/bin" sh $$BUILD_DIR/build-mozjpeg-bazel.sh $$BUILD_ARCH "$$BUILD_DIR/mozjpeg" "$$BUILD_DIR"
+    PATH="$$(dirname $$CMAKE_BIN):$$PATH" sh $$BUILD_DIR/build-mozjpeg-bazel.sh $$BUILD_ARCH "$$BUILD_DIR/mozjpeg" "$$BUILD_DIR"
     """ +
     "\n".join([
         "cp -f \"$$BUILD_DIR/mozjpeg/{}\" \"$(location Public/mozjpeg/{})\"".format(header, header) for header in headers

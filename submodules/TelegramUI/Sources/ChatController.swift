@@ -6888,6 +6888,10 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
+        if shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: UIAccessibility.isVoiceOverRunning) {
+            UIAccessibility.post(notification: .screenChanged, argument: self.chatDisplayNode.historyNode.view)
+        }
+        
         self.didAppear = true
         
         self.chatDisplayNode.historyNode.experimentalSnapScrollToItem = false

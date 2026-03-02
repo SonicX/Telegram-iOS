@@ -88,6 +88,7 @@ public final class ListViewBackingView: UIView {
     }
     
     override public func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
+        print("[VO-DEBUG] ListViewBackingView.accessibilityScroll called, direction=\(direction.rawValue), target=\(self.target != nil)")
         return self.target?.accessibilityScroll(direction) ?? false
     }
 }
@@ -5340,6 +5341,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     public var accessibilityStatusAnnouncementOnScroll = false
     public var accessibilityInterruptSpeechOnUserAction = false
     
+    /// Returns (firstAbsoluteIndex, lastAbsoluteIndex, totalCount) for a given set of visible local item indices.
+    public var accessibilityAbsoluteScrollInfo: (([Int]) -> (first: Int, last: Int, total: Int)?)?
+    
     /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
     
@@ -5352,91 +5356,83 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     
     public func scrollWithDirection(_ direction: ListViewScrollDirection, distance: CGFloat) -> Bool {
         let initialOffset = self.scroller.contentOffset
+        print("[VO-DEBUG] scrollWithDirection: direction=\(direction), distance=\(distance), initialOffset=\(initialOffset), contentSize=\(self.scroller.contentSize), frame=\(self.scroller.frame), contentInset=\(self.scroller.contentInset)")
         switch direction {
             case .up:
                 var contentOffset = initialOffset
                 contentOffset.y -= distance
                 contentOffset.y = max(self.scroller.contentInset.top, contentOffset.y)
+                print("[VO-DEBUG] scrollWithDirection UP: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y < initialOffset.y)")
                 if contentOffset.y < initialOffset.y {
                     self.ignoreScrollingEvents = true
                     self.scroller.setContentOffset(contentOffset, animated: false)
                     self.ignoreScrollingEvents = false
                     self.updateScrollViewDidScroll(self.scroller, synchronous: true)
                 } else {
+                    print("[VO-DEBUG] scrollWithDirection UP: returning false (already at top)")
                     return false
                 }
             case .down:
                 var contentOffset = initialOffset
                 contentOffset.y += distance
                 contentOffset.y = max(self.scroller.contentInset.top, min(contentOffset.y, self.scroller.contentSize.height - self.scroller.frame.height))
+                print("[VO-DEBUG] scrollWithDirection DOWN: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y > initialOffset.y)")
                 if contentOffset.y > initialOffset.y {
                     self.ignoreScrollingEvents = true
                     self.scroller.setContentOffset(contentOffset, animated: false)
                     self.ignoreScrollingEvents = false
                     self.updateScrollViewDidScroll(self.scroller, synchronous: true)
                 } else {
+                    print("[VO-DEBUG] scrollWithDirection DOWN: returning false (already at bottom)")
                     return false
                 }
         }
 
-        let visibleRect = CGRect(origin: self.scroller.contentOffset, size: self.scroller.bounds.size)
-        let visibleNodes = self.itemNodes.filter { $0.frame.intersects(visibleRect) }
-
-        let targetNode: ListViewItemNode?
-        switch direction {
-            case .up:
-                if self.rotated {
-                    targetNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            
+            let visibleRange = self.displayedItemRange.visibleRange
+            let rangeIndices: [Int]
+            if let visibleRange {
+                rangeIndices = Array(visibleRange.firstIndex...visibleRange.lastIndex)
+            } else {
+                let viewBounds = CGRect(origin: CGPoint.zero, size: self.visibleSize)
+                rangeIndices = self.itemNodes.filter { $0.frame.intersects(viewBounds) && $0.index != nil }.compactMap(\.index)
+            }
+            
+            print("[VO-DEBUG] deferred(0.15s): displayedRange=\(String(describing: visibleRange)), rangeIndices=\(rangeIndices), itemsCount=\(self.items.count)")
+            
+            let scrollStatus: String?
+            if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
+                print("[VO-DEBUG] absoluteInfo: first=\(absoluteInfo.first), last=\(absoluteInfo.last), total=\(absoluteInfo.total)")
+                if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
+                    scrollStatus = accessibilityPageScrolledRangeString("\(absoluteInfo.first)", "\(absoluteInfo.last)", "\(absoluteInfo.total)")
                 } else {
-                    targetNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
+                    scrollStatus = "Items \(absoluteInfo.first) to \(absoluteInfo.last) of \(absoluteInfo.total)"
                 }
-            case .down:
-                if self.rotated {
-                    targetNode = visibleNodes.max(by: { $0.frame.maxY < $1.frame.maxY })
+            } else if self.accessibilityPageScrolledUsesVisibleRange, let visibleRange {
+                if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
+                    scrollStatus = accessibilityPageScrolledRangeString("\(visibleRange.firstIndex + 1)", "\(visibleRange.lastIndex + 1)", "\(self.items.count)")
                 } else {
-                    targetNode = visibleNodes.max(by: { $0.frame.maxY < $1.frame.maxY })
+                    let rangeFormat = Bundle.main.localizedString(forKey: "VoiceOver.ScrollStatusRange", value: "Items from %1$@ to %2$@ of %3$@", table: nil)
+                    scrollStatus = String(format: rangeFormat, "\(visibleRange.firstIndex + 1)", "\(visibleRange.lastIndex + 1)", "\(self.items.count)")
                 }
-        }
-
-        let visibleIndices = visibleNodes.compactMap(\.index).sorted()
-        let scrollStatus: String?
-        if self.accessibilityPageScrolledUsesVisibleRange, let firstVisibleIndex = visibleIndices.first, let lastVisibleIndex = visibleIndices.last {
-            if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
-                scrollStatus = accessibilityPageScrolledRangeString("\(firstVisibleIndex + 1)", "\(lastVisibleIndex + 1)", "\(self.items.count)")
             } else {
-                let rangeFormat = Bundle.main.localizedString(forKey: "VoiceOver.ScrollStatusRange", value: "Items from %1$@ to %2$@ of %3$@", table: nil)
-                scrollStatus = String(format: rangeFormat, "\(firstVisibleIndex + 1)", "\(lastVisibleIndex + 1)", "\(self.items.count)")
+                scrollStatus = nil
             }
-        } else if let index = targetNode?.index {
-            if let accessibilityPageScrolledString = self.accessibilityPageScrolledString {
-                scrollStatus = accessibilityPageScrolledString("\(index + 1)", "\(self.items.count)")
+            
+            print("[VO-DEBUG] scrollStatus=\(scrollStatus ?? "nil")")
+            
+            if let scrollStatus {
+                if self.accessibilityStatusAnnouncementOnScroll {
+                    print("[VO-DEBUG] posting .announcement: \(scrollStatus)")
+                    UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: scrollStatus)
+                } else {
+                    print("[VO-DEBUG] posting .pageScrolled: \(scrollStatus)")
+                    UIAccessibility.post(notification: UIAccessibility.Notification.pageScrolled, argument: scrollStatus)
+                }
             } else {
-                scrollStatus = "Row \(index + 1) of \(self.items.count)"
-            }
-        } else {
-            scrollStatus = nil
-        }
-        
-        if let node = targetNode, self.accessibilityLayoutChangedOnScroll {
-            UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: node.view)
-        }
-        if let scrollStatus {
-            if self.accessibilityStatusAnnouncementOnScroll {
-                UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: scrollStatus)
-            } else {
-                UIAccessibility.post(notification: UIAccessibility.Notification.pageScrolled, argument: scrollStatus)
-            }
-        }
-
-        if UIAccessibility.isVoiceOverRunning, let announceContent = self.accessibilityAnnouncementForBottomVisibleItem {
-            let bottommostNode: ListViewItemNode?
-            if self.rotated {
-                bottommostNode = visibleNodes.min(by: { $0.frame.minY < $1.frame.minY })
-            } else {
-                bottommostNode = visibleNodes.max(by: { $0.frame.maxY < $1.frame.maxY })
-            }
-            if let node = bottommostNode, let text = announceContent(node), !text.isEmpty {
-                UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: text)
+                print("[VO-DEBUG] scrollStatus is nil, nothing posted!")
             }
         }
         return true
@@ -5451,7 +5447,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             default:
                 scrollDirection = self.rotated ? .down : .up
         }
-        return self.scrollWithDirection(scrollDirection, distance: distance)
+        print("[VO-DEBUG] accessibilityScroll called, direction=\(direction.rawValue), rotated=\(self.rotated), scrollDirection=\(scrollDirection), distance=\(distance)")
+        let result = self.scrollWithDirection(scrollDirection, distance: distance)
+        print("[VO-DEBUG] accessibilityScroll result=\(result)")
+        return result
     }
     
     open func customItemDeleteAnimationDuration(itemNode: ListViewItemNode) -> Double? {

@@ -49,7 +49,17 @@ genrule(
     CMAKE_DIR="$$(pwd)/$$BUILD_DIR/cmake"
     rm -rf "$$CMAKE_DIR"
     mkdir -p "$$CMAKE_DIR"
-    tar -xzf "$(location @cmake_tar_gz//file)" -C "$$CMAKE_DIR"
+
+    CMAKE_BIN=""
+    if command -v cmake >/dev/null 2>&1; then
+        CMAKE_BIN="$$(command -v cmake)"
+    elif [ -x "/opt/homebrew/bin/cmake" ]; then
+        CMAKE_BIN="/opt/homebrew/bin/cmake"
+    else
+        COPYFILE_DISABLE=1 tar --no-mac-metadata -xzf "$(location @cmake_tar_gz//file)" -C "$$CMAKE_DIR" 2>/dev/null || \
+        tar -xzf "$(location @cmake_tar_gz//file)" -C "$$CMAKE_DIR"
+        CMAKE_BIN="$$CMAKE_DIR/cmake-4.1.2-macos-universal/CMake.app/Contents/bin/cmake"
+    fi
 
     OPENSSL_BASE_DIR="$$(pwd)/$$BUILD_DIR"
     OPENSSL_DIR="$$OPENSSL_BASE_DIR/openssl"
@@ -77,7 +87,7 @@ genrule(
 
     mkdir -p "$$BUILD_DIR/Public/td"
 
-    PATH="$$CMAKE_DIR/cmake-4.1.2-macos-universal/CMake.app/Contents/bin:$$PATH" sh $$BUILD_DIR/build-td-bazel.sh $$BUILD_ARCH "$$BUILD_DIR/td" "$$BUILD_DIR" "$$OPENSSL_DIR"
+    PATH="$$(dirname $$CMAKE_BIN):$$PATH" sh $$BUILD_DIR/build-td-bazel.sh $$BUILD_ARCH "$$BUILD_DIR/td" "$$BUILD_DIR" "$$OPENSSL_DIR"
     """ +
     "\n".join([
         "cp -f \"$$BUILD_DIR/td/tde2e/{}\" \"$(location Public/td/{})\"".format(header, header) for header in headers

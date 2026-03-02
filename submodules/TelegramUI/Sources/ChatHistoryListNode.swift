@@ -921,7 +921,71 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.accessibilityPageScrolledRangeString = { from, to, count in
             return "Сообщения с \(from) по \(to) из \(count)"
         }
-        self.accessibilityInterruptSpeechOnUserAction = true
+        self.accessibilityAbsoluteScrollInfo = { [weak self] visibleLocalIndices in
+            guard let strongSelf = self else {
+                print("[VO-DEBUG] absoluteScrollInfo: self is nil")
+                return nil
+            }
+            guard let historyView = (strongSelf.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView else {
+                print("[VO-DEBUG] absoluteScrollInfo: no historyView in opaqueTransactionState")
+                return nil
+            }
+            let entries = historyView.filteredEntries
+            guard !entries.isEmpty, !visibleLocalIndices.isEmpty else {
+                print("[VO-DEBUG] absoluteScrollInfo: entries=\(entries.count), visibleLocalIndices=\(visibleLocalIndices)")
+                return nil
+            }
+            
+            print("[VO-DEBUG] absoluteScrollInfo: entries.count=\(entries.count), visibleLocalIndices=\(visibleLocalIndices.sorted())")
+            
+            var minAbsolute: Int?
+            var maxAbsolute: Int?
+            var totalCount: Int?
+            var locationsFound = 0
+            var locationsNil = 0
+            
+            for localIndex in visibleLocalIndices {
+                let entryIndex = entries.count - 1 - localIndex
+                guard entryIndex >= 0, entryIndex < entries.count else {
+                    print("[VO-DEBUG] absoluteScrollInfo: localIndex=\(localIndex) -> entryIndex=\(entryIndex) OUT OF BOUNDS (entries.count=\(entries.count))")
+                    continue
+                }
+                let entry = entries[entryIndex]
+                let location: MessageHistoryEntryLocation?
+                switch entry {
+                case let .MessageEntry(_, _, _, loc, _, _):
+                    location = loc
+                case let .MessageGroupEntry(_, messages, _):
+                    location = messages.first?.4
+                default:
+                    location = nil
+                }
+                if let location = location {
+                    locationsFound += 1
+                    let absIndex = location.count - location.index
+                    if let current = minAbsolute {
+                        minAbsolute = min(current, absIndex)
+                    } else {
+                        minAbsolute = absIndex
+                    }
+                    if let current = maxAbsolute {
+                        maxAbsolute = max(current, absIndex)
+                    } else {
+                        maxAbsolute = absIndex
+                    }
+                    totalCount = location.count
+                } else {
+                    locationsNil += 1
+                }
+            }
+            
+            print("[VO-DEBUG] absoluteScrollInfo: locationsFound=\(locationsFound), locationsNil=\(locationsNil), min=\(minAbsolute as Any), max=\(maxAbsolute as Any), total=\(totalCount as Any)")
+            
+            if let first = minAbsolute, let last = maxAbsolute, let total = totalCount {
+                return (first: first, last: last, total: total)
+            }
+            return nil
+        }
         self.accessibilityLayoutChangedOnScroll = false
         self.accessibilityStatusAnnouncementOnScroll = false
         
@@ -1578,7 +1642,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 return true
             })
             |> mapToSignal { location, ignoreMessagesInTimestampRange, ignoreMessageIds in
-                return chatHistoryViewForLocation(location, ignoreMessagesInTimestampRange: ignoreMessagesInTimestampRange, ignoreMessageIds: ignoreMessageIds, context: context, chatLocation: chatLocation, chatLocationContextHolder: chatLocationContextHolder, scheduled: isScheduledMessages, fixedCombinedReadStates: fixedCombinedReadStates.with { $0 }, tag: tag, appendMessagesFromTheSameGroup: appendMessagesFromTheSameGroup, additionalData: additionalData, orderStatistics: [], useRootInterfaceStateForThread: useRootInterfaceStateForThread)
+                return chatHistoryViewForLocation(location, ignoreMessagesInTimestampRange: ignoreMessagesInTimestampRange, ignoreMessageIds: ignoreMessageIds, context: context, chatLocation: chatLocation, chatLocationContextHolder: chatLocationContextHolder, scheduled: isScheduledMessages, fixedCombinedReadStates: fixedCombinedReadStates.with { $0 }, tag: tag, appendMessagesFromTheSameGroup: appendMessagesFromTheSameGroup, additionalData: additionalData, orderStatistics: [.combinedLocation], useRootInterfaceStateForThread: useRootInterfaceStateForThread)
                 |> beforeNext { viewUpdate in
                     switch viewUpdate {
                         case let .HistoryView(view, _, _, _, _, _, _):
