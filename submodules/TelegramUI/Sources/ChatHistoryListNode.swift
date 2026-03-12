@@ -988,7 +988,21 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         }
         self.accessibilityLayoutChangedOnScroll = false
         self.accessibilityStatusAnnouncementOnScroll = false
-        
+        self.accessibilityNavigationOrder = .reversed
+        self.accessibilityDirectionalAnnouncement = { [weak self] fromIndex, toIndex in
+            guard let self, abs(toIndex - fromIndex) == 1 else { return nil }
+            let strings = self.currentPresentationData.strings
+            if toIndex < fromIndex {
+                return strings.primaryComponent.dict["VoiceOver.Chat.NextMessage"]
+                    ?? strings.secondaryComponent?.dict["VoiceOver.Chat.NextMessage"]
+                    ?? "next message"
+            } else {
+                return strings.primaryComponent.dict["VoiceOver.Chat.PreviousMessage"]
+                    ?? strings.secondaryComponent?.dict["VoiceOver.Chat.PreviousMessage"]
+                    ?? "previous message"
+            }
+        }
+
         self.dynamicBounceEnabled = !self.currentPresentationData.disableAnimations
         self.experimentalSnapScrollToItem = false
         
@@ -1313,8 +1327,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             return nil
         }
         
-        let element = UIAccessibilityElement(accessibilityContainer: self)
-        element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+        let element = makeAccessibilityElement(of: itemNode, container: self, trackFocus: true)
         element.accessibilityLabel = label
         element.accessibilityValue = value
         element.accessibilityTraits = itemNode.view.accessibilityTraits
@@ -1349,6 +1362,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
             }
         })
+        if self.accessibilityNavigationOrder == .reversed {
+            accessibilityElements.reverse()
+        }
+        self.updateAccessibilityDirectionalElements(accessibilityElements)
         
         return accessibilityElements.isEmpty ? nil : accessibilityElements
     }

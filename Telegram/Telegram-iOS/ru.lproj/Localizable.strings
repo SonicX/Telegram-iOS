@@ -1,1 +1,5 @@
 "VoiceOver.ScrollStatusRange" = "Сообщения с %1$@ по %2$@ из %3$@";
+"VoiceOver.Chat.NextMessage" = "следующее сообщение";
+"VoiceOver.Chat.PreviousMessage" = "предыдущее сообщение";
+"VoiceOver.ChatList.NextChat" = "следующий чат";
+"VoiceOver.ChatList.PreviousChat" = "предыдущий чат";

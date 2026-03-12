@@ -6343,6 +6343,10 @@ Sorry for the inconvenience.";
 
 "VoiceOver.ScrollStatus" = "Row %1$@ of %2$@";
 "VoiceOver.ScrollStatusRange" = "Items from %1$@ to %2$@ of %3$@";
+"VoiceOver.Chat.NextMessage" = "next message";
+"VoiceOver.Chat.PreviousMessage" = "previous message";
+"VoiceOver.ChatList.NextChat" = "next chat";
+"VoiceOver.ChatList.PreviousChat" = "previous chat";
 
 "Conversation.UsersTooMuchError" = "Sorry, this group is full.";
 

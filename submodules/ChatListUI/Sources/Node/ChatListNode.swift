@@ -1445,6 +1445,20 @@ public final class ChatListNode: ListView {
         }
         self.accessibilityPageScrolledUsesVisibleRange = true
         self.accessibilityInterruptSpeechOnUserAction = true
+        self.accessibilityNavigationOrder = .reversed
+        self.accessibilityDirectionalAnnouncement = { [weak self] fromIndex, toIndex in
+            guard let self, abs(toIndex - fromIndex) == 1 else { return nil }
+            let strings = self.currentState.presentationData.strings
+            if toIndex < fromIndex {
+                return strings.primaryComponent.dict["VoiceOver.ChatList.NextChat"]
+                    ?? strings.secondaryComponent?.dict["VoiceOver.ChatList.NextChat"]
+                    ?? "next chat"
+            } else {
+                return strings.primaryComponent.dict["VoiceOver.ChatList.PreviousChat"]
+                    ?? strings.secondaryComponent?.dict["VoiceOver.ChatList.PreviousChat"]
+                    ?? "previous chat"
+            }
+        }
 
         let nodeInteraction = ChatListNodeInteraction(context: context, animationCache: self.animationCache, animationRenderer: self.animationRenderer, activateSearch: { [weak self] in
             if let strongSelf = self, let activateSearch = strongSelf.activateSearch {

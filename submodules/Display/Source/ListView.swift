@@ -142,6 +142,11 @@ public enum GeneralScrollDirection {
     case down
 }
 
+public enum ListViewAccessibilityNavigationOrder {
+    case natural
+    case reversed
+}
+
 private func cancelContextGestures(view: UIView) {
     if let gestureRecognizers = view.gestureRecognizers {
         for gesture in gestureRecognizers {
@@ -465,6 +470,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
     @objc open func customAccessibilityElements() -> [Any]? {
         var accessibilityElements: [Any] = []
+        let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
@@ -479,9 +485,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.forEachItemNode({ itemNode in
             let intersection = itemNode.frame.intersection(visibleRect)
             if !intersection.isNull && intersection.height > itemNode.frame.height * 0.5 {
-                addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+                if trackDirectionalFocus, itemNode.isAccessibilityElement {
+                    accessibilityElements.append(makeAccessibilityElement(of: itemNode, container: self, trackFocus: true))
+                } else {
+                    addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+                }
             }
         })
+        if self.accessibilityNavigationOrder == .reversed {
+            accessibilityElements.reverse()
+        }
+        self.updateAccessibilityDirectionalElements(accessibilityElements)
         return accessibilityElements.isEmpty ? nil : accessibilityElements
     }
 
@@ -5340,13 +5354,99 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     public var accessibilityLayoutChangedOnScroll = true
     public var accessibilityStatusAnnouncementOnScroll = false
     public var accessibilityInterruptSpeechOnUserAction = false
-    
+    public var accessibilityNavigationOrder: ListViewAccessibilityNavigationOrder = .natural
+    public var accessibilityDirectionalAnnouncement: ((Int, Int) -> String?)?
+    private var accessibilityDirectionalSnapshotId: Int = 0
+    private var accessibilityPreviousFocusedDirectionalState: (snapshotId: Int, directionalIndex: Int)?
+    private var accessibilityPendingFocusExitResetToken: Int = 0
+    private var accessibilityDirectionalTrackedSignature: [String] = []
+    private var accessibilityLastReportedVisibleRange: ListViewVisibleItemRange?
+    private var accessibilityAutoAdvanceInProgress = false
+    private var accessibilityLastCenteredElementIdentifier: ObjectIdentifier?
+
     /// Returns (firstAbsoluteIndex, lastAbsoluteIndex, totalCount) for a given set of visible local item indices.
     public var accessibilityAbsoluteScrollInfo: (([Int]) -> (first: Int, last: Int, total: Int)?)?
     
     /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
-    
+
+    public func updateAccessibilityDirectionalElements(_ elements: [Any]) {
+        guard self.accessibilityDirectionalAnnouncement != nil else {
+            self.accessibilityPreviousFocusedDirectionalState = nil
+            self.accessibilityPendingFocusExitResetToken &+= 1
+            self.accessibilityDirectionalTrackedSignature = []
+            return
+        }
+
+        var trackedSignature: [String] = []
+        for element in elements {
+            guard let element = element as? FocusTrackingAccessibilityElement else { continue }
+            let frame = element.accessibilityFrame
+            let identifier = element.accessibilityIdentifier ?? ""
+            let label = element.accessibilityLabel ?? ""
+            let value = element.accessibilityValue ?? ""
+            let traits = UInt64(element.accessibilityTraits.rawValue)
+            trackedSignature.append("\(identifier)|\(label)|\(value)|\(traits)|\(Int(frame.minX.rounded()))|\(Int(frame.minY.rounded()))|\(Int(frame.width.rounded()))|\(Int(frame.height.rounded()))")
+        }
+
+        let hasTrackedSequenceChanged = trackedSignature != self.accessibilityDirectionalTrackedSignature
+        if hasTrackedSequenceChanged {
+            self.accessibilityDirectionalSnapshotId &+= 1
+            self.accessibilityPreviousFocusedDirectionalState = nil
+            self.accessibilityPendingFocusExitResetToken &+= 1
+            self.accessibilityDirectionalTrackedSignature = trackedSignature
+        }
+        let snapshotId = self.accessibilityDirectionalSnapshotId
+        var trackedCount = 0
+        for element in elements {
+            guard let element = element as? FocusTrackingAccessibilityElement else { continue }
+            element.directionalSnapshotId = snapshotId
+            element.directionalFocusIndex = trackedCount
+            element.focused = { [weak self] snapshotId, directionalIndex in
+                self?.handleAccessibilityElementFocused(snapshotId: snapshotId, directionalIndex: directionalIndex)
+            }
+            element.focusLost = { [weak self] snapshotId, directionalIndex in
+                self?.handleAccessibilityElementFocusLost(snapshotId: snapshotId, directionalIndex: directionalIndex)
+            }
+            trackedCount += 1
+        }
+    }
+
+    private func handleAccessibilityElementFocused(snapshotId: Int, directionalIndex: Int) {
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        guard snapshotId == self.accessibilityDirectionalSnapshotId else { return }
+        self.accessibilityPendingFocusExitResetToken &+= 1
+
+        guard let previousState = self.accessibilityPreviousFocusedDirectionalState else {
+            self.accessibilityPreviousFocusedDirectionalState = (snapshotId: snapshotId, directionalIndex: directionalIndex)
+            return
+        }
+        self.accessibilityPreviousFocusedDirectionalState = (snapshotId: snapshotId, directionalIndex: directionalIndex)
+        guard previousState.snapshotId == snapshotId else { return }
+        guard previousState.directionalIndex != directionalIndex,
+              let accessibilityDirectionalAnnouncement = self.accessibilityDirectionalAnnouncement else { return }
+        guard let announcement = accessibilityDirectionalAnnouncement(previousState.directionalIndex, directionalIndex),
+              !announcement.isEmpty else { return }
+        UIAccessibility.post(notification: .announcement, argument: announcement)
+    }
+
+    private func handleAccessibilityElementFocusLost(snapshotId: Int, directionalIndex: Int) {
+        guard snapshotId == self.accessibilityDirectionalSnapshotId else { return }
+        guard let previousState = self.accessibilityPreviousFocusedDirectionalState,
+              previousState.snapshotId == snapshotId,
+              previousState.directionalIndex == directionalIndex else { return }
+        self.accessibilityPendingFocusExitResetToken &+= 1
+        let resetToken = self.accessibilityPendingFocusExitResetToken
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.accessibilityPendingFocusExitResetToken == resetToken else { return }
+            guard let currentState = self.accessibilityPreviousFocusedDirectionalState,
+                  currentState.snapshotId == snapshotId,
+                  currentState.directionalIndex == directionalIndex else { return }
+            self.accessibilityPreviousFocusedDirectionalState = nil
+        }
+    }
+
     private func interruptAccessibilitySpeechIfNeeded() {
         guard self.accessibilityInterruptSpeechOnUserAction, UIAccessibility.isVoiceOverRunning else {
             return
@@ -5354,9 +5454,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: "")
     }
     
-    public func scrollWithDirection(_ direction: ListViewScrollDirection, distance: CGFloat) -> Bool {
+    public func scrollWithDirection(_ direction: ListViewScrollDirection, distance: CGFloat, centerVoiceOverFocus: Bool = false) -> Bool {
         let initialOffset = self.scroller.contentOffset
+        let initialMaxOffset = max(self.scroller.contentInset.top, self.scroller.contentSize.height - self.scroller.frame.height)
+        let initialProgress: CGFloat = initialMaxOffset > self.scroller.contentInset.top ? ((initialOffset.y - self.scroller.contentInset.top) / (initialMaxOffset - self.scroller.contentInset.top)) : 1.0
         print("[VO-DEBUG] scrollWithDirection: direction=\(direction), distance=\(distance), initialOffset=\(initialOffset), contentSize=\(self.scroller.contentSize), frame=\(self.scroller.frame), contentInset=\(self.scroller.contentInset)")
+        print("[VO-DEBUG] scrollPosition before: offsetY=\(initialOffset.y), maxOffsetY=\(initialMaxOffset), progress=\(Int((max(0.0, min(1.0, initialProgress)) * 100.0).rounded()))%")
         switch direction {
             case .up:
                 var contentOffset = initialOffset
@@ -5364,9 +5467,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 contentOffset.y = max(self.scroller.contentInset.top, contentOffset.y)
                 print("[VO-DEBUG] scrollWithDirection UP: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y < initialOffset.y)")
                 if contentOffset.y < initialOffset.y {
-                    self.ignoreScrollingEvents = true
                     self.scroller.setContentOffset(contentOffset, animated: false)
-                    self.ignoreScrollingEvents = false
                     self.updateScrollViewDidScroll(self.scroller, synchronous: true)
                 } else {
                     print("[VO-DEBUG] scrollWithDirection UP: returning false (already at top)")
@@ -5378,9 +5479,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 contentOffset.y = max(self.scroller.contentInset.top, min(contentOffset.y, self.scroller.contentSize.height - self.scroller.frame.height))
                 print("[VO-DEBUG] scrollWithDirection DOWN: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y > initialOffset.y)")
                 if contentOffset.y > initialOffset.y {
-                    self.ignoreScrollingEvents = true
                     self.scroller.setContentOffset(contentOffset, animated: false)
-                    self.ignoreScrollingEvents = false
                     self.updateScrollViewDidScroll(self.scroller, synchronous: true)
                 } else {
                     print("[VO-DEBUG] scrollWithDirection DOWN: returning false (already at bottom)")
@@ -5401,10 +5500,52 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             
             print("[VO-DEBUG] deferred(0.15s): displayedRange=\(String(describing: visibleRange)), rangeIndices=\(rangeIndices), itemsCount=\(self.items.count)")
+            let currentOffset = self.scroller.contentOffset
+            let currentMaxOffset = max(self.scroller.contentInset.top, self.scroller.contentSize.height - self.scroller.frame.height)
+            let currentProgress: CGFloat = currentMaxOffset > self.scroller.contentInset.top ? ((currentOffset.y - self.scroller.contentInset.top) / (currentMaxOffset - self.scroller.contentInset.top)) : 1.0
+            print("[VO-DEBUG] scrollPosition after: offsetY=\(currentOffset.y), maxOffsetY=\(currentMaxOffset), progress=\(Int((max(0.0, min(1.0, currentProgress)) * 100.0).rounded()))%")
+
+            if let visibleRange {
+                let localFirst = visibleRange.firstIndex + 1
+                let localLast = visibleRange.lastIndex + 1
+                let localCount = max(0, localLast - localFirst + 1)
+                let localCoverage: Double = self.items.count > 0 ? (Double(localCount) / Double(self.items.count)) * 100.0 : 0.0
+                print("[VO-DEBUG] localRange metrics: first=\(localFirst), last=\(localLast), count=\(localCount), totalItems=\(self.items.count), coverage=\(String(format: "%.1f", localCoverage))%")
+            }
+
+            if let visibleRange {
+                if let previousRange = self.accessibilityLastReportedVisibleRange, !self.accessibilityAutoAdvanceInProgress {
+                    let isAtTopBoundary = visibleRange.firstIndex <= 0
+                    let isAtBottomBoundary = visibleRange.lastIndex >= max(0, self.items.count - 1)
+                    let hasNoRangeChange = visibleRange.firstIndex == previousRange.firstIndex && visibleRange.lastIndex == previousRange.lastIndex
+
+                    // Auto-advance is only for true backward jumps after dynamic list rebase.
+                    // Do not trigger it on equal ranges or at hard list boundaries.
+                    let regressedDown = direction == .down && !isAtBottomBoundary && visibleRange.lastIndex < previousRange.lastIndex
+                    let regressedUp = direction == .up && !isAtTopBoundary && visibleRange.firstIndex > previousRange.firstIndex
+                    if regressedDown || regressedUp {
+                        if hasNoRangeChange {
+                            print("[VO-DEBUG] accessibility auto-advance skipped: no range change")
+                        }
+                        self.accessibilityAutoAdvanceInProgress = true
+                        print("[VO-DEBUG] accessibility auto-advance: detected range regression, direction=\(direction), previous=\(previousRange), current=\(visibleRange)")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                            guard let self else { return }
+                            _ = self.scrollWithDirection(direction, distance: distance, centerVoiceOverFocus: false)
+                            self.accessibilityAutoAdvanceInProgress = false
+                        }
+                    }
+                }
+                self.accessibilityLastReportedVisibleRange = visibleRange
+            }
             
             let scrollStatus: String?
             if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
                 print("[VO-DEBUG] absoluteInfo: first=\(absoluteInfo.first), last=\(absoluteInfo.last), total=\(absoluteInfo.total)")
+                let absoluteCount = max(0, absoluteInfo.last - absoluteInfo.first + 1)
+                let absoluteCoverage: Double = absoluteInfo.total > 0 ? (Double(absoluteCount) / Double(absoluteInfo.total)) * 100.0 : 0.0
+                let absoluteTailProgress: Double = absoluteInfo.total > 0 ? (Double(absoluteInfo.last) / Double(absoluteInfo.total)) * 100.0 : 0.0
+                print("[VO-DEBUG] absoluteRange metrics: first=\(absoluteInfo.first), last=\(absoluteInfo.last), count=\(absoluteCount), total=\(absoluteInfo.total), coverage=\(String(format: "%.1f", absoluteCoverage))%, tailProgress=\(String(format: "%.1f", absoluteTailProgress))%")
                 if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
                     scrollStatus = accessibilityPageScrolledRangeString("\(absoluteInfo.first)", "\(absoluteInfo.last)", "\(absoluteInfo.total)")
                 } else {
@@ -5434,6 +5575,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             } else {
                 print("[VO-DEBUG] scrollStatus is nil, nothing posted!")
             }
+
+            if centerVoiceOverFocus, UIAccessibility.isVoiceOverRunning {
+                self.postAccessibilityCenterFocus(retryCount: 2)
+            }
         }
         return true
     }
@@ -5448,9 +5593,69 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 scrollDirection = self.rotated ? .down : .up
         }
         print("[VO-DEBUG] accessibilityScroll called, direction=\(direction.rawValue), rotated=\(self.rotated), scrollDirection=\(scrollDirection), distance=\(distance)")
-        let result = self.scrollWithDirection(scrollDirection, distance: distance)
+        let result = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: true)
         print("[VO-DEBUG] accessibilityScroll result=\(result)")
         return result
+    }
+
+    private func postAccessibilityCenterFocus(retryCount: Int) {
+        guard let centerElement = self.accessibilityElementClosestToVisibleCenter() else {
+            if retryCount > 0 {
+                print("[VO-DEBUG] center-focus: no center element found, retry=\(retryCount)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                    self?.postAccessibilityCenterFocus(retryCount: retryCount - 1)
+                }
+            } else {
+                print("[VO-DEBUG] center-focus: no center element found")
+            }
+            return
+        }
+
+        let elementIdentifier = ObjectIdentifier(centerElement)
+        if self.accessibilityLastCenteredElementIdentifier == elementIdentifier {
+            print("[VO-DEBUG] center-focus: skipping duplicate center target")
+            return
+        }
+        self.accessibilityLastCenteredElementIdentifier = elementIdentifier
+        print("[VO-DEBUG] center-focus: posting .layoutChanged to center element")
+        UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: centerElement)
+    }
+
+    private func accessibilityElementClosestToVisibleCenter() -> AnyObject? {
+        let visibleBounds = CGRect(origin: .zero, size: self.visibleSize)
+        let visibleBoundsInScreen = UIAccessibility.convertToScreenCoordinates(visibleBounds, in: self.view)
+        let targetCenterY = visibleBoundsInScreen.midY
+
+        guard let elements = self.customAccessibilityElements(), !elements.isEmpty else {
+            return nil
+        }
+
+        var bestElement: AnyObject?
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for element in elements {
+            guard let accessibilityElement = element as? UIAccessibilityElement else {
+                continue
+            }
+            let frame = accessibilityElement.accessibilityFrame
+            if frame.isNull || frame.isEmpty || !frame.intersects(visibleBoundsInScreen) {
+                continue
+            }
+            let label = accessibilityElement.accessibilityLabel ?? ""
+            if label.isEmpty {
+                continue
+            }
+            let distance = abs(frame.midY - targetCenterY)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestElement = accessibilityElement
+            }
+        }
+        if bestElement == nil {
+            // Fallback: center element from raw array, if castable.
+            let middleIndex = elements.count / 2
+            bestElement = elements[middleIndex] as AnyObject
+        }
+        return bestElement
     }
     
     open func customItemDeleteAnimationDuration(itemNode: ListViewItemNode) -> Double? {
