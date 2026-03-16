@@ -1338,6 +1338,9 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     
     override public func customAccessibilityElements() -> [Any]? {
         var accessibilityElements: [Any] = []
+        let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
+        var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
+        var activeSourceViewIds = Set<ObjectIdentifier>()
         let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
@@ -1350,18 +1353,104 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         }
         
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
-        self.forEachItemNode({ itemNode in
-            let intersection = itemNode.frame.intersection(visibleRect)
-            guard !intersection.isNull, intersection.height > itemNode.frame.height * 0.5 else {
+        self.forEachItemNode({ node in
+            if trackDirectionalFocus {
+                guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
+                    return
+                }
+                let viewId = ObjectIdentifier(itemNode.view)
+                activeSourceViewIds.insert(viewId)
+                if itemNode.isAccessibilityElement {
+                    let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
+                    element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                    element.accessibilityLabel = itemNode.accessibilityLabel
+                    element.accessibilityValue = itemNode.accessibilityValue
+                    element.accessibilityTraits = itemNode.accessibilityTraits
+                    element.accessibilityHint = itemNode.accessibilityHint
+                    element.accessibilityIdentifier = itemNode.accessibilityIdentifier
+                    element.accessibilityCustomActions = itemNode.view.accessibilityCustomActions
+                    directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
+                } else if let nodeChildren = itemNode.accessibilityElements, !nodeChildren.isEmpty {
+                    var labels: [String] = []
+                    var customActions: [UIAccessibilityCustomAction] = []
+                    for child in nodeChildren {
+                        if let child = child as? UIAccessibilityElement {
+                            if let childLabel = child.accessibilityLabel, !childLabel.isEmpty {
+                                labels.append(childLabel)
+                            } else if let childValue = child.accessibilityValue, !childValue.isEmpty {
+                                labels.append(childValue)
+                            }
+                            if let actions = child.accessibilityCustomActions {
+                                customActions.append(contentsOf: actions)
+                            }
+                        }
+                    }
+                    let composedLabel = labels.joined(separator: ", ")
+                    if !composedLabel.isEmpty {
+                        let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
+                        element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                        element.accessibilityLabel = composedLabel
+                        element.accessibilityValue = nil
+                        element.accessibilityTraits = itemNode.accessibilityTraits
+                        element.accessibilityHint = nil
+                        element.accessibilityIdentifier = itemNode.accessibilityIdentifier
+                        element.accessibilityCustomActions = customActions.isEmpty ? nil : customActions
+                        directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
+                    }
+                }
                 return
             }
-            
-            if let element = self.makeMessageAccessibilityElement(for: itemNode) {
+
+            let intersection = node.frame.intersection(visibleRect)
+            guard !intersection.isNull, intersection.height > node.frame.height * 0.5 else {
+                return
+            }
+            if let element = self.makeMessageAccessibilityElement(for: node) {
                 accessibilityElements.append(element)
             } else {
-                addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+                addAccessibilityChildren(of: node, container: self, to: &accessibilityElements)
             }
         })
+        if !trackDirectionalFocus && accessibilityElements.isEmpty {
+            self.forEachItemNode({ node in
+                let intersection = node.frame.intersection(visibleRect)
+                guard !intersection.isNull, intersection.height > 1.0 else {
+                    return
+                }
+                if let element = self.makeMessageAccessibilityElement(for: node) {
+                    accessibilityElements.append(element)
+                } else {
+                    addAccessibilityChildren(of: node, container: self, to: &accessibilityElements)
+                }
+            })
+        }
+        if trackDirectionalFocus {
+            accessibilityElements = directionalCandidates.sorted(by: { lhs, rhs in
+                if lhs.localIndex != rhs.localIndex {
+                    return lhs.localIndex < rhs.localIndex
+                } else {
+                    return lhs.order < rhs.order
+                }
+            }).map(\.element)
+            self.cleanupDirectionalElementPool(activeSourceViewIds: activeSourceViewIds)
+        } else {
+            accessibilityElements = accessibilityElements.enumerated().sorted(by: { lhs, rhs in
+                let lhsFrame = (lhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
+                let rhsFrame = (rhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
+                if lhsFrame.isNull != rhsFrame.isNull {
+                    return !lhsFrame.isNull
+                }
+                let dy = lhsFrame.minY - rhsFrame.minY
+                if abs(dy) > 0.5 {
+                    return dy < 0.0
+                }
+                let dx = lhsFrame.minX - rhsFrame.minX
+                if abs(dx) > 0.5 {
+                    return dx < 0.0
+                }
+                return lhs.offset < rhs.offset
+            }).map(\.element)
+        }
         if self.accessibilityNavigationOrder == .reversed {
             accessibilityElements.reverse()
         }

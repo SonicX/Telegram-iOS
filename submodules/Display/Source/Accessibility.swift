@@ -12,6 +12,9 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
 
     override public func accessibilityElementDidBecomeFocused() {
         super.accessibilityElementDidBecomeFocused()
+        let label = self.accessibilityLabel ?? ""
+        let identifier = self.accessibilityIdentifier ?? ""
+        print("[VO-SWIPE-DEBUG] focused-element snapshot=\(String(describing: directionalSnapshotId)) index=\(String(describing: directionalFocusIndex)) id='\(identifier)' label='\(label)'")
         if let snapshotId = directionalSnapshotId, let index = directionalFocusIndex {
             focused?(snapshotId, index)
         }
@@ -23,6 +26,9 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
 
     override public func accessibilityElementDidLoseFocus() {
         super.accessibilityElementDidLoseFocus()
+        let label = self.accessibilityLabel ?? ""
+        let identifier = self.accessibilityIdentifier ?? ""
+        print("[VO-SWIPE-DEBUG] lost-focus snapshot=\(String(describing: directionalSnapshotId)) index=\(String(describing: directionalFocusIndex)) id='\(identifier)' label='\(label)'")
         if let snapshotId = directionalSnapshotId, let index = directionalFocusIndex {
             focusLost?(snapshotId, index)
         }
@@ -48,20 +54,56 @@ public func makeAccessibilityElement(of node: ASDisplayNode, container: Any, tra
     return element
 }
 
-public func addAccessibilityChildren(of node: ASDisplayNode, container: Any, to list: inout [Any]) {
+private func makeFocusTrackingElement(from element: UIAccessibilityElement, container: Any, sourceView: UIView?) -> FocusTrackingAccessibilityElement {
+    let focusElement = FocusTrackingAccessibilityElement(accessibilityContainer: container)
+    focusElement.sourceView = sourceView
+    focusElement.accessibilityFrame = element.accessibilityFrame
+    focusElement.accessibilityLabel = element.accessibilityLabel
+    focusElement.accessibilityValue = element.accessibilityValue
+    focusElement.accessibilityTraits = element.accessibilityTraits
+    focusElement.accessibilityHint = element.accessibilityHint
+    focusElement.accessibilityIdentifier = element.accessibilityIdentifier
+    focusElement.accessibilityCustomActions = element.accessibilityCustomActions
+    return focusElement
+}
+
+public func addAccessibilityChildren(of node: ASDisplayNode, container: Any, to list: inout [Any], trackFocus: Bool = false) {
     if node.isAccessibilityElement {
-        let element = UIAccessibilityElement(accessibilityContainer: container)
-        element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view)
-        element.accessibilityLabel = node.accessibilityLabel
-        element.accessibilityValue = node.accessibilityValue
-        element.accessibilityTraits = node.accessibilityTraits
-        element.accessibilityHint = node.accessibilityHint
-        element.accessibilityIdentifier = node.accessibilityIdentifier
-        
-        //node.accessibilityFrame = UIAccessibilityConvertFrameToScreenCoordinates(node.bounds, node.view)
-        list.append(element)
+        if trackFocus {
+            let element = FocusTrackingAccessibilityElement(accessibilityContainer: container)
+            element.sourceView = node.view
+            element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view)
+            element.accessibilityLabel = node.accessibilityLabel
+            element.accessibilityValue = node.accessibilityValue
+            element.accessibilityTraits = node.accessibilityTraits
+            element.accessibilityHint = node.accessibilityHint
+            element.accessibilityIdentifier = node.accessibilityIdentifier
+            element.accessibilityCustomActions = node.view.accessibilityCustomActions
+            list.append(element)
+        } else {
+            let element = UIAccessibilityElement(accessibilityContainer: container)
+            element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view)
+            element.accessibilityLabel = node.accessibilityLabel
+            element.accessibilityValue = node.accessibilityValue
+            element.accessibilityTraits = node.accessibilityTraits
+            element.accessibilityHint = node.accessibilityHint
+            element.accessibilityIdentifier = node.accessibilityIdentifier
+            
+            //node.accessibilityFrame = UIAccessibilityConvertFrameToScreenCoordinates(node.bounds, node.view)
+            list.append(element)
+        }
     } else if let accessibilityElements = node.accessibilityElements {
-        list.append(contentsOf: accessibilityElements)
+        if trackFocus {
+            for childElement in accessibilityElements {
+                guard let childElement = childElement as? UIAccessibilityElement else {
+                    list.append(childElement)
+                    continue
+                }
+                list.append(makeFocusTrackingElement(from: childElement, container: container, sourceView: node.view))
+            }
+        } else {
+            list.append(contentsOf: accessibilityElements)
+        }
     }
 }
 

@@ -471,6 +471,8 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     @objc open func customAccessibilityElements() -> [Any]? {
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
+        var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
+        var activeSourceViewIds = Set<ObjectIdentifier>()
         let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
@@ -482,16 +484,83 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
         }
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
-        self.forEachItemNode({ itemNode in
-            let intersection = itemNode.frame.intersection(visibleRect)
-            if !intersection.isNull && intersection.height > itemNode.frame.height * 0.5 {
-                if trackDirectionalFocus, itemNode.isAccessibilityElement {
-                    accessibilityElements.append(makeAccessibilityElement(of: itemNode, container: self, trackFocus: true))
-                } else {
-                    addAccessibilityChildren(of: itemNode, container: self, to: &accessibilityElements)
+        self.forEachItemNode({ node in
+            if trackDirectionalFocus {
+                guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
+                    return
                 }
+                let viewId = ObjectIdentifier(itemNode.view)
+                activeSourceViewIds.insert(viewId)
+                if itemNode.isAccessibilityElement {
+                    let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
+                    element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                    element.accessibilityLabel = itemNode.accessibilityLabel
+                    element.accessibilityValue = itemNode.accessibilityValue
+                    element.accessibilityTraits = itemNode.accessibilityTraits
+                    element.accessibilityHint = itemNode.accessibilityHint
+                    element.accessibilityIdentifier = itemNode.accessibilityIdentifier
+                    element.accessibilityCustomActions = itemNode.view.accessibilityCustomActions
+                    directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
+                } else if let nodeChildren = itemNode.accessibilityElements {
+                    for (order, childElement) in nodeChildren.enumerated() {
+                        if let child = childElement as? UIAccessibilityElement {
+                            let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: order)
+                            element.accessibilityFrame = child.accessibilityFrame
+                            element.accessibilityLabel = child.accessibilityLabel
+                            element.accessibilityValue = child.accessibilityValue
+                            element.accessibilityTraits = child.accessibilityTraits
+                            element.accessibilityHint = child.accessibilityHint
+                            element.accessibilityIdentifier = child.accessibilityIdentifier
+                            element.accessibilityCustomActions = child.accessibilityCustomActions
+                            directionalCandidates.append((localIndex: itemIndex, order: order, element: element))
+                        } else {
+                            directionalCandidates.append((localIndex: itemIndex, order: order, element: childElement))
+                        }
+                    }
+                }
+                return
+            }
+            let intersection = node.frame.intersection(visibleRect)
+            let minimumVisibleHeight: CGFloat = node.frame.height * 0.5
+            if !intersection.isNull && intersection.height > minimumVisibleHeight {
+                addAccessibilityChildren(of: node, container: self, to: &accessibilityElements, trackFocus: false)
             }
         })
+        if !trackDirectionalFocus && accessibilityElements.isEmpty {
+            self.forEachItemNode({ node in
+                let intersection = node.frame.intersection(visibleRect)
+                if !intersection.isNull && intersection.height > 1.0 {
+                    addAccessibilityChildren(of: node, container: self, to: &accessibilityElements, trackFocus: false)
+                }
+            })
+        }
+        if trackDirectionalFocus {
+            accessibilityElements = directionalCandidates.sorted(by: { lhs, rhs in
+                if lhs.localIndex != rhs.localIndex {
+                    return lhs.localIndex < rhs.localIndex
+                } else {
+                    return lhs.order < rhs.order
+                }
+            }).map(\.element)
+            self.cleanupDirectionalElementPool(activeSourceViewIds: activeSourceViewIds)
+        } else {
+            accessibilityElements = accessibilityElements.enumerated().sorted(by: { lhs, rhs in
+                let lhsFrame = (lhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
+                let rhsFrame = (rhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
+                if lhsFrame.isNull != rhsFrame.isNull {
+                    return !lhsFrame.isNull
+                }
+                let dy = lhsFrame.minY - rhsFrame.minY
+                if abs(dy) > 0.5 {
+                    return dy < 0.0
+                }
+                let dx = lhsFrame.minX - rhsFrame.minX
+                if abs(dx) > 0.5 {
+                    return dx < 0.0
+                }
+                return lhs.offset < rhs.offset
+            }).map(\.element)
+        }
         if self.accessibilityNavigationOrder == .reversed {
             accessibilityElements.reverse()
         }
@@ -590,6 +659,14 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         
         self.displayLink.isPaused = true
+        
+        self.accessibilityElementFocusedObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.elementFocusedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleSystemAccessibilityFocusNotification(notification)
+        }
     }
     
     deinit {
@@ -610,6 +687,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             
             self.waitingForNodesDisposable.dispose()
             self.reorderFeedbackDisposable?.dispose()
+            if let accessibilityElementFocusedObserver = self.accessibilityElementFocusedObserver {
+                NotificationCenter.default.removeObserver(accessibilityElementFocusedObserver)
+                self.accessibilityElementFocusedObserver = nil
+            }
         }()
     }
     
@@ -5363,6 +5444,16 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var accessibilityLastReportedVisibleRange: ListViewVisibleItemRange?
     private var accessibilityAutoAdvanceInProgress = false
     private var accessibilityLastCenteredElementIdentifier: ObjectIdentifier?
+    private var accessibilityElementFocusedObserver: NSObjectProtocol?
+    private var accessibilityLastSystemFocusedSignature: String?
+    private var accessibilityLastSystemFocusedSourceViewIdentifier: ObjectIdentifier?
+    private var accessibilityLastSystemFocusedIndex: Int?
+    private var accessibilityRecoveryInProgress = false
+    private var accessibilityFocusContainmentCheckToken: Int = 0
+    private var accessibilityLastInListFocusTimestamp: CFTimeInterval = 0.0
+    private var accessibilityFocusLeftListFailureCount: Int = 0
+    private var accessibilityDirectionalElementPool: [ObjectIdentifier: [FocusTrackingAccessibilityElement]] = [:]
+    private var accessibilityEdgeScrollPending = false
 
     /// Returns (firstAbsoluteIndex, lastAbsoluteIndex, totalCount) for a given set of visible local item indices.
     public var accessibilityAbsoluteScrollInfo: (([Int]) -> (first: Int, last: Int, total: Int)?)?
@@ -5381,12 +5472,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         var trackedSignature: [String] = []
         for element in elements {
             guard let element = element as? FocusTrackingAccessibilityElement else { continue }
-            let frame = element.accessibilityFrame
+            let sourceViewSignature: String
+            if let sourceView = element.sourceView {
+                sourceViewSignature = String(ObjectIdentifier(sourceView).hashValue)
+            } else {
+                sourceViewSignature = "no-source-view"
+            }
             let identifier = element.accessibilityIdentifier ?? ""
             let label = element.accessibilityLabel ?? ""
             let value = element.accessibilityValue ?? ""
             let traits = UInt64(element.accessibilityTraits.rawValue)
-            trackedSignature.append("\(identifier)|\(label)|\(value)|\(traits)|\(Int(frame.minX.rounded()))|\(Int(frame.minY.rounded()))|\(Int(frame.width.rounded()))|\(Int(frame.height.rounded()))")
+            // Do not include frame values here: frame changes while scrolling and should not reset
+            // directional focus state unless actual accessible sequence changed.
+            trackedSignature.append("\(sourceViewSignature)|\(identifier)|\(label)|\(value)|\(traits)")
         }
 
         let hasTrackedSequenceChanged = trackedSignature != self.accessibilityDirectionalTrackedSignature
@@ -5425,6 +5523,13 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         guard previousState.snapshotId == snapshotId else { return }
         guard previousState.directionalIndex != directionalIndex,
               let accessibilityDirectionalAnnouncement = self.accessibilityDirectionalAnnouncement else { return }
+        if abs(previousState.directionalIndex - directionalIndex) == 1 {
+            self.logVoiceOverDirectionalSwipeTransition(
+                snapshotId: snapshotId,
+                fromDirectionalIndex: previousState.directionalIndex,
+                toDirectionalIndex: directionalIndex
+            )
+        }
         guard let announcement = accessibilityDirectionalAnnouncement(previousState.directionalIndex, directionalIndex),
               !announcement.isEmpty else { return }
         UIAccessibility.post(notification: .announcement, argument: announcement)
@@ -5445,6 +5550,419 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                   currentState.directionalIndex == directionalIndex else { return }
             self.accessibilityPreviousFocusedDirectionalState = nil
         }
+    }
+
+    private func handleSystemAccessibilityFocusNotification(_ notification: Notification) {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        guard self.accessibilityDirectionalAnnouncement != nil else {
+            return
+        }
+
+        let focusedAny = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey]
+        if let focusedAny, !self.isAccessibilityObjectInsideCurrentListSequence(focusedAny) {
+            // Do not auto-recover on transient "left-list" reports: this path causes
+            // aggressive focus jumps back into the list while VoiceOver is still resolving
+            // focus during dynamic updates.
+            return
+        }
+        guard let focusedAny, let focusedData = self.accessibilityDebugData(from: focusedAny) else {
+            if let focusedAny {
+                print("[VO-SWIPE-DEBUG] system-focus unsupported-focused-type=\(type(of: focusedAny))")
+            }
+            return
+        }
+
+        let elementsAny = self.customAccessibilityElements() ?? []
+        let elements = elementsAny.compactMap { $0 as? UIAccessibilityElement }
+        guard !elements.isEmpty else {
+            return
+        }
+
+        let elementData: [(index: Int, element: UIAccessibilityElement, data: (identifier: String, label: String, value: String, traits: UInt64, frame: CGRect, kind: String))] = elements.enumerated().compactMap { index, element in
+            guard let data = self.accessibilityDebugData(from: element) else {
+                return nil
+            }
+            return (index, element, data)
+        }
+        guard !elementData.isEmpty else {
+            return
+        }
+        let focusedSourceViewIdentifier: ObjectIdentifier?
+        if let focusedView = focusedAny as? UIView {
+            focusedSourceViewIdentifier = ObjectIdentifier(focusedView)
+        } else if let focusedElement = focusedAny as? FocusTrackingAccessibilityElement, let sourceView = focusedElement.sourceView {
+            focusedSourceViewIdentifier = ObjectIdentifier(sourceView)
+        } else {
+            focusedSourceViewIdentifier = nil
+        }
+
+        let toIndex: Int?
+        let matchKind: String
+        if let focusedSourceViewIdentifier, let sourceViewCandidate = elementData.first(where: { item in
+            guard let trackedElement = item.element as? FocusTrackingAccessibilityElement,
+                  let sourceView = trackedElement.sourceView else {
+                return false
+            }
+            return ObjectIdentifier(sourceView) == focusedSourceViewIdentifier
+        }) {
+            toIndex = sourceViewCandidate.index
+            matchKind = "source-view"
+        } else {
+            let focusedStableKey = self.accessibilityDebugStableKey(from: focusedData)
+            let exactCandidates = elementData.filter { self.accessibilityDebugStableKey(from: $0.data) == focusedStableKey }
+            if exactCandidates.count == 1 {
+                toIndex = exactCandidates[0].index
+                matchKind = "exact"
+            } else if exactCandidates.count > 1 {
+                toIndex = exactCandidates.min(by: { self.accessibilityDebugFrameDistance($0.data.frame, focusedData.frame) < self.accessibilityDebugFrameDistance($1.data.frame, focusedData.frame) })?.index
+                matchKind = "exact-nearest"
+            } else {
+                // Fallback: VoiceOver sometimes reports focused source as UIView (_ASDisplayView), so
+                // match by nearest frame in screen coordinates.
+                toIndex = elementData.min(by: { self.accessibilityDebugFrameDistance($0.data.frame, focusedData.frame) < self.accessibilityDebugFrameDistance($1.data.frame, focusedData.frame) })?.index
+                matchKind = "nearest"
+            }
+        }
+        guard let toIndex else {
+            return
+        }
+        self.accessibilityLastSystemFocusedIndex = toIndex
+        self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
+        self.accessibilityFocusLeftListFailureCount = 0
+
+        var fromIndex: Int?
+        if let previousSourceViewIdentifier = self.accessibilityLastSystemFocusedSourceViewIdentifier {
+            fromIndex = elementData.first(where: { item in
+                guard let trackedElement = item.element as? FocusTrackingAccessibilityElement,
+                      let sourceView = trackedElement.sourceView else {
+                    return false
+                }
+                return ObjectIdentifier(sourceView) == previousSourceViewIdentifier
+            })?.index
+        }
+        if fromIndex == nil, let previousSignature = self.accessibilityLastSystemFocusedSignature {
+            fromIndex = elementData.first(where: { self.accessibilityDebugStableKey(from: $0.data) == previousSignature })?.index
+        }
+        self.accessibilityLastSystemFocusedSourceViewIdentifier = {
+            guard let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? FocusTrackingAccessibilityElement,
+                  let sourceView = focusedElement.sourceView else {
+                return nil
+            }
+            return ObjectIdentifier(sourceView)
+        }()
+        self.accessibilityLastSystemFocusedSignature = self.accessibilityDebugStableKey(from: focusedData)
+
+        if let fromIndex, abs(toIndex - fromIndex) == 1 {
+            var rows: [String] = []
+            rows.reserveCapacity(elements.count)
+            for item in elementData {
+                let index = item.index
+                let marker: String
+                if index == fromIndex {
+                    marker = "FROM"
+                } else if index == toIndex {
+                    marker = "TO"
+                } else {
+                    marker = ""
+                }
+                let summary = self.accessibilityDebugSummary(data: item.data)
+                if marker.isEmpty {
+                    rows.append("[\(index)] \(summary)")
+                } else {
+                    rows.append("[\(index) \(marker)] \(summary)")
+                }
+            }
+            print("[VO-SWIPE-DEBUG] system-focus-step from=\(fromIndex) to=\(toIndex) count=\(elements.count)")
+            print("[VO-SWIPE-DEBUG] system-visible-elements: \(rows.joined(separator: " || "))")
+        } else {
+            let summary = self.accessibilityDebugSummary(data: focusedData)
+            print("[VO-SWIPE-DEBUG] system-focus kind=\(focusedData.kind) match=\(matchKind) to=\(toIndex) summary=\(summary)")
+        }
+        // Auto-scroll when the focused element's screen frame approaches a visible edge
+        // in the direction of navigation. This prevents VoiceOver from exiting the
+        // container when the next elements are off-screen.
+        if let fromIndex, abs(toIndex - fromIndex) == 1 {
+            let direction = toIndex - fromIndex
+            let toFrame = elementData.first(where: { $0.index == toIndex })?.data.frame ?? .zero
+            let screenHeight = UIScreen.main.bounds.height
+            let edgeBuffer: CGFloat = 120.0
+
+            let needsScroll: Bool
+            if direction < 0 {
+                needsScroll = toFrame.maxY > screenHeight - edgeBuffer
+            } else {
+                needsScroll = toFrame.minY < edgeBuffer
+            }
+
+            if needsScroll && !self.accessibilityEdgeScrollPending {
+                self.accessibilityEdgeScrollPending = true
+                print("[VO-SCROLL] TRIGGER: toIndex=\(toIndex) count=\(elements.count) dir=\(direction) frame.y=\(toFrame.minY) maxY=\(toFrame.maxY) screenH=\(screenHeight)")
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.accessibilityEdgeScrollPending = false
+                    self.scrollForAccessibilityEdge(arrayDirection: direction)
+                }
+            } else if needsScroll {
+                print("[VO-SCROLL] skip: toIndex=\(toIndex) dir=\(direction) (scroll pending)")
+            } else {
+                print("[VO-SCROLL] skip: toIndex=\(toIndex) count=\(elements.count) dir=\(direction) frame.y=\(toFrame.minY)")
+            }
+        }
+    }
+
+    private func scrollForAccessibilityEdge(arrayDirection: Int) {
+        var avgHeight: CGFloat = 76.0
+        var nodeCount: CGFloat = 0.0
+        var totalHeight: CGFloat = 0.0
+        self.forEachItemNode { node in
+            totalHeight += node.frame.height
+            nodeCount += 1.0
+        }
+        if nodeCount > 0 {
+            avgHeight = totalHeight / nodeCount
+        }
+
+        let scrollAmount = avgHeight * 3.0
+        let physicalDirection: CGFloat
+        if self.rotated {
+            physicalDirection = arrayDirection < 0 ? -1.0 : 1.0
+        } else {
+            physicalDirection = arrayDirection < 0 ? 1.0 : -1.0
+        }
+
+        let contentOffset = self.scroller.contentOffset
+        let newY = contentOffset.y + scrollAmount * physicalDirection
+        let clampedY = max(
+            -self.scroller.contentInset.top,
+            min(newY, self.scroller.contentSize.height - self.scroller.frame.height)
+        )
+        guard abs(clampedY - contentOffset.y) > 1.0 else {
+            print("[VO-SCROLL] no-op: offset unchanged (clamped)")
+            return
+        }
+
+        print("[VO-SCROLL] scrolling: offset \(contentOffset.y) → \(clampedY) (delta=\(clampedY - contentOffset.y))")
+        self.scroller.setContentOffset(CGPoint(x: 0, y: clampedY), animated: false)
+        self.updateScrollViewDidScroll(self.scroller, synchronous: true)
+    }
+
+    private func isAccessibilityObjectInsideListView(_ object: Any) -> Bool {
+        if let view = object as? UIView {
+            return view === self.view || view.isDescendant(of: self.view)
+        }
+        if let element = object as? UIAccessibilityElement {
+            if let containerView = element.accessibilityContainer as? UIView {
+                return containerView === self.view || containerView.isDescendant(of: self.view)
+            }
+            if let containerNode = element.accessibilityContainer as? ASDisplayNode {
+                let containerView = containerNode.view
+                return containerView === self.view || containerView.isDescendant(of: self.view)
+            }
+        }
+        return false
+    }
+
+    private func accessibilitySourceViewIdentifier(from object: Any) -> ObjectIdentifier? {
+        if let view = object as? UIView {
+            return ObjectIdentifier(view)
+        }
+        if let focusedElement = object as? FocusTrackingAccessibilityElement, let sourceView = focusedElement.sourceView {
+            return ObjectIdentifier(sourceView)
+        }
+        return nil
+    }
+
+    private func isAccessibilityObjectInsideCurrentListSequence(_ object: Any) -> Bool {
+        if self.isAccessibilityObjectInsideListView(object) {
+            return true
+        }
+        guard let focusedSourceViewIdentifier = self.accessibilitySourceViewIdentifier(from: object) else {
+            return false
+        }
+        guard let elementsAny = self.customAccessibilityElements(), !elementsAny.isEmpty else {
+            return false
+        }
+        for element in elementsAny {
+            guard let trackedElement = element as? FocusTrackingAccessibilityElement,
+                  let sourceView = trackedElement.sourceView else {
+                continue
+            }
+            if ObjectIdentifier(sourceView) == focusedSourceViewIdentifier {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func recoverAccessibilityFocusToList(aroundIndex: Int?, reason: String) {
+        guard !self.accessibilityRecoveryInProgress else {
+            return
+        }
+        self.accessibilityRecoveryInProgress = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self else {
+                return
+            }
+            defer {
+                self.accessibilityRecoveryInProgress = false
+            }
+            guard UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            guard let elementsAny = self.customAccessibilityElements(), !elementsAny.isEmpty else {
+                return
+            }
+            let elements = elementsAny.compactMap { $0 as? UIAccessibilityElement }
+            guard !elements.isEmpty else {
+                return
+            }
+            let targetElement: UIAccessibilityElement
+            if let aroundIndex {
+                let clampedIndex = max(0, min(aroundIndex, elements.count - 1))
+                targetElement = elements[clampedIndex]
+            } else {
+                targetElement = elements[max(0, min(elements.count / 2, elements.count - 1))]
+            }
+            self.accessibilityLastSystemFocusedSignature = self.accessibilityDebugStableKey(
+                from: (
+                    identifier: targetElement.accessibilityIdentifier ?? "",
+                    label: targetElement.accessibilityLabel ?? "",
+                    value: targetElement.accessibilityValue ?? "",
+                    traits: UInt64(targetElement.accessibilityTraits.rawValue),
+                    frame: targetElement.accessibilityFrame,
+                    kind: "UIAccessibilityElement"
+                )
+            )
+            if let focusTarget = targetElement as? FocusTrackingAccessibilityElement, let sourceView = focusTarget.sourceView {
+                self.accessibilityLastSystemFocusedSourceViewIdentifier = ObjectIdentifier(sourceView)
+            } else {
+                self.accessibilityLastSystemFocusedSourceViewIdentifier = nil
+            }
+            print("[VO-SWIPE-DEBUG] recover-focus reason=\(reason) targetIndex=\(aroundIndex.map(String.init) ?? "center")")
+            UIAccessibility.post(notification: .layoutChanged, argument: targetElement)
+        }
+    }
+
+    private func scheduleAccessibilityFocusContainmentCheck(reason: String) {
+        _ = reason
+        return
+    }
+
+    public func reuseOrCreateDirectionalElement(sourceView: UIView, childOrder: Int) -> FocusTrackingAccessibilityElement {
+        let key = ObjectIdentifier(sourceView)
+        if let cached = self.accessibilityDirectionalElementPool[key], childOrder < cached.count {
+            return cached[childOrder]
+        }
+        var elements = self.accessibilityDirectionalElementPool[key] ?? []
+        while elements.count <= childOrder {
+            let element = FocusTrackingAccessibilityElement(accessibilityContainer: self)
+            element.sourceView = sourceView
+            elements.append(element)
+        }
+        self.accessibilityDirectionalElementPool[key] = elements
+        return elements[childOrder]
+    }
+
+    public func cleanupDirectionalElementPool(activeSourceViewIds: Set<ObjectIdentifier>) {
+        for key in self.accessibilityDirectionalElementPool.keys {
+            if !activeSourceViewIds.contains(key) {
+                self.accessibilityDirectionalElementPool.removeValue(forKey: key)
+            }
+        }
+    }
+
+    private func accessibilityDebugData(from object: Any) -> (identifier: String, label: String, value: String, traits: UInt64, frame: CGRect, kind: String)? {
+        if let element = object as? UIAccessibilityElement {
+            return (
+                identifier: element.accessibilityIdentifier ?? "",
+                label: element.accessibilityLabel ?? "",
+                value: element.accessibilityValue ?? "",
+                traits: UInt64(element.accessibilityTraits.rawValue),
+                frame: element.accessibilityFrame,
+                kind: "UIAccessibilityElement"
+            )
+        }
+        if let view = object as? UIView {
+            return (
+                identifier: view.accessibilityIdentifier ?? "",
+                label: view.accessibilityLabel ?? "",
+                value: view.accessibilityValue ?? "",
+                traits: UInt64(view.accessibilityTraits.rawValue),
+                frame: UIAccessibility.convertToScreenCoordinates(view.bounds, in: view),
+                kind: String(describing: type(of: view))
+            )
+        }
+        return nil
+    }
+
+    private func accessibilityDebugStableKey(from data: (identifier: String, label: String, value: String, traits: UInt64, frame: CGRect, kind: String)) -> String {
+        return "\(data.identifier)|\(data.label)|\(data.value)|\(data.traits)"
+    }
+
+    private func accessibilityDebugFrameDistance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let dx = lhs.midX - rhs.midX
+        let dy = lhs.midY - rhs.midY
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    private func accessibilityDebugSummary(data: (identifier: String, label: String, value: String, traits: UInt64, frame: CGRect, kind: String)) -> String {
+        let identifier = data.identifier
+        var label = data.label
+        if label.count > 80 {
+            label = String(label.prefix(80)) + "..."
+        }
+        label = label.replacingOccurrences(of: "\n", with: " ")
+        let frame = data.frame
+        return "kind=\(data.kind) id='\(identifier)' label='\(label)' frame(x:\(Int(frame.minX.rounded())) y:\(Int(frame.minY.rounded())) w:\(Int(frame.width.rounded())) h:\(Int(frame.height.rounded())))"
+    }
+
+    private func logVoiceOverDirectionalSwipeTransition(snapshotId: Int, fromDirectionalIndex: Int, toDirectionalIndex: Int) {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        guard let elements = self.customAccessibilityElements(), !elements.isEmpty else {
+            print("[VO-SWIPE-DEBUG] snapshot=\(snapshotId) from=\(fromDirectionalIndex) to=\(toDirectionalIndex) elements=0")
+            return
+        }
+
+        var rows: [String] = []
+        rows.reserveCapacity(elements.count)
+
+        for (index, element) in elements.enumerated() {
+            guard let element = element as? UIAccessibilityElement else {
+                rows.append("[\(index)] <non-UIAccessibilityElement>")
+                continue
+            }
+            let marker: String
+            if index == fromDirectionalIndex {
+                marker = "FROM"
+            } else if index == toDirectionalIndex {
+                marker = "TO"
+            } else {
+                marker = ""
+            }
+
+            var label = element.accessibilityLabel ?? ""
+            if label.count > 80 {
+                label = String(label.prefix(80)) + "..."
+            }
+            label = label.replacingOccurrences(of: "\n", with: " ")
+
+            let identifier = element.accessibilityIdentifier ?? ""
+            let frame = element.accessibilityFrame
+            let frameSummary = "x:\(Int(frame.minX.rounded())) y:\(Int(frame.minY.rounded())) w:\(Int(frame.width.rounded())) h:\(Int(frame.height.rounded()))"
+
+            if marker.isEmpty {
+                rows.append("[\(index)] id='\(identifier)' label='\(label)' frame(\(frameSummary))")
+            } else {
+                rows.append("[\(index) \(marker)] id='\(identifier)' label='\(label)' frame(\(frameSummary))")
+            }
+        }
+
+        print("[VO-SWIPE-DEBUG] one-finger-step snapshot=\(snapshotId) from=\(fromDirectionalIndex) to=\(toDirectionalIndex) count=\(elements.count)")
+        print("[VO-SWIPE-DEBUG] visible-elements: \(rows.joined(separator: " || "))")
     }
 
     private func interruptAccessibilitySpeechIfNeeded() {
@@ -5490,45 +6008,52 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
             
-            let visibleRange = self.displayedItemRange.visibleRange
+            let displayedVisibleRange = self.displayedItemRange.visibleRange
+            let viewBounds = CGRect(origin: CGPoint.zero, size: self.visibleSize)
+            let visibleNodeIndices = self.itemNodes
+                .filter { $0.frame.intersects(viewBounds) && $0.index != nil }
+                .compactMap(\.index)
+            let resolvedVisibleRange = resolvedAccessibilityVisibleRange(
+                displayedVisibleRange: displayedVisibleRange,
+                visibleNodeIndices: visibleNodeIndices
+            )
             let rangeIndices: [Int]
-            if let visibleRange {
-                rangeIndices = Array(visibleRange.firstIndex...visibleRange.lastIndex)
+            if let resolvedVisibleRange {
+                rangeIndices = Array(resolvedVisibleRange.first...resolvedVisibleRange.last)
             } else {
-                let viewBounds = CGRect(origin: CGPoint.zero, size: self.visibleSize)
-                rangeIndices = self.itemNodes.filter { $0.frame.intersects(viewBounds) && $0.index != nil }.compactMap(\.index)
+                rangeIndices = visibleNodeIndices
             }
             
-            print("[VO-DEBUG] deferred(0.15s): displayedRange=\(String(describing: visibleRange)), rangeIndices=\(rangeIndices), itemsCount=\(self.items.count)")
+            print("[VO-DEBUG] deferred(0.15s): displayedRange=\(String(describing: displayedVisibleRange)), resolvedRange=\(String(describing: resolvedVisibleRange)), rangeIndices=\(rangeIndices), itemsCount=\(self.items.count)")
             let currentOffset = self.scroller.contentOffset
             let currentMaxOffset = max(self.scroller.contentInset.top, self.scroller.contentSize.height - self.scroller.frame.height)
             let currentProgress: CGFloat = currentMaxOffset > self.scroller.contentInset.top ? ((currentOffset.y - self.scroller.contentInset.top) / (currentMaxOffset - self.scroller.contentInset.top)) : 1.0
             print("[VO-DEBUG] scrollPosition after: offsetY=\(currentOffset.y), maxOffsetY=\(currentMaxOffset), progress=\(Int((max(0.0, min(1.0, currentProgress)) * 100.0).rounded()))%")
 
-            if let visibleRange {
-                let localFirst = visibleRange.firstIndex + 1
-                let localLast = visibleRange.lastIndex + 1
+            if let resolvedVisibleRange {
+                let localFirst = resolvedVisibleRange.first + 1
+                let localLast = resolvedVisibleRange.last + 1
                 let localCount = max(0, localLast - localFirst + 1)
                 let localCoverage: Double = self.items.count > 0 ? (Double(localCount) / Double(self.items.count)) * 100.0 : 0.0
                 print("[VO-DEBUG] localRange metrics: first=\(localFirst), last=\(localLast), count=\(localCount), totalItems=\(self.items.count), coverage=\(String(format: "%.1f", localCoverage))%")
             }
 
-            if let visibleRange {
+            if let resolvedVisibleRange {
                 if let previousRange = self.accessibilityLastReportedVisibleRange, !self.accessibilityAutoAdvanceInProgress {
-                    let isAtTopBoundary = visibleRange.firstIndex <= 0
-                    let isAtBottomBoundary = visibleRange.lastIndex >= max(0, self.items.count - 1)
-                    let hasNoRangeChange = visibleRange.firstIndex == previousRange.firstIndex && visibleRange.lastIndex == previousRange.lastIndex
+                    let isAtTopBoundary = resolvedVisibleRange.first <= 0
+                    let isAtBottomBoundary = resolvedVisibleRange.last >= max(0, self.items.count - 1)
+                    let hasNoRangeChange = resolvedVisibleRange.first == previousRange.firstIndex && resolvedVisibleRange.last == previousRange.lastIndex
 
                     // Auto-advance is only for true backward jumps after dynamic list rebase.
                     // Do not trigger it on equal ranges or at hard list boundaries.
-                    let regressedDown = direction == .down && !isAtBottomBoundary && visibleRange.lastIndex < previousRange.lastIndex
-                    let regressedUp = direction == .up && !isAtTopBoundary && visibleRange.firstIndex > previousRange.firstIndex
+                    let regressedDown = direction == .down && !isAtBottomBoundary && resolvedVisibleRange.last < previousRange.lastIndex
+                    let regressedUp = direction == .up && !isAtTopBoundary && resolvedVisibleRange.first > previousRange.firstIndex
                     if regressedDown || regressedUp {
                         if hasNoRangeChange {
                             print("[VO-DEBUG] accessibility auto-advance skipped: no range change")
                         }
                         self.accessibilityAutoAdvanceInProgress = true
-                        print("[VO-DEBUG] accessibility auto-advance: detected range regression, direction=\(direction), previous=\(previousRange), current=\(visibleRange)")
+                        print("[VO-DEBUG] accessibility auto-advance: detected range regression, direction=\(direction), previous=\(previousRange), current=\(resolvedVisibleRange)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                             guard let self else { return }
                             _ = self.scrollWithDirection(direction, distance: distance, centerVoiceOverFocus: false)
@@ -5536,7 +6061,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                         }
                     }
                 }
-                self.accessibilityLastReportedVisibleRange = visibleRange
+                let resolvedFirstFullyVisible = displayedVisibleRange?.firstIndexFullyVisible ?? false
+                self.accessibilityLastReportedVisibleRange = ListViewVisibleItemRange(
+                    firstIndex: resolvedVisibleRange.first,
+                    firstIndexFullyVisible: resolvedFirstFullyVisible,
+                    lastIndex: resolvedVisibleRange.last
+                )
             }
             
             let scrollStatus: String?
@@ -5551,12 +6081,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 } else {
                     scrollStatus = "Items \(absoluteInfo.first) to \(absoluteInfo.last) of \(absoluteInfo.total)"
                 }
-            } else if self.accessibilityPageScrolledUsesVisibleRange, let visibleRange {
+            } else if self.accessibilityPageScrolledUsesVisibleRange, let resolvedVisibleRange {
                 if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
-                    scrollStatus = accessibilityPageScrolledRangeString("\(visibleRange.firstIndex + 1)", "\(visibleRange.lastIndex + 1)", "\(self.items.count)")
+                    scrollStatus = accessibilityPageScrolledRangeString("\(resolvedVisibleRange.first + 1)", "\(resolvedVisibleRange.last + 1)", "\(self.items.count)")
                 } else {
                     let rangeFormat = Bundle.main.localizedString(forKey: "VoiceOver.ScrollStatusRange", value: "Items from %1$@ to %2$@ of %3$@", table: nil)
-                    scrollStatus = String(format: rangeFormat, "\(visibleRange.firstIndex + 1)", "\(visibleRange.lastIndex + 1)", "\(self.items.count)")
+                    scrollStatus = String(format: rangeFormat, "\(resolvedVisibleRange.first + 1)", "\(resolvedVisibleRange.last + 1)", "\(self.items.count)")
                 }
             } else {
                 scrollStatus = nil
