@@ -1335,6 +1335,43 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         element.accessibilityIdentifier = itemNode.view.accessibilityIdentifier
         return element
     }
+
+    private func accessibilityData(for object: Any, clippedTo visibleScreenRect: CGRect) -> (label: String?, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?, frame: CGRect)? {
+        let frame: CGRect
+        let label: String?
+        let value: String?
+        let hint: String?
+        let identifier: String?
+        let traits: UIAccessibilityTraits
+        let customActions: [UIAccessibilityCustomAction]?
+
+        if let element = object as? UIAccessibilityElement {
+            frame = element.accessibilityFrame.intersection(visibleScreenRect)
+            label = element.accessibilityLabel
+            value = element.accessibilityValue
+            hint = element.accessibilityHint
+            identifier = element.accessibilityIdentifier
+            traits = element.accessibilityTraits
+            customActions = element.accessibilityCustomActions
+        } else if let view = object as? UIView {
+            let sourceFrame = view.isAccessibilityElement ? view.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+            frame = sourceFrame.intersection(visibleScreenRect)
+            label = view.accessibilityLabel
+            value = view.accessibilityValue
+            hint = view.accessibilityHint
+            identifier = view.accessibilityIdentifier
+            traits = view.accessibilityTraits
+            customActions = view.accessibilityCustomActions
+        } else {
+            return nil
+        }
+
+        guard !frame.isNull, frame.width > 1.0, frame.height > 1.0 else {
+            return nil
+        }
+
+        return (label, value, hint, identifier, traits, customActions, frame)
+    }
     
     override public func customAccessibilityElements() -> [Any]? {
         var accessibilityElements: [Any] = []
@@ -1353,47 +1390,87 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         }
         
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
+        let visibleBoundsRect = CGRect(
+            x: 0.0,
+            y: self.rotated ? self.insets.bottom : self.insets.top,
+            width: self.visibleSize.width,
+            height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+        )
+        var visibleScreenRect = UIAccessibility.convertToScreenCoordinates(visibleBoundsRect, in: self.view)
+        var currentClippingNode: ASDisplayNode? = self
+        while let clippingNode = currentClippingNode {
+            if let clippingContainer = clippingNode as? AccessibilityClippingContainer, let clippingFrame = clippingContainer.accessibilityClippingFrameInScreenCoordinates() {
+                visibleScreenRect = visibleScreenRect.intersection(clippingFrame)
+                if visibleScreenRect.isNull || visibleScreenRect.width <= 1.0 || visibleScreenRect.height <= 1.0 {
+                    self.updateAccessibilityDirectionalElements([])
+                    return nil
+                }
+            }
+            currentClippingNode = clippingNode.supernode
+        }
         self.forEachItemNode({ node in
             if trackDirectionalFocus {
                 guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
                     return
                 }
+                let intersection = itemNode.frame.intersection(visibleRect)
+                guard !intersection.isNull, intersection.height > 1.0, intersection.width > 1.0 else {
+                    return
+                }
                 let viewId = ObjectIdentifier(itemNode.view)
                 activeSourceViewIds.insert(viewId)
                 if itemNode.isAccessibilityElement {
+                    guard let itemData = self.accessibilityData(for: itemNode.view, clippedTo: visibleScreenRect) else {
+                        return
+                    }
                     let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
-                    element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
-                    element.accessibilityLabel = itemNode.accessibilityLabel
-                    element.accessibilityValue = itemNode.accessibilityValue
-                    element.accessibilityTraits = itemNode.accessibilityTraits
-                    element.accessibilityHint = itemNode.accessibilityHint
-                    element.accessibilityIdentifier = itemNode.accessibilityIdentifier
-                    element.accessibilityCustomActions = itemNode.view.accessibilityCustomActions
+                    element.accessibilityFrame = itemData.frame
+                    element.accessibilityLabel = itemData.label
+                    element.accessibilityValue = itemData.value
+                    element.accessibilityTraits = itemData.traits
+                    element.accessibilityHint = itemData.hint
+                    element.accessibilityIdentifier = itemData.identifier
+                    element.accessibilityCustomActions = itemData.customActions
                     directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
                 } else if let nodeChildren = itemNode.accessibilityElements, !nodeChildren.isEmpty {
                     var labels: [String] = []
                     var customActions: [UIAccessibilityCustomAction] = []
+                    var combinedFrame: CGRect?
+                    var combinedHint: String?
+                    var combinedIdentifier = itemNode.accessibilityIdentifier
                     for child in nodeChildren {
-                        if let child = child as? UIAccessibilityElement {
-                            if let childLabel = child.accessibilityLabel, !childLabel.isEmpty {
-                                labels.append(childLabel)
-                            } else if let childValue = child.accessibilityValue, !childValue.isEmpty {
-                                labels.append(childValue)
-                            }
-                            if let actions = child.accessibilityCustomActions {
-                                customActions.append(contentsOf: actions)
-                            }
+                        guard let childData = self.accessibilityData(for: child, clippedTo: visibleScreenRect) else {
+                            continue
+                        }
+                        if let childLabel = childData.label, !childLabel.isEmpty {
+                            labels.append(childLabel)
+                        } else if let childValue = childData.value, !childValue.isEmpty {
+                            labels.append(childValue)
+                        }
+                        if let actions = childData.customActions {
+                            customActions.append(contentsOf: actions)
+                        }
+                        if combinedHint == nil, let childHint = childData.hint, !childHint.isEmpty {
+                            combinedHint = childHint
+                        }
+                        if combinedIdentifier == nil, let childIdentifier = childData.identifier, !childIdentifier.isEmpty {
+                            combinedIdentifier = childIdentifier
+                        }
+                        if let currentFrame = combinedFrame {
+                            combinedFrame = currentFrame.union(childData.frame)
+                        } else {
+                            combinedFrame = childData.frame
                         }
                     }
                     let composedLabel = labels.joined(separator: ", ")
-                    if !composedLabel.isEmpty {
+                    if !composedLabel.isEmpty, let frame = combinedFrame, frame.width > 1.0, frame.height > 1.0 {
                         let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
-                        element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                        element.accessibilityFrame = frame
                         element.accessibilityLabel = composedLabel
                         element.accessibilityValue = nil
                         element.accessibilityTraits = itemNode.accessibilityTraits
-                        element.accessibilityHint = nil
-                        element.accessibilityIdentifier = itemNode.accessibilityIdentifier
+                        element.accessibilityHint = combinedHint
+                        element.accessibilityIdentifier = combinedIdentifier
                         element.accessibilityCustomActions = customActions.isEmpty ? nil : customActions
                         directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
                     }

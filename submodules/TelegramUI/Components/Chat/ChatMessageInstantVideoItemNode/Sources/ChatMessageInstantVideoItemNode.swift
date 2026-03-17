@@ -67,6 +67,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
     public var reactionButtonsNode: ChatMessageReactionButtonsNode?
     
     public let messageAccessibilityArea: AccessibilityAreaNode
+    private var messageAccessibilityAreaBaseFrame: CGRect = .zero
     
     public var currentSwipeToReplyTranslation: CGFloat = 0.0
     
@@ -651,7 +652,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
                     strongSelf.contextSourceNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.containerNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.contentNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
-                    strongSelf.messageAccessibilityArea.frame = CGRect(origin: CGPoint(), size: layoutSize)
+                    strongSelf.updateMessageAccessibilityAreaFrame(CGRect(origin: CGPoint(), size: layoutSize))
                     
                     strongSelf.appliedParams = params
                     strongSelf.appliedItem = item
@@ -1464,9 +1465,17 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
         item.controllerInteraction.openMessageContextMenu(item.message, false, self, self.interactiveVideoNode.frame, nil, nil)
     }
     
+    private func updateMessageAccessibilityAreaFrame(_ frame: CGRect? = nil) {
+        if let frame {
+            self.messageAccessibilityAreaBaseFrame = frame
+        }
+        self.messageAccessibilityArea.updateFrameClippedToAccessibilityContainers(self.messageAccessibilityAreaBaseFrame, in: self)
+    }
+
     private var absoluteRect: (CGRect, CGSize)?
     override public func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
         self.absoluteRect = (rect, containerSize)
+        self.updateMessageAccessibilityAreaFrame()
         
         var rect = rect
         rect.origin.y = containerSize.height - rect.maxY + self.insets.top

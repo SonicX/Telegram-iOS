@@ -250,6 +250,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     public let sendActionButtons: ChatTextInputActionButtonsNode
     private let slowModeButton: BoostSlowModeButton
     public var mediaRecordingAccessibilityArea: AccessibilityAreaNode?
+    private let textInputAccessibilityArea: AccessibilityAreaNode
     private let counterTextNode: ImmediateTextNode
     
     public let menuButton: HighlightTrackingButtonNode
@@ -345,6 +346,46 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
 //    private var toolbarHostingController: UIViewController? //Any? //  UIHostingController<ChatToolbarView>?
     private var toolbarNode: ASDisplayNode?
     
+    override public var accessibilityElements: [Any]? {
+        get {
+            var elements: [Any] = []
+
+            func appendView(_ view: UIView?) {
+                guard let view, !view.isHidden, view.alpha > 0.01, view.isAccessibilityElement else {
+                    return
+                }
+                elements.append(view)
+            }
+
+            func appendNode(_ node: ASDisplayNode?) {
+                guard let node else {
+                    return
+                }
+                appendView(node.view)
+            }
+
+            appendNode(self.textInputAccessibilityArea)
+            appendNode(self.mediaRecordingAccessibilityArea)
+            appendView(self.attachmentButton)
+            appendNode(self.menuButton)
+
+            for (_, button) in self.accessoryItemButtons {
+                appendView(button)
+            }
+
+            if self.mediaRecordingAccessibilityArea == nil {
+                appendNode(self.mediaActionButtons)
+            }
+            appendNode(self.sendActionButtons)
+            appendNode(self.viewOnceButton)
+            appendNode(self.recordMoreButton)
+
+            return elements.isEmpty ? nil : elements
+        }
+        set {
+        }
+    }
+
     public var inputTextState: ChatTextInputState {
         if let textInputNode = self.textInputNode {
             let selectionRange: Range<Int> = textInputNode.selectedRange.location ..< (textInputNode.selectedRange.location + textInputNode.selectedRange.length)
@@ -724,6 +765,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         self.mediaActionButtons = ChatTextInputActionButtonsNode(context: context, presentationInterfaceState: presentationInterfaceState, presentationContext: presentationContext, presentController: presentController)
         self.mediaActionButtons.sendContainerNode.alpha = 0.0
+        self.textInputAccessibilityArea = AccessibilityAreaNode()
         
         self.counterTextNode = ImmediateTextNode()
         self.counterTextNode.textAlignment = .center
@@ -735,6 +777,16 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.recordMoreButton = ChatRecordingViewOnceButtonNode(icon: .recordMore)
         
         super.init()
+        
+        self.textInputAccessibilityArea.activate = { [weak self] in
+            return self?.activateTextInputAccessibilityArea() ?? false
+        }
+        self.textInputAccessibilityArea.focused = { [weak self] in
+            guard let self, self.textInputNode?.isFirstResponder() == true, let textInputView = self.textInputNode?.view else {
+                return
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: textInputView)
+        }
         
         self.view.addSubview(self.glassBackgroundContainer)
         
@@ -972,6 +1024,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.textInputContainerBackgroundView.contentView.addSubview(self.accessoryPanelContainer)
         self.textInputContainerBackgroundView.contentView.addSubview(self.textPlaceholderNode.view)
         self.textInputContainerBackgroundView.contentView.addSubview(self.textInputNodeClippingContainer.view)
+        self.textInputNodeClippingContainer.addSubnode(self.textInputAccessibilityArea)
         
         self.menuButton.view.addSubview(self.menuButtonBackgroundView)
         self.menuButton.addSubnode(self.menuButtonClippingNode)
@@ -1108,6 +1161,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         textInputNode.tintColor = tintColor
         textInputNode.textView.scrollIndicatorInsets = UIEdgeInsets(top: 9.0, left: 0.0, bottom: 9.0, right: -13.0)
         self.textInputNodeClippingContainer.addSubnode(textInputNode)
+        self.textInputNodeClippingContainer.insertSubnode(self.textInputAccessibilityArea, aboveSubnode: textInputNode)
         textInputNode.view.disablesInteractiveTransitionGestureRecognizer = true
         textInputNode.isUserInteractionEnabled = !self.sendingTextDisabled
         textInputNode.textView.returnKeyType = self.sendWithReturnKey ? .send : .default
@@ -2971,6 +3025,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         let textInputNodeClippingContainerFrame = CGRect(origin: CGPoint(x: textFieldFrame.minX - actualTextInputViewInternalInsets.left, y: textFieldFrame.minY - actualTextInputViewInternalInsets.top), size: CGSize(width: textFieldFrame.width + actualTextInputViewInternalInsets.left + actualTextInputViewInternalInsets.right,  height: textFieldFrame.height + actualTextInputViewInternalInsets.top + actualTextInputViewInternalInsets.bottom))
         let shouldUpdateLayout = textInputNodeClippingContainerFrame.size != self.textInputNodeClippingContainer.frame.size
         transition.updateFrame(node: self.textInputNodeClippingContainer, frame: textInputNodeClippingContainerFrame)
+        transition.updateFrame(node: self.textInputAccessibilityArea, frame: CGRect(origin: .zero, size: textInputNodeClippingContainerFrame.size))
+        self.textInputAccessibilityArea.isHidden = textInputNodeClippingContainerFrame.size.width <= 1.0 || textInputNodeClippingContainerFrame.size.height <= 1.0 || audioRecordingItemsAlpha < 0.01
         
         transition.updateFrame(view: self.textInputSeparator, frame: CGRect(origin: CGPoint(x: 15.0, y: textFieldTopContentOffset - UIScreenPixel), size: CGSize(width: textFieldFrame.width, height: UIScreenPixel)))
         self.textInputSeparator.backgroundColor = interfaceState.theme.chat.inputPanel.inputPlaceholderColor
@@ -3130,6 +3186,17 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         } else {
             textPlaceholderSize = self.textPlaceholderNode.bounds.size
         }
+        
+        let inputAccessibilityLabel: String
+        if let currentPlaceholder = self.currentPlaceholder, !currentPlaceholder.isEmpty {
+            inputAccessibilityLabel = currentPlaceholder
+        } else {
+            inputAccessibilityLabel = interfaceState.strings.Conversation_InputTextPlaceholder
+        }
+        let inputAccessibilityValue = self.textInputNode?.attributedText?.string ?? ""
+        self.textInputAccessibilityArea.accessibilityLabel = inputAccessibilityLabel
+        self.textInputAccessibilityArea.accessibilityValue = inputAccessibilityValue.isEmpty ? nil : inputAccessibilityValue
+        self.textInputAccessibilityArea.accessibilityTraits = self.textInputNode?.textView.accessibilityTraits ?? []
         
         let textPlaceholderFrame: CGRect
         if sendingTextDisabled {
@@ -5303,6 +5370,29 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             self.switchToTextInputIfNeeded?()
             self.switching = false
         }
+    }
+    
+    private func activateTextInputAccessibilityArea() -> Bool {
+        if self.sendingTextDisabled {
+            guard let controller = (self.interfaceInteraction?.chatController() as? ChatController) else {
+                return false
+            }
+            if let boostsToUnrestrict = self.presentationInterfaceState?.boostsToUnrestrict, boostsToUnrestrict > 0 {
+                self.interfaceInteraction?.openBoostToUnrestrict()
+            } else {
+                self.interfaceInteraction?.displayUndo(.universal(animation: "premium_unlock", scale: 1.0, colors: ["__allcolors__": UIColor(white: 1.0, alpha: 1.0)], title: nil, text: controller.restrictedSendingContentsText(), customUndoText: nil, timeout: nil))
+            }
+            return true
+        }
+        
+        self.ensureFocusedOnTap()
+        Queue.mainQueue().after(0.05) { [weak self] in
+            guard let self, let textInputView = self.textInputNode?.view else {
+                return
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: textInputView)
+        }
+        return true
     }
     
     public func backwardsDeleteText() {

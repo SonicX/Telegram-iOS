@@ -8,6 +8,37 @@ import ComponentFlow
 import ComponentDisplayAdapters
 import TabBarComponent
 
+private func prioritizedAccessibilityHitTest(in view: UIView, point: CGPoint, event: UIEvent?) -> Any? {
+    guard !view.isHidden, view.alpha > 0.01 else {
+        return nil
+    }
+    let localPoint = view.convert(point, from: nil)
+    guard view.bounds.insetBy(dx: -1.0, dy: -1.0).contains(localPoint) else {
+        return nil
+    }
+    if #available(iOS 18.0, *) {
+        if let result = view.accessibilityHitTest(point, event: event) {
+            return result
+        }
+    }
+    if let hitView = view.hitTest(localPoint, with: event) {
+        var currentView: UIView? = hitView
+        while let candidateView = currentView {
+            if candidateView.isAccessibilityElement {
+                return candidateView
+            }
+            if candidateView === view {
+                break
+            }
+            currentView = candidateView.superview
+        }
+        if view.isAccessibilityElement {
+            return view
+        }
+    }
+    return nil
+}
+
 private extension ToolbarTheme {
     convenience init(theme: PresentationTheme) {
         self.init(barBackgroundColor: theme.rootController.tabBar.backgroundColor, barSeparatorColor: .clear, barTextColor: theme.rootController.tabBar.textColor, barSelectedTextColor: theme.rootController.tabBar.selectedTextColor)
@@ -43,11 +74,20 @@ final class TabBarControllerNode: ASDisplayNode {
     
     private final class View: UIView {
         var onLayout: (() -> Void)?
+        var accessibilityHitTestImpl: ((CGPoint, UIEvent?) -> Any?)?
         
         override func layoutSubviews() {
             super.layoutSubviews()
             
             self.onLayout?()
+        }
+        
+        @available(iOS 18.0, *)
+        override func accessibilityHitTest(_ point: CGPoint, event: UIEvent?) -> Any? {
+            if let result = self.accessibilityHitTestImpl?(point, event) {
+                return result
+            }
+            return super.accessibilityHitTest(point, event: event)
         }
     }
     
@@ -122,6 +162,18 @@ final class TabBarControllerNode: ASDisplayNode {
                     let _ = self.updateImpl(params: layoutResult.params, transition: .immediate)
                 }
             }
+        }
+        (self.view as? View)?.accessibilityHitTestImpl = { [weak self] point, event in
+            guard let self else {
+                return nil
+            }
+            if let toolbarNode = self.toolbarNode, let result = prioritizedAccessibilityHitTest(in: toolbarNode.view, point: point, event: event) {
+                return result
+            }
+            if let tabBarView = self.tabBarView.view, let result = prioritizedAccessibilityHitTest(in: tabBarView, point: point, event: event) {
+                return result
+            }
+            return nil
         }
         
         self.backgroundColor = theme.list.plainBackgroundColor

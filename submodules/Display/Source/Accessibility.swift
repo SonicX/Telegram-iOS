@@ -35,6 +35,24 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
     }
 }
 
+private func clipAccessibilityFrame(_ frame: CGRect, for node: ASDisplayNode) -> CGRect {
+    guard !frame.isNull else {
+        return .zero
+    }
+    var result = frame
+    var currentNode: ASDisplayNode? = node
+    while let node = currentNode {
+        if let clippingContainer = node as? AccessibilityClippingContainer, let clippingFrame = clippingContainer.accessibilityClippingFrameInScreenCoordinates() {
+            result = result.intersection(clippingFrame)
+            if result.isNull || result.width <= 1.0 || result.height <= 1.0 {
+                return .zero
+            }
+        }
+        currentNode = node.supernode
+    }
+    return result
+}
+
 public func makeAccessibilityElement(of node: ASDisplayNode, container: Any, trackFocus: Bool) -> UIAccessibilityElement {
     let element: UIAccessibilityElement
     if trackFocus {
@@ -44,7 +62,7 @@ public func makeAccessibilityElement(of node: ASDisplayNode, container: Any, tra
     } else {
         element = UIAccessibilityElement(accessibilityContainer: container)
     }
-    element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view)
+    element.accessibilityFrame = clipAccessibilityFrame(UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view), for: node)
     element.accessibilityLabel = node.accessibilityLabel
     element.accessibilityValue = node.accessibilityValue
     element.accessibilityTraits = node.accessibilityTraits
@@ -72,7 +90,7 @@ public func addAccessibilityChildren(of node: ASDisplayNode, container: Any, to 
         if trackFocus {
             let element = FocusTrackingAccessibilityElement(accessibilityContainer: container)
             element.sourceView = node.view
-            element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view)
+            element.accessibilityFrame = clipAccessibilityFrame(UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view), for: node)
             element.accessibilityLabel = node.accessibilityLabel
             element.accessibilityValue = node.accessibilityValue
             element.accessibilityTraits = node.accessibilityTraits
@@ -82,7 +100,7 @@ public func addAccessibilityChildren(of node: ASDisplayNode, container: Any, to 
             list.append(element)
         } else {
             let element = UIAccessibilityElement(accessibilityContainer: container)
-            element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view)
+            element.accessibilityFrame = clipAccessibilityFrame(UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view), for: node)
             element.accessibilityLabel = node.accessibilityLabel
             element.accessibilityValue = node.accessibilityValue
             element.accessibilityTraits = node.accessibilityTraits
@@ -99,10 +117,23 @@ public func addAccessibilityChildren(of node: ASDisplayNode, container: Any, to 
                     list.append(childElement)
                     continue
                 }
-                list.append(makeFocusTrackingElement(from: childElement, container: container, sourceView: node.view))
+                let element = makeFocusTrackingElement(from: childElement, container: container, sourceView: node.view)
+                element.accessibilityFrame = clipAccessibilityFrame(childElement.accessibilityFrame, for: node)
+                if !element.accessibilityFrame.isEmpty {
+                    list.append(element)
+                }
             }
         } else {
-            list.append(contentsOf: accessibilityElements)
+            for childElement in accessibilityElements {
+                if let childElement = childElement as? UIAccessibilityElement {
+                    childElement.accessibilityFrame = clipAccessibilityFrame(childElement.accessibilityFrame, for: node)
+                    if !childElement.accessibilityFrame.isEmpty {
+                        list.append(childElement)
+                    }
+                } else {
+                    list.append(childElement)
+                }
+            }
         }
     }
 }

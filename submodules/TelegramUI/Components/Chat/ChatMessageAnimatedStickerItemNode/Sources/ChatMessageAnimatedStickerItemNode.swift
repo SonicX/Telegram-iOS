@@ -125,6 +125,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
     private var reactionButtonsNode: ChatMessageReactionButtonsNode?
     
     private let messageAccessibilityArea: AccessibilityAreaNode
+    private var messageAccessibilityAreaBaseFrame: CGRect = .zero
     
     private var highlightedState: Bool = false
     
@@ -711,9 +712,17 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         self.updateVisibility()
     }
     
+    private func updateMessageAccessibilityAreaFrame(_ frame: CGRect? = nil) {
+        if let frame {
+            self.messageAccessibilityAreaBaseFrame = frame
+        }
+        self.messageAccessibilityArea.updateFrameClippedToAccessibilityContainers(self.messageAccessibilityAreaBaseFrame, in: self)
+    }
+
     private var absoluteRect: (CGRect, CGSize)?
     override public func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
         self.absoluteRect = (rect, containerSize)
+        self.updateMessageAccessibilityAreaFrame()
         if !self.contextSourceNode.isExtractedToContextPreview {
             var rect = rect
             rect.origin.y = containerSize.height - rect.maxY + self.insets.top
@@ -1482,7 +1491,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                         suggestedPostInfoNode.removeFromSupernode()
                     }
                     
-                    strongSelf.messageAccessibilityArea.frame = CGRect(origin: CGPoint(), size: layoutSize)
+                    strongSelf.updateMessageAccessibilityAreaFrame(CGRect(origin: CGPoint(), size: layoutSize))
                     strongSelf.containerNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.contentNode.frame = CGRect(origin: CGPoint(), size: layoutSize)

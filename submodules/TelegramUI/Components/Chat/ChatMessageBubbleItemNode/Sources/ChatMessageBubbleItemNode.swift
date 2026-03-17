@@ -727,6 +727,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
     public var needsQuickTranslateButton: Bool = false /* SGSimpleSettings.defaultValues[SGSimpleSettings.Keys.quickTranslateButton.rawValue] as! Bool*/
     
     private let messageAccessibilityArea: AccessibilityAreaNode
+    private var messageAccessibilityAreaBaseFrame: CGRect = .zero
 
     private var backgroundType: ChatMessageBackgroundType?
     
@@ -5053,8 +5054,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                         }
                     }
                 }
-                strongSelf.messageAccessibilityArea.frame = backgroundFrame
             }
+            strongSelf.updateMessageAccessibilityAreaFrame(backgroundFrame)
             if let shareButtonNode = strongSelf.shareButtonNode {
                 let buttonSize = shareButtonNode.update(presentationData: item.presentationData, controllerInteraction: item.controllerInteraction, chatLocation: item.chatLocation, subject: item.associatedData.subject, message: item.message, account: item.context.account, disableComments: disablesComments)
                 
@@ -5111,7 +5112,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 strongSelf.animateFrameTransition(1.0, backgroundFrame.size.height)
                 strongSelf.backgroundFrameTransition = nil
             }*/
-            strongSelf.messageAccessibilityArea.frame = backgroundFrame
+            strongSelf.updateMessageAccessibilityAreaFrame(backgroundFrame)
             if let shareButtonNode = strongSelf.shareButtonNode {
                 let buttonSize = shareButtonNode.update(presentationData: item.presentationData, controllerInteraction: item.controllerInteraction, chatLocation: item.chatLocation, subject: item.associatedData.subject, message: item.message, account: item.context.account, disableComments: disablesComments)
                 
@@ -6724,10 +6725,18 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         }
     }
     
+    private func updateMessageAccessibilityAreaFrame(_ frame: CGRect? = nil) {
+        if let frame {
+            self.messageAccessibilityAreaBaseFrame = frame
+        }
+        self.messageAccessibilityArea.updateFrameClippedToAccessibilityContainers(self.messageAccessibilityAreaBaseFrame, in: self)
+    }
+
     private var absoluteRect: (CGRect, CGSize)?
     
     override public func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
         self.absoluteRect = (rect, containerSize)
+        self.updateMessageAccessibilityAreaFrame()
         guard !self.mainContextSourceNode.isExtractedToContextPreview else {
             return
         }

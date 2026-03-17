@@ -440,6 +440,19 @@ public final class TabBarComponent: Component {
                     itemTransition.setPosition(view: selectedItemComponentView, position: itemFrame.center)
                     itemTransition.setBounds(view: selectedItemComponentView, bounds: CGRect(origin: CGPoint(), size: itemFrame.size))
                     itemTransition.setScale(view: selectedItemComponentView, scale: self.selectionGestureState != nil ? 1.15 : 1.0)
+                    itemComponentView.isAccessibilityElement = true
+                    itemComponentView.accessibilityLabel = item.item.title
+                    itemComponentView.accessibilityTraits = isItemSelected ? [.button, .selected] : [.button]
+                    itemComponentView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemFrame, in: self)
+                    itemComponentView.accessibilityActivateAction = { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        self.overrideSelectedItemId = item.id
+                        item.action(false)
+                        self.state?.updated(transition: .spring(duration: 0.4), isLocal: true)
+                    }
+                    selectedItemComponentView.isAccessibilityElement = false
                     
                     if let previousComponent, previousComponent.selectedId != item.id, isItemSelected {
                         itemComponentView.playSelectionAnimation()
@@ -518,6 +531,7 @@ private final class ItemComponent: Component {
     
     final class View: UIView {
         let contextContainerView: ContextExtractedContentContainingView
+        var accessibilityActivateAction: (() -> Void)?
         
         private var imageIcon: ComponentView<Empty>?
         private var animationIcon: ComponentView<Empty>?
@@ -541,6 +555,15 @@ private final class ItemComponent: Component {
         
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+        
+        override func accessibilityActivate() -> Bool {
+            if let accessibilityActivateAction = self.accessibilityActivateAction {
+                accessibilityActivateAction()
+                return true
+            } else {
+                return super.accessibilityActivate()
+            }
         }
         
         deinit {

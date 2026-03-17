@@ -160,7 +160,7 @@ private func cancelContextGestures(view: UIView) {
     }
 }
 
-open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDelegate {
+open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDelegate, AccessibilityClippingContainer {
     public struct ScrollingIndicatorState {
         public struct Item {
             public var index: Int
@@ -484,16 +484,31 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
         }
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
+        let visibleBoundsRect = CGRect(
+            x: 0.0,
+            y: self.rotated ? self.insets.bottom : self.insets.top,
+            width: self.visibleSize.width,
+            height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+        )
+        let visibleScreenRect = UIAccessibility.convertToScreenCoordinates(visibleBoundsRect, in: self.view)
         self.forEachItemNode({ node in
             if trackDirectionalFocus {
                 guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
+                    return
+                }
+                let intersection = itemNode.frame.intersection(visibleRect)
+                guard !intersection.isNull, intersection.height > 1.0, intersection.width > 1.0 else {
                     return
                 }
                 let viewId = ObjectIdentifier(itemNode.view)
                 activeSourceViewIds.insert(viewId)
                 if itemNode.isAccessibilityElement {
                     let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
-                    element.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                    let frame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view).intersection(visibleScreenRect)
+                    guard !frame.isNull, frame.height > 1.0, frame.width > 1.0 else {
+                        return
+                    }
+                    element.accessibilityFrame = frame
                     element.accessibilityLabel = itemNode.accessibilityLabel
                     element.accessibilityValue = itemNode.accessibilityValue
                     element.accessibilityTraits = itemNode.accessibilityTraits
@@ -504,8 +519,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 } else if let nodeChildren = itemNode.accessibilityElements {
                     for (order, childElement) in nodeChildren.enumerated() {
                         if let child = childElement as? UIAccessibilityElement {
+                            let frame = child.accessibilityFrame.intersection(visibleScreenRect)
+                            guard !frame.isNull, frame.height > 1.0, frame.width > 1.0 else {
+                                continue
+                            }
                             let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: order)
-                            element.accessibilityFrame = child.accessibilityFrame
+                            element.accessibilityFrame = frame
                             element.accessibilityLabel = child.accessibilityLabel
                             element.accessibilityValue = child.accessibilityValue
                             element.accessibilityTraits = child.accessibilityTraits
@@ -5508,6 +5527,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             trackedCount += 1
         }
+    }
+    
+    public func accessibilityClippingFrameInScreenCoordinates() -> CGRect? {
+        let visibleBoundsRect = CGRect(
+            x: 0.0,
+            y: self.rotated ? self.insets.bottom : self.insets.top,
+            width: self.visibleSize.width,
+            height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+        )
+        guard visibleBoundsRect.width > 1.0, visibleBoundsRect.height > 1.0 else {
+            return nil
+        }
+        return UIAccessibility.convertToScreenCoordinates(visibleBoundsRect, in: self.view)
     }
 
     private func handleAccessibilityElementFocused(snapshotId: Int, directionalIndex: Int) {

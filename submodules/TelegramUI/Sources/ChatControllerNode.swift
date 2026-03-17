@@ -53,6 +53,82 @@ import ChatTextInputPanelNode
 import ChatInputAccessoryPanel
 import ChatMessageTextBubbleContentNode
 
+private func accessibilityFrameInScreenCoordinates(for object: Any) -> CGRect? {
+    if let element = object as? UIAccessibilityElement {
+        let frame = element.accessibilityFrame
+        return frame.isNull ? nil : frame
+    }
+    if let view = object as? UIView {
+        let frame = view.isAccessibilityElement ? view.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+        return frame.isNull ? nil : frame
+    }
+    return nil
+}
+
+private func descendantAccessibilityHitTest(in view: UIView, point: CGPoint) -> Any? {
+    if let accessibilityElements = view.accessibilityElements {
+        for element in accessibilityElements.reversed() {
+            guard let frame = accessibilityFrameInScreenCoordinates(for: element) else {
+                continue
+            }
+            if frame.insetBy(dx: -1.0, dy: -1.0).contains(point) {
+                return element
+            }
+        }
+    }
+
+    for subview in view.subviews.reversed() {
+        guard !subview.isHidden, subview.alpha > 0.01 else {
+            continue
+        }
+        if let result = descendantAccessibilityHitTest(in: subview, point: point) {
+            return result
+        }
+        guard subview.isAccessibilityElement, let frame = accessibilityFrameInScreenCoordinates(for: subview) else {
+            continue
+        }
+        if frame.insetBy(dx: -1.0, dy: -1.0).contains(point) {
+            return subview
+        }
+    }
+
+    return nil
+}
+
+private func prioritizedAccessibilityHitTest(in view: UIView, point: CGPoint, event: UIEvent?) -> Any? {
+    guard !view.isHidden, view.alpha > 0.01 else {
+        return nil
+    }
+    let localPoint = view.convert(point, from: nil)
+    guard view.bounds.insetBy(dx: -1.0, dy: -1.0).contains(localPoint) else {
+        return nil
+    }
+    if #available(iOS 18.0, *) {
+        if let result = view.accessibilityHitTest(point, event: event) {
+            return result
+        }
+    }
+    if let result = descendantAccessibilityHitTest(in: view, point: point) {
+        return result
+    }
+    if let hitView = view.hitTest(localPoint, with: event) {
+        var currentView: UIView? = hitView
+        while let candidateView = currentView {
+            if candidateView.isAccessibilityElement {
+                return candidateView
+            }
+            if candidateView === view {
+                break
+            }
+            currentView = candidateView.superview
+        }
+        if view.isAccessibilityElement {
+            return view
+        }
+    }
+    return nil
+}
+
 final class VideoNavigationControllerDropContentItem: NavigationControllerDropContentItem {
     let itemNode: OverlayMediaItemNode
     
@@ -86,6 +162,33 @@ private final class ChatControllerNodeView: UITracingLayerView, WindowInputAcces
         }
         return result
     }
+
+    @available(iOS 18.0, *)
+    override func accessibilityHitTest(_ point: CGPoint, event: UIEvent?) -> Any? {
+        if let node = self.node {
+            if let navigationBar = node.navigationBar, let result = prioritizedAccessibilityHitTest(in: navigationBar.view, point: point, event: event) {
+                return result
+            }
+            if let result = prioritizedAccessibilityHitTest(in: node.inputContextPanelContainer.view, point: point, event: event) {
+                return result
+            }
+            if let result = prioritizedAccessibilityHitTest(in: node.inputPanelContainerNode.view, point: point, event: event) {
+                return result
+            }
+            if let inputNode = node.inputNode {
+                if let externalTopPanelContainer = inputNode.externalTopPanelContainer, let result = prioritizedAccessibilityHitTest(in: externalTopPanelContainer, point: point, event: event) {
+                    return result
+                }
+                if let result = prioritizedAccessibilityHitTest(in: inputNode.view, point: point, event: event) {
+                    return result
+                }
+            }
+            if let result = prioritizedAccessibilityHitTest(in: node.navigateButtons.view, point: point, event: event) {
+                return result
+            }
+        }
+        return super.accessibilityHitTest(point, event: event)
+    }
 }
 
 private final class ScrollContainerNode: ASScrollNode {
@@ -116,7 +219,7 @@ class ChatNodeContainer: ASDisplayNode {
     }
 }
 
-class HistoryNodeContainer: ASDisplayNode {
+class HistoryNodeContainer: ASDisplayNode, AccessibilityClippingContainer {
     var isSecret: Bool {
         didSet {
             if self.isSecret != oldValue {
@@ -124,6 +227,8 @@ class HistoryNodeContainer: ASDisplayNode {
             }
         }
     }
+
+    var accessibilityClippingFrameProvider: (() -> CGRect?)?
     
     var contentNode: ASDisplayNode {
         return self
@@ -137,6 +242,10 @@ class HistoryNodeContainer: ASDisplayNode {
         if self.isSecret {
             setLayerDisableScreenshots(self.layer, self.isSecret)
         }
+    }
+
+    func accessibilityClippingFrameInScreenCoordinates() -> CGRect? {
+        return self.accessibilityClippingFrameProvider?()
     }
 }
 
@@ -753,8 +862,19 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         
         self.navigateButtons = ChatHistoryNavigationButtons(theme: self.chatPresentationInterfaceState.theme, dateTimeFormat: self.chatPresentationInterfaceState.dateTimeFormat, backgroundNode: self.backgroundNode, isChatRotated: historyNodeRotated)
         self.navigateButtons.accessibilityElementsHidden = true
-        
+
         super.init()
+
+        self.historyNodeContainer.accessibilityClippingFrameProvider = { [weak self] in
+            guard let self else {
+                return nil
+            }
+            let rect = self.frameForVisibleArea()
+            guard rect.width > 1.0, rect.height > 1.0 else {
+                return nil
+            }
+            return UIAccessibility.convertToScreenCoordinates(rect, in: self.view)
+        }
 
         getContentAreaInScreenSpaceImpl = { [weak self] in
             guard let strongSelf = self else {
@@ -3862,7 +3982,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     func frameForVisibleArea() -> CGRect {
         var rect = CGRect(origin: CGPoint(x: self.visibleAreaInset.left, y: self.visibleAreaInset.top), size: CGSize(width: self.bounds.size.width - self.visibleAreaInset.left - self.visibleAreaInset.right, height: self.bounds.size.height - self.visibleAreaInset.top - self.visibleAreaInset.bottom))
         if let inputContextPanelNode = self.inputContextPanelNode, let topItemFrame = inputContextPanelNode.topItemFrame {
-            rect.size.height = topItemFrame.minY
+            rect.size.height = max(0.0, topItemFrame.minY - rect.minY)
         }
         if let containerNode = self.containerNode {
             return containerNode.view.convert(rect, to: self.view)
