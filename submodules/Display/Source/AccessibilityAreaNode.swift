@@ -13,13 +13,38 @@ public protocol AccessibilityClippingContainer: AnyObject {
 public final class AccessibilityAreaNode: ASDisplayNode {
     private final class View: UIView {
         weak var areaNode: AccessibilityAreaNode?
-        
+
         override var accessibilityFrame: CGRect {
             get {
                 return self.areaNode?.resolvedAccessibilityFrame() ?? super.accessibilityFrame
             }
             set {
                 super.accessibilityFrame = newValue
+            }
+        }
+
+        override func accessibilityActivate() -> Bool {
+            return self.areaNode?.accessibilityActivate() ?? super.accessibilityActivate()
+        }
+
+        override func accessibilityElementDidBecomeFocused() {
+            super.accessibilityElementDidBecomeFocused()
+            self.areaNode?.accessibilityElementDidBecomeFocused()
+        }
+
+        override func accessibilityIncrement() {
+            if let areaNode = self.areaNode {
+                areaNode.accessibilityIncrement()
+            } else {
+                super.accessibilityIncrement()
+            }
+        }
+
+        override func accessibilityDecrement() {
+            if let areaNode = self.areaNode {
+                areaNode.accessibilityDecrement()
+            } else {
+                super.accessibilityDecrement()
             }
         }
     }
