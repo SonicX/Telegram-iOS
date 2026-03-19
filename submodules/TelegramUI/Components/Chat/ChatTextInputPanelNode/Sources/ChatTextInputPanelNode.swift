@@ -251,6 +251,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     private let slowModeButton: BoostSlowModeButton
     public var mediaRecordingAccessibilityArea: AccessibilityAreaNode?
     private let textInputAccessibilityArea: AccessibilityAreaNode
+    private let hideKeyboardAccessibilityArea: AccessibilityAreaNode
     private let counterTextNode: ImmediateTextNode
     
     public let menuButton: HighlightTrackingButtonNode
@@ -382,6 +383,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             }
 
             appendNode(self.textInputAccessibilityArea)
+            appendNode(self.hideKeyboardAccessibilityArea)
             if self.accessibilitySendButtonAnchor == .textInput {
                 appendSendButtonIfNeeded()
             }
@@ -789,6 +791,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.mediaActionButtons = ChatTextInputActionButtonsNode(context: context, presentationInterfaceState: presentationInterfaceState, presentationContext: presentationContext, presentController: presentController)
         self.mediaActionButtons.sendContainerNode.alpha = 0.0
         self.textInputAccessibilityArea = AccessibilityAreaNode()
+        self.hideKeyboardAccessibilityArea = AccessibilityAreaNode()
         
         self.counterTextNode = ImmediateTextNode()
         self.counterTextNode.textAlignment = .center
@@ -802,6 +805,10 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         super.init()
         
         self.textInputAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+        self.hideKeyboardAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+        self.hideKeyboardAccessibilityArea.accessibilityLabel = presentationInterfaceState.strings.Common_Close
+        self.hideKeyboardAccessibilityArea.accessibilityHint = presentationInterfaceState.strings.VoiceOver_Keyboard
+        self.hideKeyboardAccessibilityArea.accessibilityTraits = [.button]
         self.voiceOverStatusObserver = NotificationCenter.default.addObserver(
             forName: UIAccessibility.voiceOverStatusDidChangeNotification,
             object: nil,
@@ -811,6 +818,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                     return
                 }
                 self.textInputAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+                self.hideKeyboardAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
             }
         )
         
@@ -823,6 +831,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             }
             self.accessibilitySendButtonAnchor = .textInput
             UIAccessibility.post(notification: .layoutChanged, argument: textInputView)
+        }
+        self.hideKeyboardAccessibilityArea.activate = { [weak self] in
+            return self?.performHideKeyboardAccessibilityAction() ?? false
         }
         
         self.view.addSubview(self.glassBackgroundContainer)
@@ -1062,6 +1073,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.textInputContainerBackgroundView.contentView.addSubview(self.textPlaceholderNode.view)
         self.textInputContainerBackgroundView.contentView.addSubview(self.textInputNodeClippingContainer.view)
         self.textInputNodeClippingContainer.addSubnode(self.textInputAccessibilityArea)
+        self.textInputNodeClippingContainer.addSubnode(self.hideKeyboardAccessibilityArea)
         
         self.menuButton.view.addSubview(self.menuButtonBackgroundView)
         self.menuButton.addSubnode(self.menuButtonClippingNode)
@@ -3068,6 +3080,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         transition.updateFrame(node: self.textInputNodeClippingContainer, frame: textInputNodeClippingContainerFrame)
         transition.updateFrame(node: self.textInputAccessibilityArea, frame: textInputAccessibilityFrame)
         self.textInputAccessibilityArea.isHidden = textInputNodeClippingContainerFrame.size.width <= 1.0 || textInputNodeClippingContainerFrame.size.height <= 1.0 || audioRecordingItemsAlpha < 0.01
+        self.hideKeyboardAccessibilityArea.isHidden = true
         
         transition.updateFrame(view: self.textInputSeparator, frame: CGRect(origin: CGPoint(x: 15.0, y: textFieldTopContentOffset - UIScreenPixel), size: CGSize(width: textFieldFrame.width, height: UIScreenPixel)))
         self.textInputSeparator.backgroundColor = interfaceState.theme.chat.inputPanel.inputPlaceholderColor
@@ -3238,6 +3251,11 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.textInputAccessibilityArea.accessibilityLabel = inputAccessibilityLabel
         self.textInputAccessibilityArea.accessibilityValue = inputAccessibilityValue.isEmpty ? nil : inputAccessibilityValue
         self.textInputAccessibilityArea.accessibilityTraits = self.textInputNode?.textView.accessibilityTraits ?? []
+        self.textInputAccessibilityArea.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: interfaceState.strings.Common_Close, target: self, selector: #selector(self.performHideKeyboardAccessibilityCustomAction(_:)))
+        ]
+        self.hideKeyboardAccessibilityArea.accessibilityLabel = interfaceState.strings.Common_Close
+        self.hideKeyboardAccessibilityArea.accessibilityHint = interfaceState.strings.VoiceOver_Keyboard
         
         let textPlaceholderFrame: CGRect
         if sendingTextDisabled {
@@ -3385,6 +3403,20 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 textInputAccessibilityFrame.size.width = min(textInputAccessibilityFrame.size.width, maxAccessibilityWidth)
             }
             transition.updateFrame(node: self.textInputAccessibilityArea, frame: textInputAccessibilityFrame)
+        }
+        
+        if self.textInputNode?.isFirstResponder() == true, UIAccessibility.isVoiceOverRunning, !self.textInputAccessibilityArea.isHidden {
+            let hideActionWidth: CGFloat = min(44.0, textInputAccessibilityFrame.width)
+            let hideActionHeight: CGFloat = max(34.0, textInputAccessibilityFrame.height)
+            let hideActionX = max(textInputAccessibilityFrame.minX, textInputAccessibilityFrame.maxX - hideActionWidth)
+            let hideActionFrame = CGRect(
+                origin: CGPoint(x: hideActionX, y: textInputAccessibilityFrame.midY - hideActionHeight * 0.5),
+                size: CGSize(width: hideActionWidth, height: hideActionHeight)
+            )
+            transition.updateFrame(node: self.hideKeyboardAccessibilityArea, frame: hideActionFrame)
+            self.hideKeyboardAccessibilityArea.isHidden = hideActionFrame.width <= 1.0 || hideActionFrame.height <= 1.0
+        } else {
+            self.hideKeyboardAccessibilityArea.isHidden = true
         }
         if let (rect, containerSize) = self.absoluteRect {
             self.sendActionButtons.updateAbsoluteRect(CGRect(x: rect.origin.x + sendActionButtonsFrame.origin.x, y: rect.origin.y + sendActionButtonsFrame.origin.y, width: sendActionButtonsFrame.width, height: sendActionButtonsFrame.height), within: containerSize, transition: transition)
@@ -5399,6 +5431,10 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.textInputNode?.resignFirstResponder()
     }
     
+    override public func accessibilityPerformEscape() -> Bool {
+        return self.performHideKeyboardAccessibilityAction()
+    }
+    
     public func ensureFocused() {
         if self.sendingTextDisabled {
             return
@@ -5411,6 +5447,25 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         if !self.switching {
             self.textInputNode?.becomeFirstResponder()
         }
+    }
+    
+    @objc private func performHideKeyboardAccessibilityCustomAction(_ action: UIAccessibilityCustomAction) -> Bool {
+        return self.performHideKeyboardAccessibilityAction()
+    }
+    
+    private func performHideKeyboardAccessibilityAction() -> Bool {
+        guard self.textInputNode?.isFirstResponder() == true else {
+            return false
+        }
+        self.ensureUnfocused()
+        self.accessibilitySendButtonAnchor = .none
+        Queue.mainQueue().after(0.05) { [weak self] in
+            guard let self else {
+                return
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: self.textInputAccessibilityArea.view)
+        }
+        return true
     }
     
     private var switching = false
