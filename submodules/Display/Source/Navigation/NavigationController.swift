@@ -116,9 +116,8 @@ private final class NavigationControllerNode: ASDisplayNode {
     }
     
     override func accessibilityPerformEscape() -> Bool {
-        if let controller = self.controller, controller.viewControllers.count > 1 {
-            let _ = self.controller?.popViewController(animated: true)
-            return true
+        if let controller = self.controller {
+            return controller.performBackActionFromAccessibility()
         }
         return false
     }
@@ -1844,6 +1843,10 @@ open class NavigationController: UINavigationController, ContainableController, 
         }
     }
     
+    open override func accessibilityPerformEscape() -> Bool {
+        return self.performBackActionFromAccessibility()
+    }
+    
     public final var currentWindow: WindowHost? {
         if let window = self.view.window as? WindowHost {
             return window
@@ -1971,6 +1974,27 @@ open class NavigationController: UINavigationController, ContainableController, 
     
     private func notifyAccessibilityScreenChanged() {
         UIAccessibility.post(notification: UIAccessibility.Notification.screenChanged, argument: nil)
+    }
+    
+    fileprivate func performBackActionFromAccessibility() -> Bool {
+        guard self._viewControllers.count > 1, let topController = self._viewControllers.last else {
+            return false
+        }
+        
+        let performPop: () -> Void = { [weak self, weak topController] in
+            guard let self, let topController else {
+                return
+            }
+            self.filterController(topController, animated: true)
+        }
+        
+        if topController.attemptNavigation({
+            performPop()
+        }) {
+            performPop()
+        }
+        
+        return true
     }
     
     public func updateRootContainerTransitionOffset(_ offset: CGFloat, transition: ContainedViewLayoutTransition) {
