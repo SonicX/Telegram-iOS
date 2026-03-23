@@ -430,7 +430,9 @@ public final class TabBarComponent: Component {
                 let itemFrame = CGRect(origin: CGPoint(x: innerInset + CGFloat(index) * itemSize.width, y: floor((size.height - itemSize.height) * 0.5)), size: itemSize)
                 if let itemComponentView = itemView.view as? ItemComponent.View, let selectedItemComponentView = selectedItemView.view as? ItemComponent.View {
                     if itemComponentView.superview == nil {
-                        itemComponentView.isUserInteractionEnabled = false
+                        // Keep the base item view interactive so accessibility hit-testing
+                        // can resolve it reliably on compact devices with VoiceOver enabled.
+                        itemComponentView.isUserInteractionEnabled = true
                         selectedItemComponentView.isUserInteractionEnabled = false
 
                         self.liquidLensView.contentView.addSubview(itemComponentView)
