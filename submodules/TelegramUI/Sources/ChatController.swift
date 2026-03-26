@@ -6889,7 +6889,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         super.viewDidAppear(animated)
         
         if shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: UIAccessibility.isVoiceOverRunning) {
-            UIAccessibility.post(notification: .screenChanged, argument: self.chatDisplayNode.historyNode.view)
+            self.chatDisplayNode.historyNode.postAccessibilityFocusOnAppear(preferredIdentifier: "chat.unreadMessages")
         }
         
         self.didAppear = true

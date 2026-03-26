@@ -7,6 +7,7 @@ import MergeLists
 import AccountContext
 import ChatControllerInteraction
 import ChatHistoryEntry
+import ChatMessageItemView
 import ChatMessageBubbleItemNode
 
 func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toView: ChatHistoryView, reason: ChatHistoryViewTransitionReason, reverse: Bool, chatLocation: ChatLocation, source: ChatHistoryListSource, controllerInteraction: ChatControllerInteraction, scrollPosition: ChatHistoryViewScrollPosition?, scrollAnimationCurve: ListViewAnimationCurve?, initialData: InitialMessageHistoryData?, keyboardButtonsMessage: Message?, cachedData: CachedPeerData?, cachedDataMessages: [MessageId: Message]?, readStateData: [PeerId: ChatHistoryCombinedInitialReadStateData]?, flashIndicators: Bool, updatedMessageSelection: Bool, messageTransitionNode: ChatMessageTransitionNodeImpl?, allUpdated: Bool) -> ChatHistoryViewTransition {
@@ -236,6 +237,13 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                                 if let taskRect = itemNode.getTodoTaskRect(id: todoTaskId) {
                                     return taskRect.midY
                                 }
+                            }
+                            return 0.0
+                        }))
+                    } else if !scrollSubject.setupReply {
+                        position = .center(.custom({ itemNode in
+                            if let itemNode = itemNode as? ChatMessageItemView {
+                                return itemNode.navigationTopAnchorForScrolling()
                             }
                             return 0.0
                         }))

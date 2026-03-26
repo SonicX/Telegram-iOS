@@ -980,6 +980,10 @@ open class ChatMessageItemView: ListViewItemNode, ChatMessageItemNodeProtocol {
         return self.bounds
     }
     
+    open func navigationTopAnchorForScrolling() -> CGFloat {
+        return self.contentFrame().minY
+    }
+    
     private func playEffectAnimation(effect: AvailableMessageEffects.MessageEffect, force: Bool) {
         guard let item = self.item else {
             return

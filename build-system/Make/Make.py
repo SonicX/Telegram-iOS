@@ -53,6 +53,11 @@ class BazelCommandLine:
             # Ask bazel to print the actual resolved command line options.
             '--announce_rc',
 
+            '--xcode_version={}'.format(self.build_environment.xcode_version_full),
+            '--repo_env=DEVELOPER_DIR={}'.format(self.build_environment.xcode_developer_path),
+            '--repo_env=XCODE_VERSION={}'.format(self.build_environment.xcode_build_version),
+            '--repo_env=USE_CLANG_CL={}'.format(self.build_environment.xcode_build_version),
+
             # https://github.com/bazelbuild/rules_swift
             # If enabled, Swift compilation actions will use the same global Clang module
             # cache used by Objective-C compilation actions. This is disabled by default

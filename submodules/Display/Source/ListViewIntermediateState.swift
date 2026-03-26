@@ -328,25 +328,25 @@ struct ListViewState {
                             offset = self.insets.top - node.frame.minY + additionalOffset
                         case let .center(overflow):
                             let contentAreaHeight = self.visibleSize.height - self.insets.bottom - self.insets.top
-                            if node.frame.size.height <= contentAreaHeight + CGFloat.ulpOfOne {
-                                offset = self.insets.top + floor((contentAreaHeight - node.frame.size.height) / 2.0) - node.frame.minY
-                            } else {
-                                switch overflow {
-                                case .top:
+                            switch overflow {
+                            case let .custom(getOverflow):
+                                if Thread.isMainThread, case let .Node(_, _, referenceNode, newNode) = node, let listNode = referenceNode?.syncWith({ $0 }) ?? newNode?.syncWith({ $0 }) {
+                                    let anchorOffset = getOverflow(listNode)
+                                    offset = self.insets.top + floor(contentAreaHeight / 2.0) - node.frame.minY - anchorOffset
+                                } else {
                                     offset = self.insets.top - node.frame.minY
-                                case .bottom:
-                                    offset = (self.visibleSize.height - self.insets.bottom) - node.frame.maxY
-                                case let .custom(getOverflow):
-                                    if Thread.isMainThread, case let .Node(_, _, referenceNode, newNode) = node, let listNode = referenceNode?.syncWith({ $0 }) ?? newNode?.syncWith({ $0 }) {
-                                        let overflow = getOverflow(listNode)
-                                        if overflow == 0.0 {
-                                            offset = self.insets.top - node.frame.minY
-                                        } else {
-                                            offset = (self.visibleSize.height - self.insets.bottom) - node.frame.maxY
-                                            offset += overflow
-                                            offset -= floor((self.visibleSize.height - self.insets.bottom - self.insets.top) * 0.5)
-                                        }
-                                    } else {
+                                }
+                            case .top, .bottom:
+                                if node.frame.size.height <= contentAreaHeight + CGFloat.ulpOfOne {
+                                    offset = self.insets.top + floor((contentAreaHeight - node.frame.size.height) / 2.0) - node.frame.minY
+                                } else {
+                                    switch overflow {
+                                    case .top:
+                                        offset = self.insets.top - node.frame.minY
+                                    case .bottom:
+                                        offset = (self.visibleSize.height - self.insets.bottom) - node.frame.maxY
+                                    case .custom:
+                                        assertionFailure()
                                         offset = self.insets.top - node.frame.minY
                                     }
                                 }

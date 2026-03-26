@@ -28,3 +28,30 @@ public func resolvedAccessibilityVisibleRange(
 public func shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: Bool) -> Bool {
     return isVoiceOverRunning
 }
+
+func resolvedAccessibilityRecoveryIndex(
+    preferredStableKey: String?,
+    aroundIndex: Int?,
+    candidateStableKeys: [String]
+) -> Int? {
+    guard !candidateStableKeys.isEmpty else {
+        return nil
+    }
+    
+    if let preferredStableKey {
+        let matchingIndices = candidateStableKeys.enumerated().compactMap { index, stableKey in
+            stableKey == preferredStableKey ? index : nil
+        }
+        if let aroundIndex, !matchingIndices.isEmpty {
+            return matchingIndices.min(by: { abs($0 - aroundIndex) < abs($1 - aroundIndex) })
+        } else if let firstMatchingIndex = matchingIndices.first {
+            return firstMatchingIndex
+        }
+    }
+    
+    if let aroundIndex {
+        return max(0, min(aroundIndex, candidateStableKeys.count - 1))
+    } else {
+        return max(0, min(candidateStableKeys.count / 2, candidateStableKeys.count - 1))
+    }
+}

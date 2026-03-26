@@ -7007,6 +7007,28 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         return nil
     }
     
+    override public func navigationTopAnchorForScrolling() -> CGFloat {
+        var topAnchor = self.backgroundNode.frame.minY
+        
+        if let nameNode = self.nameNode {
+            topAnchor = min(topAnchor, nameNode.frame.minY)
+        }
+        if let forwardInfoNode = self.forwardInfoNode {
+            topAnchor = min(topAnchor, forwardInfoNode.frame.minY)
+        }
+        if let threadInfoNode = self.threadInfoNode {
+            topAnchor = min(topAnchor, threadInfoNode.frame.minY)
+        }
+        if let replyInfoNode = self.replyInfoNode {
+            topAnchor = min(topAnchor, replyInfoNode.frame.minY)
+        }
+        for contentNode in self.contentNodes {
+            topAnchor = min(topAnchor, contentNode.frame.minY)
+        }
+        
+        return topAnchor
+    }
+    
     public func hasExpandedAudioTranscription() -> Bool {
         for contentNode in self.contentNodes {
             if let contentNode = contentNode as? ChatMessageFileBubbleContentNode {

@@ -142,6 +142,23 @@ def get_xcode_version():
     print('Could not parse the Xcode version from {}'.format(plist_path))
     exit(1)
 
+def get_xcode_developer_path():
+    xcode_path = run_executable_with_output('xcode-select', ['-p']).strip('\n')
+    if not os.path.isdir(xcode_path):
+        print('The path reported by \'xcode-select -p\' does not exist')
+        exit(1)
+    return xcode_path
+
+def get_xcode_build_version():
+    output = run_executable_with_output('xcodebuild', ['-version']).split('\n')
+    pattern = 'Build version '
+    for line in output:
+        if line.startswith(pattern):
+            return line[len(pattern):].strip()
+
+    print('Could not parse the Xcode build version from xcodebuild -version')
+    exit(1)
+
 
 class BuildEnvironmentVersions:
     def __init__(
@@ -194,7 +211,9 @@ class BuildEnvironment:
                     versions.bazel_version, actual_bazel_version, self.bazel_path))
                 exit(1)
 
+        self.xcode_developer_path = get_xcode_developer_path()
         actual_xcode_version = get_xcode_version()
+        actual_xcode_build_version = get_xcode_build_version()
         if actual_xcode_version != versions.xcode_version:
             if override_xcode_version:
                 print('Overriding the required Xcode version {} with {} as reported by \'xcode-select -p\''.format(
@@ -207,5 +226,13 @@ class BuildEnvironment:
 
         self.app_version = versions.app_version
         self.xcode_version = versions.xcode_version
+        self.xcode_build_version = actual_xcode_build_version
+        xcode_version_components = self.xcode_version.split('.')
+        if len(xcode_version_components) >= 3:
+            self.xcode_version_full = '{}.{}'.format(self.xcode_version, self.xcode_build_version)
+        elif len(xcode_version_components) == 2:
+            self.xcode_version_full = '{}.0.{}'.format(self.xcode_version, self.xcode_build_version)
+        else:
+            self.xcode_version_full = '{}.0.0.{}'.format(self.xcode_version, self.xcode_build_version)
         self.bazel_version = versions.bazel_version
         self.macos_version = versions.macos_version

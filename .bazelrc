@@ -11,6 +11,19 @@ build --host_crosstool_top=@local_config_apple_cc//:toolchain
 build --per_file_copt=".*\.m$","@-fno-objc-msgsend-selector-stubs"
 build --per_file_copt=".*\.mm$","@-fno-objc-msgsend-selector-stubs"
 
+# Xcode 26.4 surfaces additional warnings in older vendored code. Keep them as
+# warnings so local device builds can complete without patching every legacy file.
+build --objccopt=-Wno-error=enum-enum-conversion
+build --objccopt=-Wno-error=enum-float-conversion
+build --objccopt=-Wno-error=misleading-indentation
+build --objccopt=-Wno-error=thread-safety-analysis
+build --objccopt=-Wno-error=reorder-init-list
+build --cxxopt=-Wno-error=enum-enum-conversion
+build --cxxopt=-Wno-error=enum-float-conversion
+build --cxxopt=-Wno-error=misleading-indentation
+build --cxxopt=-Wno-error=thread-safety-analysis
+build --cxxopt=-Wno-error=reorder-init-list
+
 build --features=debug_prefix_map_pwd_is_dot
 build --features=swift.cacheable_swiftmodules
 build --features=swift.debug_prefix_map

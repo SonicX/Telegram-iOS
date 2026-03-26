@@ -11,6 +11,7 @@ import ChatControllerInteraction
 import ChatMessageItemCommon
 
 private let titleFont = UIFont.systemFont(ofSize: 13.0)
+public let chatUnreadAccessibilityIdentifier = "chat.unreadMessages"
 
 public class ChatUnreadItem: ListViewItem {
     public let index: MessageIndex
@@ -157,6 +158,7 @@ public class ChatUnreadItemNode: ListViewItemNode {
                     
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: backgroundSize)
                     strongSelf.activateArea.accessibilityLabel = string
+                    strongSelf.activateArea.accessibilityIdentifier = chatUnreadAccessibilityIdentifier
                     
                     strongSelf.backgroundNode.frame = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: backgroundSize)
                     

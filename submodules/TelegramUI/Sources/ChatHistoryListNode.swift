@@ -49,6 +49,12 @@ struct ChatTopVisibleMessageRange: Equatable {
 
 private let historyMessageCount: Int = 44
 
+private struct PendingMessageNavigationAlignment {
+    let messageId: MessageId
+    let directionHint: ListViewScrollToItemDirectionHint
+    var remainingPasses: Int
+}
+
 enum ChatHistoryViewScrollPosition {
     case unread(index: MessageIndex)
     case positionRestoration(index: MessageIndex, relativeOffset: CGFloat)
@@ -664,6 +670,8 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     
     private var appliedScrollToMessageId: MessageIndex? = nil
     private let scrollToMessageIdPromise = Promise<MessageIndex?>(nil)
+    private var pendingMessageNavigationAlignment: PendingMessageNavigationAlignment?
+    private var isApplyingPendingMessageNavigationAlignment = false
     
     private let currentlyPlayingMessageIdPromise = Promise<(MessageIndex, Bool)?>(nil)
     private var appliedPlayingMessageId: (MessageIndex, Bool)? = nil
@@ -3673,11 +3681,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     
     public func scrollToStartOfHistory() {
         self.beganDragging?()
+        self.pendingMessageNavigationAlignment = nil
         self.chatHistoryLocationValue = ChatHistoryLocationInput(content: .Scroll(subject: MessageHistoryScrollToSubject(index: .lowerBound, quote: nil), anchorIndex: .lowerBound, sourceIndex: .upperBound, scrollPosition: .bottom(0.0), animated: true, highlight: false, setupReply: false), id: self.takeNextHistoryLocationId())
     }
     
     public func scrollToEndOfHistory() {
         self.beganDragging?()
+        self.pendingMessageNavigationAlignment = nil
         switch self.visibleContentOffset() {
             case let .known(value) where value <= CGFloat.ulpOfOne:
                 break
@@ -3688,7 +3698,78 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     }
     
     public func scrollToMessage(from fromIndex: MessageIndex, to toIndex: MessageIndex, animated: Bool, highlight: Bool = true, quote: (string: String, offset: Int?)? = nil, todoTaskId: Int32? = nil, scrollPosition: ListViewScrollPosition = .center(.bottom), setupReply: Bool = false) {
+        if case .center = scrollPosition, quote == nil, todoTaskId == nil, !setupReply {
+            let directionHint: ListViewScrollToItemDirectionHint = toIndex >= fromIndex ? .Down : .Up
+            self.pendingMessageNavigationAlignment = PendingMessageNavigationAlignment(messageId: toIndex.id, directionHint: directionHint, remainingPasses: 2)
+        } else {
+            self.pendingMessageNavigationAlignment = nil
+        }
         self.chatHistoryLocationValue = ChatHistoryLocationInput(content: .Scroll(subject: MessageHistoryScrollToSubject(index: .message(toIndex), quote: quote.flatMap { quote in MessageHistoryScrollToSubject.Quote(string: quote.string, offset: quote.offset) }, todoTaskId: todoTaskId, setupReply: setupReply), anchorIndex: .message(toIndex), sourceIndex: .message(fromIndex), scrollPosition: scrollPosition, animated: animated, highlight: highlight, setupReply: setupReply), id: self.takeNextHistoryLocationId())
+    }
+
+    private func messageNavigationAlignmentTarget() -> (index: Int, itemNode: ChatMessageItemView)? {
+        guard let pendingMessageNavigationAlignment = self.pendingMessageNavigationAlignment else {
+            return nil
+        }
+        var target: (index: Int, itemNode: ChatMessageItemView)?
+        self.forEachItemNode { itemNode in
+            guard target == nil,
+                  let itemNode = itemNode as? ChatMessageItemView,
+                  let index = itemNode.index,
+                  itemNode.item?.content.firstMessage.id == pendingMessageNavigationAlignment.messageId else {
+                return
+            }
+            target = (index, itemNode)
+        }
+        return target
+    }
+
+    private func maybeApplyPendingMessageNavigationAlignment() {
+        guard !self.isApplyingPendingMessageNavigationAlignment,
+              var pendingMessageNavigationAlignment = self.pendingMessageNavigationAlignment else {
+            return
+        }
+        guard pendingMessageNavigationAlignment.remainingPasses > 0 else {
+            self.pendingMessageNavigationAlignment = nil
+            return
+        }
+        guard let target = self.messageNavigationAlignmentTarget() else {
+            return
+        }
+        
+        let visibleCenterY = self.insets.top + floor((self.visibleSize.height - self.insets.bottom - self.insets.top) * 0.5)
+        let anchorY = target.itemNode.navigationTopAnchorForScrolling()
+        let currentAnchorY = target.itemNode.apparentFrame.minY + anchorY
+        guard abs(currentAnchorY - visibleCenterY) > 1.0 else {
+            self.pendingMessageNavigationAlignment = nil
+            return
+        }
+        
+        pendingMessageNavigationAlignment.remainingPasses -= 1
+        self.pendingMessageNavigationAlignment = pendingMessageNavigationAlignment.remainingPasses > 0 ? pendingMessageNavigationAlignment : nil
+        
+        let additionalOffset = visibleCenterY - self.insets.top - target.itemNode.scrollPositioningInsets.top - anchorY
+        let scrollToItem = ListViewScrollToItem(
+            index: target.index,
+            position: .top(additionalOffset),
+            animated: false,
+            curve: .Default(duration: nil),
+            directionHint: pendingMessageNavigationAlignment.directionHint
+        )
+        
+        self.isApplyingPendingMessageNavigationAlignment = true
+        self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [], options: [.Synchronous, .LowLatency], scrollToItem: scrollToItem, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { [weak self] _ in
+            guard let self else {
+                return
+            }
+            self.isApplyingPendingMessageNavigationAlignment = false
+            if let target = self.messageNavigationAlignmentTarget() {
+                let updatedAnchorY = target.itemNode.apparentFrame.minY + target.itemNode.navigationTopAnchorForScrolling()
+                if abs(updatedAnchorY - visibleCenterY) <= 1.0 {
+                    self.pendingMessageNavigationAlignment = nil
+                }
+            }
+        })
     }
     
     public func anchorMessageInCurrentHistoryView() -> Message? {
@@ -4394,6 +4475,8 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                         itemNode.layer.animateScale(from: 0.94, to: 1.0, duration: 0.4, delay: delay, timingFunction: kCAMediaTimingFunctionSpring)
                     }
                 }
+                
+                strongSelf.maybeApplyPendingMessageNavigationAlignment()
                 
                 if let scrolledToIndex = transition.scrolledToIndex {
                     if let strongSelf = self {
@@ -5158,6 +5241,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     }
     
     func scrollToMessage(index: MessageIndex) {
+        self.pendingMessageNavigationAlignment = nil
         self.appliedScrollToMessageId = nil
         self.scrollToMessageIdPromise.set(.single(index))
     }

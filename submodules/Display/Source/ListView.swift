@@ -3226,19 +3226,23 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                             offset = (insets.top + additionalOffset + itemNode.scrollPositioningInsets.top) - itemNode.apparentFrame.minY
                         case let .center(overflow):
                             let contentAreaHeight = self.visibleSize.height - insets.bottom - insets.top
-                            if itemNode.apparentFrame.size.height <= contentAreaHeight + CGFloat.ulpOfOne {
-                                offset = insets.top + floor(((self.visibleSize.height - insets.bottom - insets.top) - itemNode.frame.size.height) / 2.0) - itemNode.apparentFrame.minY
-                            } else {
-                                switch overflow {
-                                case .top:
-                                    offset = insets.top - itemNode.apparentFrame.minY
-                                case .bottom:
-                                    offset = (self.visibleSize.height - insets.bottom) - itemNode.apparentFrame.maxY
-                                case let .custom(getOverflow):
-                                    let overflow = getOverflow(itemNode)
-                                    offset = (self.visibleSize.height - insets.bottom) - itemNode.apparentFrame.maxY + itemNode.insets.top
-                                    offset += overflow
-                                    offset -= floor((self.visibleSize.height - insets.bottom - insets.top) * 0.5)
+                            switch overflow {
+                            case let .custom(getOverflow):
+                                let anchorOffset = getOverflow(itemNode)
+                                offset = insets.top + floor(contentAreaHeight / 2.0) - itemNode.apparentFrame.minY - anchorOffset
+                            case .top, .bottom:
+                                if itemNode.apparentFrame.size.height <= contentAreaHeight + CGFloat.ulpOfOne {
+                                    offset = insets.top + floor(((self.visibleSize.height - insets.bottom - insets.top) - itemNode.frame.size.height) / 2.0) - itemNode.apparentFrame.minY
+                                } else {
+                                    switch overflow {
+                                    case .top:
+                                        offset = insets.top - itemNode.apparentFrame.minY
+                                    case .bottom:
+                                        offset = (self.visibleSize.height - insets.bottom) - itemNode.apparentFrame.maxY
+                                    case .custom:
+                                        assertionFailure()
+                                        offset = insets.top - itemNode.apparentFrame.minY
+                                    }
                                 }
                             }
                         case .visible:
@@ -5847,13 +5851,26 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             guard !elements.isEmpty else {
                 return
             }
-            let targetElement: UIAccessibilityElement
-            if let aroundIndex {
-                let clampedIndex = max(0, min(aroundIndex, elements.count - 1))
-                targetElement = elements[clampedIndex]
-            } else {
-                targetElement = elements[max(0, min(elements.count / 2, elements.count - 1))]
+            let candidateStableKeys = elements.map { element in
+                self.accessibilityDebugStableKey(
+                    from: (
+                        identifier: element.accessibilityIdentifier ?? "",
+                        label: element.accessibilityLabel ?? "",
+                        value: element.accessibilityValue ?? "",
+                        traits: UInt64(element.accessibilityTraits.rawValue),
+                        frame: element.accessibilityFrame,
+                        kind: "UIAccessibilityElement"
+                    )
+                )
             }
+            guard let targetIndex = resolvedAccessibilityRecoveryIndex(
+                preferredStableKey: self.accessibilityLastSystemFocusedSignature,
+                aroundIndex: aroundIndex,
+                candidateStableKeys: candidateStableKeys
+            ) else {
+                return
+            }
+            let targetElement = elements[targetIndex]
             self.accessibilityLastSystemFocusedSignature = self.accessibilityDebugStableKey(
                 from: (
                     identifier: targetElement.accessibilityIdentifier ?? "",
@@ -5869,7 +5886,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             } else {
                 self.accessibilityLastSystemFocusedSourceViewIdentifier = nil
             }
-            print("[VO-SWIPE-DEBUG] recover-focus reason=\(reason) targetIndex=\(aroundIndex.map(String.init) ?? "center")")
+            print("[VO-SWIPE-DEBUG] recover-focus reason=\(reason) targetIndex=\(targetIndex)")
             UIAccessibility.post(notification: .layoutChanged, argument: targetElement)
         }
     }
@@ -6211,6 +6228,87 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return result
     }
 
+    public func postAccessibilityFocusOnAppear(preferredIdentifier: String? = nil, retryCount: Int = 3) {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        guard let targetElement = self.accessibilityElement(matchingIdentifier: preferredIdentifier) ?? self.accessibilityElementClosestToVisibleCenter() else {
+            if retryCount > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                    self?.postAccessibilityFocusOnAppear(preferredIdentifier: preferredIdentifier, retryCount: retryCount - 1)
+                }
+            }
+            return
+        }
+        
+        self.accessibilityLastCenteredElementIdentifier = nil
+        UIAccessibility.post(notification: .layoutChanged, argument: targetElement)
+        
+        if let scrollStatus = self.currentAccessibilityScrollStatus() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                guard UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
+                UIAccessibility.post(notification: .announcement, argument: scrollStatus)
+            }
+        }
+    }
+    
+    private func currentAccessibilityScrollStatus() -> String? {
+        let (_, rangeIndices) = self.currentAccessibilityRangeIndices()
+        if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
+            if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
+                return accessibilityPageScrolledRangeString("\(absoluteInfo.first)", "\(absoluteInfo.last)", "\(absoluteInfo.total)")
+            } else {
+                return "Items \(absoluteInfo.first) to \(absoluteInfo.last) of \(absoluteInfo.total)"
+            }
+        }
+        
+        let (resolvedVisibleRange, _) = self.currentAccessibilityRangeIndices()
+        if self.accessibilityPageScrolledUsesVisibleRange, let resolvedVisibleRange {
+            if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
+                return accessibilityPageScrolledRangeString("\(resolvedVisibleRange.first + 1)", "\(resolvedVisibleRange.last + 1)", "\(self.items.count)")
+            } else {
+                let rangeFormat = Bundle.main.localizedString(forKey: "VoiceOver.ScrollStatusRange", value: "Items from %1$@ to %2$@ of %3$@", table: nil)
+                return String(format: rangeFormat, "\(resolvedVisibleRange.first + 1)", "\(resolvedVisibleRange.last + 1)", "\(self.items.count)")
+            }
+        }
+        
+        return nil
+    }
+    
+    private func currentAccessibilityRangeIndices() -> (resolvedVisibleRange: (first: Int, last: Int)?, rangeIndices: [Int]) {
+        let displayedVisibleRange = self.displayedItemRange.visibleRange
+        let viewBounds = CGRect(origin: CGPoint.zero, size: self.visibleSize)
+        let visibleNodeIndices = self.itemNodes
+            .filter { $0.frame.intersects(viewBounds) && $0.index != nil }
+            .compactMap(\.index)
+        let resolvedVisibleRange = resolvedAccessibilityVisibleRange(
+            displayedVisibleRange: displayedVisibleRange,
+            visibleNodeIndices: visibleNodeIndices
+        )
+        
+        if let resolvedVisibleRange {
+            return (resolvedVisibleRange, Array(resolvedVisibleRange.first...resolvedVisibleRange.last))
+        } else {
+            return (nil, visibleNodeIndices)
+        }
+    }
+    
+    private func accessibilityElement(matchingIdentifier identifier: String?) -> AnyObject? {
+        guard let identifier, let elements = self.customAccessibilityElements(), !elements.isEmpty else {
+            return nil
+        }
+        for element in elements {
+            if let accessibilityElement = element as? UIAccessibilityElement, accessibilityElement.accessibilityIdentifier == identifier {
+                return accessibilityElement
+            } else if let view = element as? UIView, view.accessibilityIdentifier == identifier {
+                return view
+            }
+        }
+        return nil
+    }
+    
     private func postAccessibilityCenterFocus(retryCount: Int) {
         guard let centerElement = self.accessibilityElementClosestToVisibleCenter() else {
             if retryCount > 0 {

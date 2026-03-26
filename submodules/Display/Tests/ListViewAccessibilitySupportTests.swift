@@ -40,4 +40,34 @@ final class ListViewAccessibilitySupportTests: XCTestCase {
         XCTAssertTrue(shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: true))
         XCTAssertFalse(shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: false))
     }
+    
+    func testResolvedRecoveryIndexPrefersMatchingStableKeyNearPreviousIndex() {
+        let index = resolvedAccessibilityRecoveryIndex(
+            preferredStableKey: "message-2",
+            aroundIndex: 3,
+            candidateStableKeys: ["message-0", "message-1", "message-2", "message-2", "message-4"]
+        )
+        
+        XCTAssertEqual(index, 3)
+    }
+    
+    func testResolvedRecoveryIndexFallsBackToAroundIndexWhenKeyMissing() {
+        let index = resolvedAccessibilityRecoveryIndex(
+            preferredStableKey: "missing",
+            aroundIndex: 4,
+            candidateStableKeys: ["message-0", "message-1", "message-2"]
+        )
+        
+        XCTAssertEqual(index, 2)
+    }
+    
+    func testResolvedRecoveryIndexFallsBackToCenterWhenNoHintsProvided() {
+        let index = resolvedAccessibilityRecoveryIndex(
+            preferredStableKey: nil,
+            aroundIndex: nil,
+            candidateStableKeys: ["message-0", "message-1", "message-2", "message-3", "message-4"]
+        )
+        
+        XCTAssertEqual(index, 2)
+    }
 }
