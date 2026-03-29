@@ -5478,6 +5478,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var accessibilityDirectionalElementPool: [ObjectIdentifier: [FocusTrackingAccessibilityElement]] = [:]
     private var accessibilityEdgeScrollPending = false
     private var accessibilityLastProgrammaticEdgeScrollTimestamp: CFTimeInterval = 0.0
+    private var accessibilityBoundaryAutoScrollTimestamp: CFTimeInterval = 0.0
 
     /// Returns (firstAbsoluteIndex, lastAbsoluteIndex, totalCount) for a given set of visible local item indices.
     public var accessibilityAbsoluteScrollInfo: (([Int]) -> (first: Int, last: Int, total: Int)?)?
@@ -5599,11 +5600,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
         let focusedAny = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey]
         if let focusedAny, !self.isAccessibilityObjectInsideCurrentListSequence(focusedAny) {
-            // If VoiceOver escaped to an external element (e.g. nav bar) right after list
-            // navigation, schedule a guarded containment check and recover only if the
-            // escape persists.
             self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
             return
+        }
+        if let focusedView = focusedAny as? UIView,
+           self.isAccessibilityObjectInsideListView(focusedView),
+           let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() {
+            let focusedScreenFrame = UIAccessibility.convertToScreenCoordinates(focusedView.bounds, in: focusedView)
+            if !focusedScreenFrame.isNull && !focusedScreenFrame.intersects(clipFrame) {
+                self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-offscreen")
+                return
+            }
         }
         guard let focusedAny, let focusedData = self.accessibilityDebugData(from: focusedAny) else {
             if let focusedAny {
@@ -5714,44 +5721,23 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             print("[VO-SWIPE-DEBUG] system-focus-step from=\(fromIndex) to=\(toIndex) count=\(elements.count)")
             print("[VO-SWIPE-DEBUG] system-visible-elements: \(rows.joined(separator: " || "))")
+            let atBoundary = (toIndex == 0 || toIndex == elements.count - 1)
+            if atBoundary {
+                let now = CACurrentMediaTime()
+                if now - self.accessibilityBoundaryAutoScrollTimestamp > 0.6, !self.accessibilityEdgeScrollPending {
+                    self.accessibilityBoundaryAutoScrollTimestamp = now
+                    self.accessibilityEdgeScrollPending = true
+                    let boundaryDirection = (toIndex == 0) ? -1 : 1
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.accessibilityEdgeScrollPending = false
+                        self.scrollForAccessibilityEdge(arrayDirection: boundaryDirection)
+                    }
+                }
+            }
         } else {
             let summary = self.accessibilityDebugSummary(data: focusedData)
             print("[VO-SWIPE-DEBUG] system-focus kind=\(focusedData.kind) match=\(matchKind) to=\(toIndex) summary=\(summary)")
-        }
-        // Auto-scroll when the focused element's screen frame approaches a visible edge
-        // in the direction of navigation. This prevents VoiceOver from exiting the
-        // container when the next elements are off-screen.
-        if let fromIndex, abs(toIndex - fromIndex) == 1 {
-            let direction = toIndex - fromIndex
-            let toFrame = elementData.first(where: { $0.index == toIndex })?.data.frame ?? .zero
-            let clippingFrame = self.accessibilityClippingFrameInScreenCoordinates()
-            let screenHeight = UIScreen.main.bounds.height
-            let clippingMinY = clippingFrame?.minY ?? 0.0
-            let clippingMaxY = clippingFrame?.maxY ?? screenHeight
-            let clippingHeight = max(1.0, clippingMaxY - clippingMinY)
-            let edgeBuffer = max(56.0, min(120.0, clippingHeight * 0.18))
-            
-            let nearEdge: Bool
-            if direction < 0 {
-                nearEdge = toFrame.maxY > clippingMaxY - edgeBuffer
-            } else {
-                nearEdge = toFrame.minY < clippingMinY + edgeBuffer
-            }
-            let needsScroll = nearEdge
-
-            if needsScroll && !self.accessibilityEdgeScrollPending {
-                self.accessibilityEdgeScrollPending = true
-                print("[VO-SCROLL] TRIGGER: toIndex=\(toIndex) count=\(elements.count) dir=\(direction) frame.y=\(toFrame.minY) maxY=\(toFrame.maxY) clip=(\(clippingMinY)-\(clippingMaxY)) nearEdge=\(nearEdge)")
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.accessibilityEdgeScrollPending = false
-                    self.scrollForAccessibilityEdge(arrayDirection: direction)
-                }
-            } else if needsScroll {
-                print("[VO-SCROLL] skip: toIndex=\(toIndex) dir=\(direction) (scroll pending)")
-            } else {
-                print("[VO-SCROLL] skip: toIndex=\(toIndex) count=\(elements.count) dir=\(direction) frame.y=\(toFrame.minY) nearEdge=\(nearEdge)")
-            }
         }
     }
 
