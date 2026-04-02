@@ -12,9 +12,6 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
 
     override public func accessibilityElementDidBecomeFocused() {
         super.accessibilityElementDidBecomeFocused()
-        let label = self.accessibilityLabel ?? ""
-        let identifier = self.accessibilityIdentifier ?? ""
-        print("[VO-SWIPE-DEBUG] focused-element snapshot=\(String(describing: directionalSnapshotId)) index=\(String(describing: directionalFocusIndex)) id='\(identifier)' label='\(label)'")
         if let snapshotId = directionalSnapshotId, let index = directionalFocusIndex {
             focused?(snapshotId, index)
         }
@@ -26,9 +23,6 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
 
     override public func accessibilityElementDidLoseFocus() {
         super.accessibilityElementDidLoseFocus()
-        let label = self.accessibilityLabel ?? ""
-        let identifier = self.accessibilityIdentifier ?? ""
-        print("[VO-SWIPE-DEBUG] lost-focus snapshot=\(String(describing: directionalSnapshotId)) index=\(String(describing: directionalFocusIndex)) id='\(identifier)' label='\(label)'")
         if let snapshotId = directionalSnapshotId, let index = directionalFocusIndex {
             focusLost?(snapshotId, index)
         }

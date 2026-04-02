@@ -6,6 +6,10 @@ import ObjCRuntimeUtils
 
 private let insertionAnimationDuration: Double = 0.4
 
+@inline(__always)
+private func voDebugLog(_ message: @autoclosure () -> String) {
+}
+
 private struct VisibleHeaderNodeId: Hashable {
     var id: ListViewItemNode.HeaderId
     var affinity: Int
@@ -88,7 +92,7 @@ public final class ListViewBackingView: UIView {
     }
     
     override public func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
-        print("[VO-DEBUG] ListViewBackingView.accessibilityScroll called, direction=\(direction.rawValue), target=\(self.target != nil)")
+        voDebugLog("[VO-DEBUG] ListViewBackingView.accessibilityScroll called, direction=\(direction.rawValue), target=\(self.target != nil)")
         return self.target?.accessibilityScroll(direction) ?? false
     }
 }
@@ -583,6 +587,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         if self.accessibilityNavigationOrder == .reversed {
             accessibilityElements.reverse()
         }
+        self.logAccessibilityArrayDiffIfNeeded(accessibilityElements)
         self.updateAccessibilityDirectionalElements(accessibilityElements)
         return accessibilityElements.isEmpty ? nil : accessibilityElements
     }
@@ -5475,6 +5480,15 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var accessibilityFocusContainmentCheckToken: Int = 0
     private var accessibilityLastInListFocusTimestamp: CFTimeInterval = 0.0
     private var accessibilityFocusLeftListFailureCount: Int = 0
+    private var accessibilityBoundaryRecenterInProgress = false
+    private var accessibilityLastBoundaryRecenterTimestamp: CFTimeInterval = 0.0
+    private var accessibilityIgnoreOffscreenUntil: CFTimeInterval = 0.0
+    private var accessibilityBoundaryAdvanceTimestamp: CFTimeInterval = 0.0
+    private var accessibilityBoundaryHitIndex: Int?
+    private var accessibilityBoundaryHitStreak: Int = 0
+    private var accessibilityBoundaryHitTimestamp: CFTimeInterval = 0.0
+    private var accessibilityLastLoggedArraySnapshot: [String] = []
+    private var accessibilityLastLoggedGlobalPosition: Int?
     private var accessibilityDirectionalElementPool: [ObjectIdentifier: [FocusTrackingAccessibilityElement]] = [:]
     private var accessibilityEdgeScrollPending = false
     private var accessibilityLastProgrammaticEdgeScrollTimestamp: CFTimeInterval = 0.0
@@ -5595,11 +5609,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         guard self.accessibilityDirectionalAnnouncement != nil else {
+            print("[VO-STATE] focus-handler-skip reason=no-directional-announcement")
             return
         }
 
         let focusedAny = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey]
+        if focusedAny == nil {
+            print("[VO-STATE] focus-handler-skip reason=nil-focused-element")
+            return
+        }
         if let focusedAny, !self.isAccessibilityObjectInsideCurrentListSequence(focusedAny) {
+            print("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
             self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
             return
         }
@@ -5608,13 +5628,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
            let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() {
             let focusedScreenFrame = UIAccessibility.convertToScreenCoordinates(focusedView.bounds, in: focusedView)
             if !focusedScreenFrame.isNull && !focusedScreenFrame.intersects(clipFrame) {
+                if CACurrentMediaTime() < self.accessibilityIgnoreOffscreenUntil || self.accessibilityBoundaryRecenterInProgress {
+                    print("[VO-STATE] focus-handler-skip reason=offscreen-ignored ttl=\(String(format: "%.0f", (self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()) * 1000))ms")
+                    return
+                }
                 self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-offscreen")
                 return
             }
         }
         guard let focusedAny, let focusedData = self.accessibilityDebugData(from: focusedAny) else {
             if let focusedAny {
-                print("[VO-SWIPE-DEBUG] system-focus unsupported-focused-type=\(type(of: focusedAny))")
+                voDebugLog("[VO-SWIPE-DEBUG] system-focus unsupported-focused-type=\(type(of: focusedAny))")
+            } else {
+                print("[VO-STATE] focus-handler-skip reason=nil-focused-after-checks")
             }
             return
         }
@@ -5622,6 +5648,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let elementsAny = self.customAccessibilityElements() ?? []
         let elements = elementsAny.compactMap { $0 as? UIAccessibilityElement }
         guard !elements.isEmpty else {
+            print("[VO-STATE] focus-handler-skip reason=empty-elements")
             return
         }
 
@@ -5632,6 +5659,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return (index, element, data)
         }
         guard !elementData.isEmpty else {
+            print("[VO-STATE] focus-handler-skip reason=empty-element-data visibleCount=\(elements.count)")
             return
         }
         let focusedSourceViewIdentifier: ObjectIdentifier?
@@ -5671,6 +5699,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
         guard let toIndex else {
+            print("[VO-STATE] focus-handler-skip reason=nil-toIndex match=\(matchKind) visibleCount=\(elements.count)")
             return
         }
         self.accessibilityLastSystemFocusedIndex = toIndex
@@ -5719,52 +5748,218 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     rows.append("[\(index) \(marker)] \(summary)")
                 }
             }
-            print("[VO-SWIPE-DEBUG] system-focus-step from=\(fromIndex) to=\(toIndex) count=\(elements.count)")
-            print("[VO-SWIPE-DEBUG] system-visible-elements: \(rows.joined(separator: " || "))")
-            let atBoundary = (toIndex == 0 || toIndex == elements.count - 1)
-            if atBoundary {
+            voDebugLog("[VO-SWIPE-DEBUG] system-focus-step from=\(fromIndex) to=\(toIndex) count=\(elements.count)")
+            voDebugLog("[VO-SWIPE-DEBUG] system-visible-elements: \(rows.joined(separator: " || "))")
+            let cursorDescription = elementData.first(where: { $0.index == toIndex })?.data.label ?? ""
+            self.logAccessibilitySwipeMetrics(
+                fromIndex: fromIndex,
+                toIndex: toIndex,
+                visibleElementsCount: elements.count,
+                cursorDescription: cursorDescription
+            )
+                    print("[VO-STATE] cursor-log-source=system-step from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
+            let nextForwardIndex: Int
+            if self.accessibilityNavigationOrder == .reversed {
+                nextForwardIndex = toIndex - 1
+            } else {
+                nextForwardIndex = toIndex + 1
+            }
+            let nextIsEdge = nextForwardIndex >= 0 && nextForwardIndex < elements.count &&
+                (nextForwardIndex == 0 || nextForwardIndex == elements.count - 1)
+            let forwardEdge = self.accessibilityNavigationOrder == .reversed ? 0 : elements.count - 1
+            let atEdge = (toIndex == forwardEdge)
+            if nextIsEdge || atEdge {
+                let edgeIndex = atEdge ? toIndex : nextForwardIndex
                 let now = CACurrentMediaTime()
-                if now - self.accessibilityBoundaryAutoScrollTimestamp > 0.6, !self.accessibilityEdgeScrollPending {
-                    self.accessibilityBoundaryAutoScrollTimestamp = now
-                    self.accessibilityEdgeScrollPending = true
-                    let boundaryDirection = (toIndex == 0) ? -1 : 1
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.accessibilityEdgeScrollPending = false
-                        self.scrollForAccessibilityEdge(arrayDirection: boundaryDirection)
-                    }
+                if self.accessibilityBoundaryHitIndex == edgeIndex, now - self.accessibilityBoundaryHitTimestamp < 0.9 {
+                    self.accessibilityBoundaryHitStreak += 1
+                } else {
+                    self.accessibilityBoundaryHitIndex = edgeIndex
+                    self.accessibilityBoundaryHitStreak = 1
                 }
+                self.accessibilityBoundaryHitTimestamp = now
+                var visibleHeightForBoundary: CGFloat = .greatestFiniteMagnitude
+                if let edgeItem = elementData.first(where: { $0.index == edgeIndex }),
+                   let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() {
+                    let visibleHeight = edgeItem.data.frame.intersection(clipFrame).height
+                    visibleHeightForBoundary = visibleHeight
+                }
+                print("[VO-STATE] boundary-page-scroll step=1-detected toIndex=\(toIndex) edgeIndex=\(edgeIndex) atEdge=\(atEdge) edgeVisH=\(Int(visibleHeightForBoundary.isFinite ? visibleHeightForBoundary : -1)) visibleCount=\(elements.count) globalPos=\(self.accessibilityLastLoggedGlobalPosition ?? -1)")
+                let _ = self.advanceAtBoundaryIfNeeded(toIndex: edgeIndex, visibleHeight: visibleHeightForBoundary, visibleCount: elements.count)
+            } else {
+                self.accessibilityBoundaryHitIndex = nil
+                self.accessibilityBoundaryHitStreak = 0
             }
         } else {
             let summary = self.accessibilityDebugSummary(data: focusedData)
-            print("[VO-SWIPE-DEBUG] system-focus kind=\(focusedData.kind) match=\(matchKind) to=\(toIndex) summary=\(summary)")
+            voDebugLog("[VO-SWIPE-DEBUG] system-focus kind=\(focusedData.kind) match=\(matchKind) to=\(toIndex) summary=\(summary)")
+            if let fromIndex, fromIndex == toIndex {
+                print("[VO-STATE] cursor-log-source=system-nonstep-skipped-same-index from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
+                return
+            }
+            let cursorDescription = elementData.first(where: { $0.index == toIndex })?.data.label ?? ""
+            self.logAccessibilitySwipeMetrics(
+                fromIndex: fromIndex ?? toIndex,
+                toIndex: toIndex,
+                visibleElementsCount: elements.count,
+                cursorDescription: cursorDescription
+            )
+            print("[VO-STATE] cursor-log-source=system-nonstep from=\(String(describing: fromIndex)) to=\(toIndex) visibleCount=\(elements.count)")
         }
     }
 
-    private func scrollForAccessibilityEdge(arrayDirection: Int) {
-        var avgHeight: CGFloat = 76.0
-        var nodeCount: CGFloat = 0.0
-        var totalHeight: CGFloat = 0.0
-        self.forEachItemNode { node in
-            totalHeight += node.frame.height
-            nodeCount += 1.0
-        }
-        if nodeCount > 0 {
-            avgHeight = totalHeight / nodeCount
-        }
-        
-        let direction: ListViewScrollDirection
-        if self.rotated {
-            direction = arrayDirection < 0 ? .up : .down
+    private func logAccessibilitySwipeMetrics(fromIndex: Int, toIndex: Int, visibleElementsCount: Int, cursorDescription: String) {
+        let logicalPosition: Int
+        if self.accessibilityNavigationOrder == .reversed {
+            logicalPosition = max(0, visibleElementsCount - toIndex - 1)
         } else {
-            direction = arrayDirection < 0 ? .down : .up
+            logicalPosition = max(0, toIndex)
         }
-        
-        let scrollAmount = avgHeight * 1.2
-        let didScroll = self.scrollWithDirection(direction, distance: scrollAmount, centerVoiceOverFocus: false, postScrollStatus: false)
-        if didScroll {
-            self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
+
+        let (resolvedVisibleRange, rangeIndices) = self.currentAccessibilityRangeIndices()
+        let totalChats: Int
+        if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
+            totalChats = absoluteInfo.total
+        } else {
+            totalChats = self.items.count
         }
+
+        var behind = logicalPosition
+        if let resolvedVisibleRange {
+            let globalPosition = max(0, resolvedVisibleRange.first + logicalPosition)
+            behind = min(max(0, totalChats - 1), globalPosition)
+        }
+        let ahead = max(0, totalChats - behind - 1)
+
+        var sanitized = cursorDescription.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+        if sanitized.count > 120 {
+            sanitized = String(sanitized.prefix(120)) + "..."
+        }
+        self.accessibilityLastLoggedGlobalPosition = behind
+        print("[VO-CURSOR] position=\(behind) behind=\(behind) ahead=\(ahead) total=\(totalChats) cursor='\(sanitized)'")
+    }
+
+    private func logAccessibilityArrayDiffIfNeeded(_ elements: [Any]) {
+        let snapshot: [String] = elements.compactMap { any in
+            guard let element = any as? UIAccessibilityElement else {
+                return nil
+            }
+            let id = element.accessibilityIdentifier ?? ""
+            let label = (element.accessibilityLabel ?? "").replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+            let value = (element.accessibilityValue ?? "").replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+            return "\(id)|\(label)|\(value)"
+        }
+        guard snapshot != self.accessibilityLastLoggedArraySnapshot else {
+            return
+        }
+
+        let oldSet = Set(self.accessibilityLastLoggedArraySnapshot)
+        let newSet = Set(snapshot)
+        let addedLabels = Array(newSet.subtracting(oldSet)).prefix(3).map { value -> String in
+            let parts = value.split(separator: "|")
+            if parts.count > 1 {
+                return String(parts[1].prefix(40))
+            }
+            return String(value.prefix(40))
+        }
+        let removedLabels = Array(oldSet.subtracting(newSet)).prefix(3).map { value -> String in
+            let parts = value.split(separator: "|")
+            if parts.count > 1 {
+                return String(parts[1].prefix(40))
+            }
+            return String(value.prefix(40))
+        }
+
+        let (_, rangeIndices) = self.currentAccessibilityRangeIndices()
+        let totalChats = self.accessibilityAbsoluteScrollInfo?(rangeIndices)?.total ?? self.items.count
+        let uiElements = elements.compactMap { $0 as? UIAccessibilityElement }
+        let oldCount = self.accessibilityLastLoggedArraySnapshot.count
+        print("[VO-STATE] array-changed old=\(oldCount) new=\(snapshot.count) total=\(totalChats)")
+        print("[VO-ARRAY] changed old=\(oldCount) new=\(snapshot.count) totalChats=\(totalChats) added=\(addedLabels) removed=\(removedLabels)")
+        self.accessibilityLastLoggedArraySnapshot = snapshot
+        self.logCursorAfterArrayChangeIfNeeded(totalChats: totalChats, oldCount: oldCount, newCount: snapshot.count, elements: uiElements)
+    }
+
+    private func logCursorAfterArrayChangeIfNeeded(totalChats: Int, oldCount: Int, newCount: Int, elements: [UIAccessibilityElement]) {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        guard !elements.isEmpty else {
+            return
+        }
+        if let focusedObject = UIAccessibility.focusedElement(using: nil),
+           self.isAccessibilityObjectInsideCurrentListSequence(focusedObject),
+           let focusedData = self.accessibilityDebugData(from: focusedObject) {
+            let elementData: [(index: Int, data: (identifier: String, label: String, value: String, traits: UInt64, frame: CGRect, kind: String))] = elements.enumerated().compactMap { index, element in
+                guard let data = self.accessibilityDebugData(from: element) else {
+                    return nil
+                }
+                return (index, data)
+            }
+            if !elementData.isEmpty {
+                let focusedStableKey = self.accessibilityDebugStableKey(from: focusedData)
+                let toIndex: Int?
+                if let exact = elementData.first(where: { self.accessibilityDebugStableKey(from: $0.data) == focusedStableKey }) {
+                    toIndex = exact.index
+                } else {
+                    toIndex = elementData.min(by: { self.accessibilityDebugFrameDistance($0.data.frame, focusedData.frame) < self.accessibilityDebugFrameDistance($1.data.frame, focusedData.frame) })?.index
+                }
+                if let toIndex {
+                    let cursorDescription = elementData.first(where: { $0.index == toIndex })?.data.label ?? ""
+                    self.logAccessibilitySwipeMetrics(
+                        fromIndex: toIndex,
+                        toIndex: toIndex,
+                        visibleElementsCount: elements.count,
+                        cursorDescription: cursorDescription
+                    )
+                    print("[VO-STATE] cursor-log-source=array-system-focus to=\(toIndex) visibleCount=\(elements.count)")
+                }
+            }
+        }
+    }
+
+    private func advanceAtBoundaryIfNeeded(toIndex: Int, visibleHeight: CGFloat, visibleCount: Int) -> Bool {
+        let now = CACurrentMediaTime()
+        // #region agent log
+        print("[AGENT-DBG][H4] boundary-check toIndex=\(toIndex) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) hitStreak=\(self.accessibilityBoundaryHitStreak)")
+        print("[VO-STATE] boundary-check toIndex=\(toIndex) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) hitStreak=\(self.accessibilityBoundaryHitStreak)")
+        // #endregion
+        let cooldownOk = now - self.accessibilityBoundaryAdvanceTimestamp > 0.8
+        let pendingOk = !self.accessibilityEdgeScrollPending
+        let countOk = visibleCount >= 4
+        let streakOk = self.accessibilityBoundaryHitStreak >= 1
+        if !(cooldownOk && pendingOk && countOk && streakOk) {
+            print("[VO-STATE] boundary-skip cooldownOk=\(cooldownOk) pendingOk=\(pendingOk) countOk=\(countOk) streakOk=\(streakOk)")
+            return false
+        }
+        self.accessibilityBoundaryAdvanceTimestamp = now
+        let triggerStreak = self.accessibilityBoundaryHitStreak
+        self.accessibilityBoundaryHitStreak = 0
+        self.accessibilityIgnoreOffscreenUntil = now + 0.35
+        self.accessibilityEdgeScrollPending = true
+        let boundaryDirection = (toIndex == 0) ? -1 : 1
+        print("[VO-STATE] boundary-page-scroll step=2-scroll-triggered edgeIndex=\(toIndex) direction=\(boundaryDirection) streak=\(triggerStreak)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.accessibilityEdgeScrollPending = false
+            self.scrollForAccessibilityEdge(arrayDirection: boundaryDirection)
+        }
+        voDebugLog("[VO-BOUNDARY-DEBUG] boundary-advance-trigger direction=\(boundaryDirection) visibleHeight=\(Int(visibleHeight.rounded())) streak=\(triggerStreak)")
+        return true
+    }
+
+    private func scrollForAccessibilityEdge(arrayDirection: Int) {
+        let scrollDirection: ListViewScrollDirection
+        if arrayDirection < 0 {
+            scrollDirection = self.rotated ? .up : .down
+        } else {
+            scrollDirection = self.rotated ? .down : .up
+        }
+        let visibleArea = self.visibleSize.height - self.insets.top - self.insets.bottom
+        let distance = floor(visibleArea * 0.3)
+        print("[VO-STATE] boundary-page-scroll silent-scroll direction=\(scrollDirection) distance=\(Int(distance)) visibleArea=\(Int(visibleArea)) arrayDirection=\(arrayDirection)")
+        _ = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: false, postScrollStatus: false)
+        self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
     }
 
     private func isAccessibilityObjectInsideListView(_ object: Any) -> Bool {
@@ -5872,7 +6067,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             } else {
                 self.accessibilityLastSystemFocusedSourceViewIdentifier = nil
             }
-            print("[VO-SWIPE-DEBUG] recover-focus reason=\(reason) targetIndex=\(targetIndex)")
+            voDebugLog("[VO-SWIPE-DEBUG] recover-focus reason=\(reason) targetIndex=\(targetIndex)")
             UIAccessibility.post(notification: .layoutChanged, argument: targetElement)
         }
     }
@@ -5882,6 +6077,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         guard self.accessibilityDirectionalAnnouncement != nil else {
+            return
+        }
+        if self.accessibilityBoundaryRecenterInProgress || CACurrentMediaTime() < self.accessibilityIgnoreOffscreenUntil {
             return
         }
         
@@ -5902,13 +6100,13 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 return
             }
             
-            if self.isAccessibilityObjectInsideCurrentListSequence(focusedObject) {
+            if self.isAccessibilityObjectInsideCurrentListSequence(focusedObject) && self.isAccessibilityObjectVisibleInsideCurrentListSequence(focusedObject) {
                 self.accessibilityFocusLeftListFailureCount = 0
                 return
             }
             // Right after our own edge scroll, give VoiceOver a short window
             // to land on the next row before attempting recovery.
-            if CACurrentMediaTime() - self.accessibilityLastProgrammaticEdgeScrollTimestamp < 0.7 {
+            if CACurrentMediaTime() - self.accessibilityLastProgrammaticEdgeScrollTimestamp < 0.15 {
                 self.accessibilityFocusLeftListFailureCount = 0
                 return
             }
@@ -5920,16 +6118,30 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 self.accessibilityFocusLeftListFailureCount = 0
                 return
             }
-            
-            self.accessibilityFocusLeftListFailureCount += 1
-            if self.accessibilityFocusLeftListFailureCount < 2 {
-                self.scheduleAccessibilityFocusContainmentCheck(reason: reason + "-confirm")
-                return
-            }
-            
             self.accessibilityFocusLeftListFailureCount = 0
+            print("[VO-STATE] recover-focus-triggered reason=\(reason) lastFocusedIndex=\(String(describing: self.accessibilityLastSystemFocusedIndex))")
             self.recoverAccessibilityFocusToList(aroundIndex: self.accessibilityLastSystemFocusedIndex, reason: reason)
         }
+    }
+
+    private func isAccessibilityObjectVisibleInsideCurrentListSequence(_ object: Any) -> Bool {
+        guard let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() else {
+            return true
+        }
+        if let data = self.accessibilityDebugData(from: object) {
+            if data.frame.isNull {
+                return true
+            }
+            return data.frame.intersects(clipFrame)
+        }
+        if let view = object as? UIView {
+            let frame = UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+            if frame.isNull {
+                return true
+            }
+            return frame.intersects(clipFrame)
+        }
+        return true
     }
 
     public func reuseOrCreateDirectionalElement(sourceView: UIView, childOrder: Int) -> FocusTrackingAccessibilityElement {
@@ -6005,7 +6217,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         guard let elements = self.customAccessibilityElements(), !elements.isEmpty else {
-            print("[VO-SWIPE-DEBUG] snapshot=\(snapshotId) from=\(fromDirectionalIndex) to=\(toDirectionalIndex) elements=0")
+            voDebugLog("[VO-SWIPE-DEBUG] snapshot=\(snapshotId) from=\(fromDirectionalIndex) to=\(toDirectionalIndex) elements=0")
             return
         }
 
@@ -6043,8 +6255,8 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
 
-        print("[VO-SWIPE-DEBUG] one-finger-step snapshot=\(snapshotId) from=\(fromDirectionalIndex) to=\(toDirectionalIndex) count=\(elements.count)")
-        print("[VO-SWIPE-DEBUG] visible-elements: \(rows.joined(separator: " || "))")
+        voDebugLog("[VO-SWIPE-DEBUG] one-finger-step snapshot=\(snapshotId) from=\(fromDirectionalIndex) to=\(toDirectionalIndex) count=\(elements.count)")
+        voDebugLog("[VO-SWIPE-DEBUG] visible-elements: \(rows.joined(separator: " || "))")
     }
 
     private func interruptAccessibilitySpeechIfNeeded() {
@@ -6058,31 +6270,31 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let initialOffset = self.scroller.contentOffset
         let initialMaxOffset = max(self.scroller.contentInset.top, self.scroller.contentSize.height - self.scroller.frame.height)
         let initialProgress: CGFloat = initialMaxOffset > self.scroller.contentInset.top ? ((initialOffset.y - self.scroller.contentInset.top) / (initialMaxOffset - self.scroller.contentInset.top)) : 1.0
-        print("[VO-DEBUG] scrollWithDirection: direction=\(direction), distance=\(distance), initialOffset=\(initialOffset), contentSize=\(self.scroller.contentSize), frame=\(self.scroller.frame), contentInset=\(self.scroller.contentInset)")
-        print("[VO-DEBUG] scrollPosition before: offsetY=\(initialOffset.y), maxOffsetY=\(initialMaxOffset), progress=\(Int((max(0.0, min(1.0, initialProgress)) * 100.0).rounded()))%")
+        voDebugLog("[VO-DEBUG] scrollWithDirection: direction=\(direction), distance=\(distance), initialOffset=\(initialOffset), contentSize=\(self.scroller.contentSize), frame=\(self.scroller.frame), contentInset=\(self.scroller.contentInset)")
+        voDebugLog("[VO-DEBUG] scrollPosition before: offsetY=\(initialOffset.y), maxOffsetY=\(initialMaxOffset), progress=\(Int((max(0.0, min(1.0, initialProgress)) * 100.0).rounded()))%")
         switch direction {
             case .up:
                 var contentOffset = initialOffset
                 contentOffset.y -= distance
                 contentOffset.y = max(self.scroller.contentInset.top, contentOffset.y)
-                print("[VO-DEBUG] scrollWithDirection UP: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y < initialOffset.y)")
+                voDebugLog("[VO-DEBUG] scrollWithDirection UP: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y < initialOffset.y)")
                 if contentOffset.y < initialOffset.y {
                     self.scroller.setContentOffset(contentOffset, animated: false)
                     self.updateScrollViewDidScroll(self.scroller, synchronous: true)
                 } else {
-                    print("[VO-DEBUG] scrollWithDirection UP: returning false (already at top)")
+                    voDebugLog("[VO-DEBUG] scrollWithDirection UP: returning false (already at top)")
                     return false
                 }
             case .down:
                 var contentOffset = initialOffset
                 contentOffset.y += distance
                 contentOffset.y = max(self.scroller.contentInset.top, min(contentOffset.y, self.scroller.contentSize.height - self.scroller.frame.height))
-                print("[VO-DEBUG] scrollWithDirection DOWN: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y > initialOffset.y)")
+                voDebugLog("[VO-DEBUG] scrollWithDirection DOWN: newOffset=\(contentOffset.y), willScroll=\(contentOffset.y > initialOffset.y)")
                 if contentOffset.y > initialOffset.y {
                     self.scroller.setContentOffset(contentOffset, animated: false)
                     self.updateScrollViewDidScroll(self.scroller, synchronous: true)
                 } else {
-                    print("[VO-DEBUG] scrollWithDirection DOWN: returning false (already at bottom)")
+                    voDebugLog("[VO-DEBUG] scrollWithDirection DOWN: returning false (already at bottom)")
                     return false
                 }
         }
@@ -6106,18 +6318,18 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 rangeIndices = visibleNodeIndices
             }
             
-            print("[VO-DEBUG] deferred(0.15s): displayedRange=\(String(describing: displayedVisibleRange)), resolvedRange=\(String(describing: resolvedVisibleRange)), rangeIndices=\(rangeIndices), itemsCount=\(self.items.count)")
+            voDebugLog("[VO-DEBUG] deferred(0.15s): displayedRange=\(String(describing: displayedVisibleRange)), resolvedRange=\(String(describing: resolvedVisibleRange)), rangeIndices=\(rangeIndices), itemsCount=\(self.items.count)")
             let currentOffset = self.scroller.contentOffset
             let currentMaxOffset = max(self.scroller.contentInset.top, self.scroller.contentSize.height - self.scroller.frame.height)
             let currentProgress: CGFloat = currentMaxOffset > self.scroller.contentInset.top ? ((currentOffset.y - self.scroller.contentInset.top) / (currentMaxOffset - self.scroller.contentInset.top)) : 1.0
-            print("[VO-DEBUG] scrollPosition after: offsetY=\(currentOffset.y), maxOffsetY=\(currentMaxOffset), progress=\(Int((max(0.0, min(1.0, currentProgress)) * 100.0).rounded()))%")
+            voDebugLog("[VO-DEBUG] scrollPosition after: offsetY=\(currentOffset.y), maxOffsetY=\(currentMaxOffset), progress=\(Int((max(0.0, min(1.0, currentProgress)) * 100.0).rounded()))%")
 
             if let resolvedVisibleRange {
                 let localFirst = resolvedVisibleRange.first + 1
                 let localLast = resolvedVisibleRange.last + 1
                 let localCount = max(0, localLast - localFirst + 1)
                 let localCoverage: Double = self.items.count > 0 ? (Double(localCount) / Double(self.items.count)) * 100.0 : 0.0
-                print("[VO-DEBUG] localRange metrics: first=\(localFirst), last=\(localLast), count=\(localCount), totalItems=\(self.items.count), coverage=\(String(format: "%.1f", localCoverage))%")
+                voDebugLog("[VO-DEBUG] localRange metrics: first=\(localFirst), last=\(localLast), count=\(localCount), totalItems=\(self.items.count), coverage=\(String(format: "%.1f", localCoverage))%")
             }
 
             if let resolvedVisibleRange {
@@ -6132,10 +6344,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     let regressedUp = direction == .up && !isAtTopBoundary && resolvedVisibleRange.first > previousRange.firstIndex
                     if regressedDown || regressedUp {
                         if hasNoRangeChange {
-                            print("[VO-DEBUG] accessibility auto-advance skipped: no range change")
+                            voDebugLog("[VO-DEBUG] accessibility auto-advance skipped: no range change")
                         }
                         self.accessibilityAutoAdvanceInProgress = true
-                        print("[VO-DEBUG] accessibility auto-advance: detected range regression, direction=\(direction), previous=\(previousRange), current=\(resolvedVisibleRange)")
+                        voDebugLog("[VO-DEBUG] accessibility auto-advance: detected range regression, direction=\(direction), previous=\(previousRange), current=\(resolvedVisibleRange)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                             guard let self else { return }
                             _ = self.scrollWithDirection(direction, distance: distance, centerVoiceOverFocus: false)
@@ -6153,11 +6365,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             
             let scrollStatus: String?
             if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
-                print("[VO-DEBUG] absoluteInfo: first=\(absoluteInfo.first), last=\(absoluteInfo.last), total=\(absoluteInfo.total)")
+                voDebugLog("[VO-DEBUG] absoluteInfo: first=\(absoluteInfo.first), last=\(absoluteInfo.last), total=\(absoluteInfo.total)")
                 let absoluteCount = max(0, absoluteInfo.last - absoluteInfo.first + 1)
                 let absoluteCoverage: Double = absoluteInfo.total > 0 ? (Double(absoluteCount) / Double(absoluteInfo.total)) * 100.0 : 0.0
                 let absoluteTailProgress: Double = absoluteInfo.total > 0 ? (Double(absoluteInfo.last) / Double(absoluteInfo.total)) * 100.0 : 0.0
-                print("[VO-DEBUG] absoluteRange metrics: first=\(absoluteInfo.first), last=\(absoluteInfo.last), count=\(absoluteCount), total=\(absoluteInfo.total), coverage=\(String(format: "%.1f", absoluteCoverage))%, tailProgress=\(String(format: "%.1f", absoluteTailProgress))%")
+                voDebugLog("[VO-DEBUG] absoluteRange metrics: first=\(absoluteInfo.first), last=\(absoluteInfo.last), count=\(absoluteCount), total=\(absoluteInfo.total), coverage=\(String(format: "%.1f", absoluteCoverage))%, tailProgress=\(String(format: "%.1f", absoluteTailProgress))%")
                 if let accessibilityPageScrolledRangeString = self.accessibilityPageScrolledRangeString {
                     scrollStatus = accessibilityPageScrolledRangeString("\(absoluteInfo.first)", "\(absoluteInfo.last)", "\(absoluteInfo.total)")
                 } else {
@@ -6174,22 +6386,22 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 scrollStatus = nil
             }
             
-            print("[VO-DEBUG] scrollStatus=\(scrollStatus ?? "nil")")
+            voDebugLog("[VO-DEBUG] scrollStatus=\(scrollStatus ?? "nil")")
             
             if postScrollStatus {
                 if let scrollStatus {
                     if self.accessibilityStatusAnnouncementOnScroll {
-                        print("[VO-DEBUG] posting .announcement: \(scrollStatus)")
+                        voDebugLog("[VO-DEBUG] posting .announcement: \(scrollStatus)")
                         UIAccessibility.post(notification: UIAccessibility.Notification.announcement, argument: scrollStatus)
                     } else {
-                        print("[VO-DEBUG] posting .pageScrolled: \(scrollStatus)")
+                        voDebugLog("[VO-DEBUG] posting .pageScrolled: \(scrollStatus)")
                         UIAccessibility.post(notification: UIAccessibility.Notification.pageScrolled, argument: scrollStatus)
                     }
                 } else {
-                    print("[VO-DEBUG] scrollStatus is nil, nothing posted!")
+                    voDebugLog("[VO-DEBUG] scrollStatus is nil, nothing posted!")
                 }
             } else {
-                print("[VO-DEBUG] scrollStatus suppressed for programmatic edge scroll")
+                voDebugLog("[VO-DEBUG] scrollStatus suppressed for programmatic edge scroll")
             }
 
             if centerVoiceOverFocus, UIAccessibility.isVoiceOverRunning {
@@ -6208,9 +6420,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             default:
                 scrollDirection = self.rotated ? .down : .up
         }
-        print("[VO-DEBUG] accessibilityScroll called, direction=\(direction.rawValue), rotated=\(self.rotated), scrollDirection=\(scrollDirection), distance=\(distance)")
+        voDebugLog("[VO-DEBUG] accessibilityScroll called, direction=\(direction.rawValue), rotated=\(self.rotated), scrollDirection=\(scrollDirection), distance=\(distance)")
         let result = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: true)
-        print("[VO-DEBUG] accessibilityScroll result=\(result)")
+        voDebugLog("[VO-DEBUG] accessibilityScroll result=\(result)")
         return result
     }
 
@@ -6298,23 +6510,23 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private func postAccessibilityCenterFocus(retryCount: Int) {
         guard let centerElement = self.accessibilityElementClosestToVisibleCenter() else {
             if retryCount > 0 {
-                print("[VO-DEBUG] center-focus: no center element found, retry=\(retryCount)")
+                voDebugLog("[VO-DEBUG] center-focus: no center element found, retry=\(retryCount)")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
                     self?.postAccessibilityCenterFocus(retryCount: retryCount - 1)
                 }
             } else {
-                print("[VO-DEBUG] center-focus: no center element found")
+                voDebugLog("[VO-DEBUG] center-focus: no center element found")
             }
             return
         }
 
         let elementIdentifier = ObjectIdentifier(centerElement)
         if self.accessibilityLastCenteredElementIdentifier == elementIdentifier {
-            print("[VO-DEBUG] center-focus: skipping duplicate center target")
+            voDebugLog("[VO-DEBUG] center-focus: skipping duplicate center target")
             return
         }
         self.accessibilityLastCenteredElementIdentifier = elementIdentifier
-        print("[VO-DEBUG] center-focus: posting .layoutChanged to center element")
+        voDebugLog("[VO-DEBUG] center-focus: posting .layoutChanged to center element")
         UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: centerElement)
     }
 
