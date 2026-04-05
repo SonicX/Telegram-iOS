@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "command": "/opt/homebrew/bin/xcodebuildmcp",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "XCODEBUILDMCP_LOG_LEVEL": "info"
+      }
+    }
+  }
+}

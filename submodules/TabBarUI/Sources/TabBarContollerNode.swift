@@ -8,6 +8,21 @@ import ComponentFlow
 import ComponentDisplayAdapters
 import TabBarComponent
 
+private func findAccessibilityElement(in view: UIView, containing screenPoint: CGPoint) -> UIView? {
+    for subview in view.subviews.reversed() {
+        if subview.isHidden || subview.alpha < 0.01 {
+            continue
+        }
+        if subview.isAccessibilityElement, subview.accessibilityFrame.contains(screenPoint) {
+            return subview
+        }
+        if let result = findAccessibilityElement(in: subview, containing: screenPoint) {
+            return result
+        }
+    }
+    return nil
+}
+
 private func prioritizedAccessibilityHitTest(in view: UIView, point: CGPoint, event: UIEvent?) -> Any? {
     guard !view.isHidden, view.alpha > 0.01 else {
         return nil
@@ -35,6 +50,15 @@ private func prioritizedAccessibilityHitTest(in view: UIView, point: CGPoint, ev
         if view.isAccessibilityElement {
             return view
         }
+    }
+    // Fallback: walk the entire subview tree ignoring isUserInteractionEnabled,
+    // matching accessibility elements by their screen-coordinate accessibilityFrame.
+    // This is needed because LiquidLensView's containerView has
+    // isUserInteractionEnabled = false, which prevents standard hitTest from
+    // reaching the tab item views on compact devices (e.g. iPhone SE) where
+    // content accessibility frames overlap with the tab bar area.
+    if let result = findAccessibilityElement(in: view, containing: point) {
+        return result
     }
     return nil
 }
