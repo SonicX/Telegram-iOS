@@ -124,7 +124,7 @@ public final class PeerInfoChatListPaneNode: ASDisplayNode, PeerInfoPaneNode, AS
     private var presentationData: PresentationData
     private var presentationDataDisposable: Disposable?
     
-    private let chatListNode: ChatListNode
+    private let chatListNode: ChatListDisplayNode
     
     private var emptyShimmerEffectNode: ChatListShimmerNode?
     private var shimmerNodeOffset: CGFloat = 0.0
@@ -149,7 +149,7 @@ public final class PeerInfoChatListPaneNode: ASDisplayNode, PeerInfoPaneNode, AS
         
         self.coveringView = UIView()
         
-        self.chatListNode = ChatListNode(
+        self.chatListNode = ChatListDisplayNode(
             context: self.context,
             location: .savedMessagesChats(peerId: context.account.peerId),
             chatListFilter: nil,

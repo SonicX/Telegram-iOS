@@ -230,14 +230,17 @@ public final class PresentationContext {
                         }
                         (controller as? UIViewController)?.setIgnoreAppearanceMethodInvocations(false)
                         strongSelf.updateViews()
-                        controller.viewWillAppear(false)
-                        if let controller = controller as? PresentableController {
-                            controller.viewDidAppear(completion: { [weak self] in
-                                self?.notifyAccessibilityScreenChanged()
-                            })
-                        } else {
-                            controller.viewDidAppear(false)
-                            strongSelf.notifyAccessibilityScreenChanged()
+                        if let uiController = controller as? UIViewController {
+                            uiController.beginAppearanceTransition(true, animated: false)
+                            if let presentable = controller as? PresentableController {
+                                presentable.viewDidAppear(completion: { [weak self] in
+                                    uiController.endAppearanceTransition()
+                                    self?.notifyAccessibilityScreenChanged()
+                                })
+                            } else {
+                                uiController.endAppearanceTransition()
+                                strongSelf.notifyAccessibilityScreenChanged()
+                            }
                         }
                     }
                 }
@@ -255,9 +258,13 @@ public final class PresentationContext {
     private func dismiss(_ controller: ContainableController) {
         if let index = self.controllers.firstIndex(where: { $0.0 === controller }) {
             self.controllers.remove(at: index)
-            controller.viewWillDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.beginAppearanceTransition(false, animated: false)
+            }
             controller.view.removeFromSuperview()
-            controller.viewDidDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.endAppearanceTransition()
+            }
             self.updateViews()
         }
     }
@@ -288,7 +295,9 @@ public final class PresentationContext {
     private func addViews() {
         if let view = self.view, let layout = self.layout {
             for (controller, _) in self.controllers {
-                controller.viewWillAppear(false)
+                if let uiController = controller as? UIViewController {
+                    uiController.beginAppearanceTransition(true, animated: false)
+                }
                 if let topLevelSubview = self.topLevelSubview() {
                     view.insertSubview(controller.view, belowSubview: topLevelSubview)
                 } else {
@@ -297,13 +306,16 @@ public final class PresentationContext {
                 let (controllerLayout, controllerFrame) = self.layoutForController(containerLayout: layout, controller: controller)
                 controller.view.frame = controllerFrame
                 controller.containerLayoutUpdated(controllerLayout, transition: .immediate)
-                if let controller = controller as? PresentableController {
-                    controller.viewDidAppear(completion: { [weak self] in
-                        self?.notifyAccessibilityScreenChanged()
-                    })
-                } else {
-                    controller.viewDidAppear(false)
-                    self.notifyAccessibilityScreenChanged()
+                if let uiController = controller as? UIViewController {
+                    if let presentable = controller as? PresentableController {
+                        presentable.viewDidAppear(completion: { [weak self] in
+                            uiController.endAppearanceTransition()
+                            self?.notifyAccessibilityScreenChanged()
+                        })
+                    } else {
+                        uiController.endAppearanceTransition()
+                        self.notifyAccessibilityScreenChanged()
+                    }
                 }
             }
             self.updateViews()
@@ -312,9 +324,13 @@ public final class PresentationContext {
     
     private func removeViews() {
         for (controller, _) in self.controllers {
-            controller.viewWillDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.beginAppearanceTransition(false, animated: false)
+            }
             controller.view.removeFromSuperview()
-            controller.viewDidDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.endAppearanceTransition()
+            }
         }
     }
     

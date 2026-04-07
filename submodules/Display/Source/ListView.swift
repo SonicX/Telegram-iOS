@@ -275,6 +275,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     public final var addContentOffset: ((CGFloat, ListViewItemNode?) -> Void)?
     public final var shouldStopScrolling: ((CGFloat) -> Bool)?
     public final var onContentsUpdated: ((ContainedViewLayoutTransition) -> Void)?
+    
+    /// When `true`, after every scroll-driven layout and after `replayOperations` (virtualized insert/remove), managed row nodes are forced hidden so a second scroll surface on `self.view` (e.g. `UITableView`) is the only visible presentation.
+    public final var automaticallyAppliesExternalScrollHostSuppression: Bool = false
 
     public final var updateScrollingIndicator: ((ScrollingIndicatorState?, ContainedViewLayoutTransition) -> Void)?
     
@@ -1122,6 +1125,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var ignoreNextScrollAdjustment: Bool = false
     
     private func updateScrollViewDidScroll(_ scrollView: UIScrollView, synchronous: Bool) {
+        // Subclasses (e.g. UITableView-backed chat history) may set another scroll view’s delegate
+        // to `self`; only the ListView scroller drives internal scroll bookkeeping.
+        if scrollView !== self.scroller {
+            return
+        }
         if self.ignoreScrollingEvents || scroller !== self.scroller {
             return
         }
@@ -1257,6 +1265,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.updateVisibleItemRange()
         self.updateItemNodesVisibilities(onlyPositive: false)
         self.onContentsUpdated?(.immediate)
+        if self.automaticallyAppliesExternalScrollHostSuppression {
+            self.suppressManagedPresentationForExternalScrollHost()
+        }
         
         //CATransaction.commit()
     }
@@ -3900,6 +3911,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 //print("replayOperations \(delta * 1000.0) ms")
             }
             
+            if self.automaticallyAppliesExternalScrollHostSuppression {
+                self.suppressManagedPresentationForExternalScrollHost()
+            }
             completion()
         } else {
             self.updateItemHeaders(leftInset: listInsets.left, rightInset: listInsets.right, synchronousLoad: synchronousLoads, transition: headerNodesTransition, animateInsertion: animated || !requestItemInsertionAnimationsIndices.isEmpty, animateFullTransition: animateFullTransition)
@@ -3927,6 +3941,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 //print("replayOperations \(delta * 1000.0) ms")
             }
             
+            if self.automaticallyAppliesExternalScrollHostSuppression {
+                self.suppressManagedPresentationForExternalScrollHost()
+            }
             completion()
             
             if self.useMainQueueTransactions {
@@ -5191,6 +5208,34 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 f(accessoryItemNode)
             }
         }
+    }
+    
+    /// Hides all visual layers that ListView normally composites for rows (including extracted bubble backgrounds and overscroll chrome). Use when the same logical list is presented by an external `UIScrollView` hosted on `self.view` so legacy nodes cannot draw behind or above it.
+    public func suppressManagedPresentationForExternalScrollHost() {
+        for itemNode in self.itemNodes {
+            itemNode.alpha = 0.0
+            itemNode.isHidden = true
+        }
+        for (_, headerNode) in self.itemHeaderNodes {
+            headerNode.alpha = 0.0
+            headerNode.isHidden = true
+        }
+        for itemNode in self.itemNodes {
+            if let accessoryItemNode = itemNode.accessoryItemNode {
+                accessoryItemNode.alpha = 0.0
+                accessoryItemNode.isHidden = true
+            }
+        }
+        self.extractedBackgroundsContainerNode?.alpha = 0.0
+        self.extractedBackgroundsContainerNode?.isHidden = true
+        self.itemHighlightOverlayBackground?.alpha = 0.0
+        self.itemHighlightOverlayBackground?.isHidden = true
+        self.topItemOverscrollBackground?.alpha = 0.0
+        self.topItemOverscrollBackground?.isHidden = true
+        self.bottomItemOverscrollBackground?.alpha = 0.0
+        self.bottomItemOverscrollBackground?.isHidden = true
+        self.reorderNode?.alpha = 0.0
+        self.reorderNode?.isHidden = true
     }
     
     public func ensureItemNodeVisible(_ node: ListViewItemNode, animated: Bool = true, overflow: CGFloat = 0.0, allowIntersection: Bool = false, atTop: Bool = false, curve: ListViewAnimationCurve = .Default(duration: 0.25)) {

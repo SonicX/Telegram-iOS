@@ -84,11 +84,11 @@ final class NavigationOverlayContainer: ASDisplayNode {
     }
     
     func transitionIn() {
-        self.controller.viewWillAppear(false)
+        self.controller.beginAppearanceTransition(true, animated: false)
         self.controller.setIgnoreAppearanceMethodInvocations(true)
         self.addSubnode(self.controller.displayNode)
         self.controller.setIgnoreAppearanceMethodInvocations(false)
-        self.controller.viewDidAppear(false)
+        self.controller.endAppearanceTransition()
     }
     
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

@@ -66,7 +66,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     private var forwardAccessoryPanelNode: ForwardAccessoryPanelNode?
     
     var contactListNode: ContactListNode?
-    let chatListNode: ChatListNode?
+    let chatListNode: ChatListDisplayNode?
     let mainContainerNode: ChatListContainerNode?
         
     private var contactListActive = false
@@ -76,7 +76,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     private var containerLayout: (ContainerViewLayout, CGFloat, CGFloat)?
     
     var contentOffsetChanged: ((ListViewVisibleContentOffset) -> Void)?
-    var contentScrollingEnded: ((ListView) -> Bool)?
+    var contentScrollingEnded: ((ChatListDisplayNode) -> Bool)?
     
     var requestActivateSearch: (() -> Void)?
     var requestDeactivateSearch: (() -> Void)?
@@ -224,7 +224,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
             self.chatListNode = nil
         } else {
             self.mainContainerNode = nil
-            self.chatListNode = ChatListNode(context: context, location: chatListLocation, previewing: false, fillPreloadItems: false, mode: chatListMode, theme: self.presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, animationCache: self.animationCache, animationRenderer: self.animationRenderer, disableAnimations: true, isInlineMode: false, autoSetReady: true, isMainTab: false)
+            self.chatListNode = ChatListDisplayNode(context: context, location: chatListLocation, previewing: false, fillPreloadItems: false, mode: chatListMode, theme: self.presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, animationCache: self.animationCache, animationRenderer: self.animationRenderer, disableAnimations: true, isInlineMode: false, autoSetReady: true, isMainTab: false)
             if let multipleSelectionLimit = controller.multipleSelectionLimit {
                 self.chatListNode?.selectionLimit = multipleSelectionLimit
             }
@@ -245,10 +245,6 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         self.chatListNode?.selectionCountChanged = { [weak self] count in
             self?.textInputPanelNode?.updateSendButtonEnabled(count > 0, animated: true)
         }
-        self.chatListNode?.accessibilityPageScrolledString = { row, count in
-            return presentationData.strings.VoiceOver_ScrollStatus(row, count).string
-        }
-        
         self.chatListNode?.activateSearch = { [weak self] in
             self?.requestActivateSearch?()
         }
@@ -1293,7 +1289,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         var updated = false
                         var count = 0
                         
-                        let chatListNode: ChatListNode?
+                        let chatListNode: ChatListDisplayNode?
                         if let mainContainerNode = strongSelf.mainContainerNode {
                             chatListNode = mainContainerNode.currentItemNode
                         } else {
@@ -1549,8 +1545,8 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         }
                     }
                     
-                    contactListNode.contentScrollingEnded = { [weak self] listView in
-                        return self?.contentScrollingEnded?(listView) ?? false
+                    contactListNode.contentScrollingEnded = { _ in
+                        return false
                     }
                     
                     if let (layout, navigationHeight, actualNavigationHeight) = self.containerLayout {

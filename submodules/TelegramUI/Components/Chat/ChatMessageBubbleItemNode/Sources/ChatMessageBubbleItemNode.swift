@@ -3220,16 +3220,15 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                         contentPosition = .linear(top: .Neighbour(false, .text, .default), bottom: .Neighbour(false, .text, .default))
                 }
                 let (contentNodeWidth, contentNodeFinalize) = contentNodeLayout(CGSize(width: maximumNodeWidth, height: CGFloat.greatestFiniteMagnitude), contentPosition)
-                #if DEBUG
-                if contentNodeWidth > maximumNodeWidth {
-                    print("contentNodeWidth \(contentNodeWidth) > \(maximumNodeWidth)")
-                }
-                #endif
+                // Sub-nodes (e.g. voice waveform) may report width a few points over the
+                // requested maximum due to rounding; using that value inflates maxContentWidth
+                // and causes layout thrash (visible as jitter while scrolling / reloading media).
+                let boundedContentWidth = min(contentNodeWidth, maximumNodeWidth)
                 
                 if contentNodeProperties.isDetached {
                     
                 } else {
-                    maxContentWidth = max(maxContentWidth, contentNodeWidth)
+                    maxContentWidth = max(maxContentWidth, boundedContentWidth)
                 }
                 
                 contentNodePropertiesAndFinalize.append((contentNodeProperties, contentPosition, contentNodeFinalize, contentGroupId, itemSelection))

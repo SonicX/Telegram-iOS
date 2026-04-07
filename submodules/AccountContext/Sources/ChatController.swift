@@ -1241,12 +1241,21 @@ public enum ChatHistoryNodeHistoryState: Equatable {
     case loaded(isEmpty: Bool, hasReachedLimits: Bool)
 }
 
-public protocol ChatHistoryListNode: ListView {
+public protocol ChatHistoryListNode: AnyObject {
+    var displayNode: ASDisplayNode { get }
     var historyState: ValuePromise<ChatHistoryNodeHistoryState> { get }
+    var preloadPages: Bool { get set }
+    var scrollEnabled: Bool { get set }
+    var defaultToSynchronousTransactionWhileScrolling: Bool { get set }
+    var scrollView: UIScrollView { get }
     
     func scrollToEndOfHistory()
     func updateLayout(transition: ContainedViewLayoutTransition, updateSizeAndInsets: ListViewUpdateSizeAndInsets)
     func messageInCurrentHistoryView(_ id: MessageId) -> Message?
+    func forEachItemNode(_ f: (ASDisplayNode) -> Void)
+    func disconnect()
+    func visibleContentOffset() -> ListViewVisibleContentOffset
+    func transferVelocity(_ velocity: CGFloat)
     
     var contentPositionChanged: (ListViewVisibleContentOffset) -> Void { get set }
 }

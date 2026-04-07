@@ -1,3 +1,13 @@
+# Bazel’s JVM may prefer IPv6; a broken v6 route causes "connection refused" to
+# bcr.bazel.build while Safari/curl still work. Prefer IPv4 for registry downloads.
+startup --host_jvm_args=-Djava.net.preferIPv4Stack=true
+
+# Vendored BCR (git submodule build-system/bazel-central-registry): module metadata
+# is read from disk first so Xcode’s Bazel doesn’t need to reach https://bcr.bazel.build.
+# Remote registry remains as fallback. After clone: git submodule update --init build-system/bazel-central-registry
+common --registry=file://%workspace%/build-system/bazel-central-registry
+common --registry=https://bcr.bazel.build
+
 build --action_env=ZERO_AR_DATE=1
 
 build --apple_platform_type=ios
@@ -41,3 +51,12 @@ common:index_build --nolegacy_important_outputs
 common:index_build --show_result=0
 common:index_build --define=buildNumber=10001
 common:index_build --define=telegramVersion=12.2.2
+
+# Run Swiftgram UI tests on simulator (host app + XCTest bundle; use opt to match Swift DEBUG vs FLEX deps).
+# Example: bazel test --config=swiftgram_ui //Telegram:SwiftgramUITests
+test:swiftgram_ui --compilation_mode=opt
+test:swiftgram_ui --ios_multi_cpus=sim_arm64
+test:swiftgram_ui --define=buildNumber=1
+test:swiftgram_ui --define=telegramVersion=12.0.0
+test:swiftgram_ui --//Telegram:disableExtensions
+test:swiftgram_ui --//Telegram:disableProvisioningProfiles

@@ -36,12 +36,23 @@ public class ChatUnreadItem: ListViewItem {
             node.contentSize = layout.contentSize
             node.insets = layout.insets
             
-            Queue.mainQueue().async {
+            let finish: () -> Void = {
                 completion(node, {
                     return (nil, { _ in
                         apply(.None)
                     })
                 })
+            }
+            if synchronousLoads {
+                if Thread.isMainThread {
+                    finish()
+                } else {
+                    DispatchQueue.main.sync(execute: finish)
+                }
+            } else {
+                Queue.mainQueue().async {
+                    finish()
+                }
             }
         }
     }

@@ -1716,8 +1716,6 @@ public final class ChatMessageInteractiveMediaNode: ASDisplayNode, GalleryItemTr
                     }
                     if !reloadMedia {
                         updateImageSignal = nil
-                    } else {
-                        print("reload media")
                     }
                     
                     var isExtendedMedia = false

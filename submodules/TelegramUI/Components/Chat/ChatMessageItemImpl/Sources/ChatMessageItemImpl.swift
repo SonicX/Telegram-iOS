@@ -587,13 +587,24 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
             node.updateSelectionState(animated: false)
             node.updateHighlightedState(animated: false)
             
-            Queue.mainQueue().async {
+            let finish: () -> Void = {
                 completion(node, {
                     return (nil, { info in
                         info.setIsOffscreen()
                         apply(.None, info, synchronousLoads)
                     })
                 })
+            }
+            if synchronousLoads {
+                if Thread.isMainThread {
+                    finish()
+                } else {
+                    DispatchQueue.main.sync(execute: finish)
+                }
+            } else {
+                Queue.mainQueue().async {
+                    finish()
+                }
             }
         }
         if Thread.isMainThread {

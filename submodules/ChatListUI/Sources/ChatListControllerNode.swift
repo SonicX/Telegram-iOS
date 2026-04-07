@@ -123,7 +123,7 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     }
     
     private var currentItemNodeValue: ChatListContainerItemNode?
-    public var currentItemNode: ChatListNode {
+    public var currentItemNode: ChatListDisplayNode {
         return self.currentItemNodeValue!.listNode
     }
     
@@ -309,7 +309,7 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
             }
             self.endedInteractiveDragging?(self.currentItemNode)
         }
-        itemNode.listNode.shouldStopScrolling = { [weak self] velocity in
+        itemNode.listNode.shouldStopScrolling = { [weak self] _, velocity in
             guard let self else {
                 return false
             }
@@ -419,11 +419,11 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     var groupSelected: ((EngineChatList.Group) -> Void)?
     var updatePeerGrouping: ((EnginePeer.Id, Bool) -> Void)?
     var contentOffset: ListViewVisibleContentOffset?
-    public var contentOffsetChanged: ((ListViewVisibleContentOffset, ListView) -> Void)?
-    public var contentScrollingEnded: ((ListView) -> Bool)?
-    var didBeginInteractiveDragging: ((ListView) -> Void)?
-    var endedInteractiveDragging: ((ListView) -> Void)?
-    var shouldStopScrolling: ((ListView, CGFloat) -> Bool)?
+    public var contentOffsetChanged: ((ListViewVisibleContentOffset, ChatListDisplayNode) -> Void)?
+    public var contentScrollingEnded: ((ChatListDisplayNode) -> Bool)?
+    var didBeginInteractiveDragging: ((ChatListDisplayNode) -> Void)?
+    var endedInteractiveDragging: ((ChatListDisplayNode) -> Void)?
+    var shouldStopScrolling: ((ChatListDisplayNode, CGFloat) -> Bool)?
     var activateChatPreview: ((ChatListItem, Int64?, ASDisplayNode, ContextGesture?, CGPoint?) -> Void)?
     var openBirthdaySetup: (() -> Void)?
     var openPremiumManagement: (() -> Void)?
@@ -1121,7 +1121,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     
     private var containerLayout: (layout: ContainerViewLayout, navigationBarHeight: CGFloat, visualNavigationHeight: CGFloat, cleanNavigationBarHeight: CGFloat, storiesInset: CGFloat)?
     
-    var contentScrollingEnded: ((ListView) -> Bool)?
+    var contentScrollingEnded: ((ChatListDisplayNode) -> Bool)?
     
     var requestDeactivateSearch: (() -> Void)?
     var requestOpenPeerFromSearch: ((EnginePeer, Int64?, Bool) -> Void)?
@@ -1810,7 +1810,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         }
     }
     
-    private func contentOffsetChanged(offset: ListViewVisibleContentOffset, listView: ListView, isPrimary: Bool) {
+    private func contentOffsetChanged(offset: ListViewVisibleContentOffset, listView: ChatListDisplayNode, isPrimary: Bool) {
         guard let containerLayout = self.containerLayout else {
             return
         }
@@ -1824,10 +1824,8 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 overscrollHiddenChatItemsAllowed = storyPeerListView.overscrollHiddenChatItemsAllowed
             }
             
-            if let chatListNode = listView as? ChatListNode {
-                if chatListNode.hasItemsToBeRevealed() {
-                    overscrollSelectedId = nil
-                }
+            if listView.hasItemsToBeRevealed() {
+                overscrollSelectedId = nil
             }
             
             if let controller = self.controller {
@@ -1891,7 +1889,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         }
     }
     
-    private func shouldStopScrolling(listView: ListView, velocity: CGFloat, isPrimary: Bool) -> Bool {
+    private func shouldStopScrolling(listView: ChatListDisplayNode, velocity: CGFloat, isPrimary: Bool) -> Bool {
         if abs(velocity) > 0.8 {
             return false
         }
@@ -1917,9 +1915,9 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         return false
     }
     
-    private func didBeginInteractiveDragging(listView: ListView, isPrimary: Bool) {
+    private func didBeginInteractiveDragging(listView: ChatListDisplayNode, isPrimary: Bool) {
         if isPrimary {
-            if let chatListNode = listView as? ChatListNode, !chatListNode.hasItemsToBeRevealed() {
+            if !listView.hasItemsToBeRevealed() {
                 self.allowOverscrollStoryExpansion = true
             } else {
                 self.allowOverscrollStoryExpansion = false
@@ -1928,7 +1926,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.allowOverscrollItemExpansion = true
     }
     
-    private func endedInteractiveDragging(listView: ListView, isPrimary: Bool) {
+    private func endedInteractiveDragging(listView: ChatListDisplayNode, isPrimary: Bool) {
         if isPrimary {
             self.allowOverscrollStoryExpansion = false
             self.currentOverscrollStoryExpansionTimestamp = nil
@@ -1937,7 +1935,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.currentOverscrollItemExpansionTimestamp = nil
     }
     
-    private func contentScrollingEnded(listView: ListView, isPrimary: Bool) -> Bool {
+    private func contentScrollingEnded(listView: ChatListDisplayNode, isPrimary: Bool) -> Bool {
         if !isPrimary || self.inlineStackContainerNode == nil {
         } else {
             return false

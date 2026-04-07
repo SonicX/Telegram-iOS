@@ -32,11 +32,22 @@ public class ChatReplyCountItem: ListViewItem {
     public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = ChatReplyCountItemNode()
-            Queue.mainQueue().async {
+            let finish: () -> Void = {
                 node.layoutForParams(params, item: self, previousItem: previousItem, nextItem: nextItem)
                 completion(node, {
                     return (nil, { _ in })
                 })
+            }
+            if synchronousLoads {
+                if Thread.isMainThread {
+                    finish()
+                } else {
+                    DispatchQueue.main.sync(execute: finish)
+                }
+            } else {
+                Queue.mainQueue().async {
+                    finish()
+                }
             }
         }
     }

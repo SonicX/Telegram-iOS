@@ -759,6 +759,10 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 }
                 let sideInsets = layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right
                 suggestedBoundingWidth += sideInsets
+                // Status/date line can measure slightly wider than the text line; combined width
+                // must not exceed the bubble stripe width or layout oscillates (jitter) when
+                // maximumNodeWidth is also limited by a tighter sibling block.
+                suggestedBoundingWidth = min(suggestedBoundingWidth, constrainedSize.width)
                 
                 return (suggestedBoundingWidth, { boundingWidth in
                     var boundingSize: CGSize

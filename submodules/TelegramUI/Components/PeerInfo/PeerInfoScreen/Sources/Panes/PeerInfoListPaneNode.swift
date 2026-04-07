@@ -81,9 +81,9 @@ final class PeerInfoListPaneNode: ASDisplayNode, PeerInfoPaneNode {
         self.selectedMessagesPromise.set(.single(self.selectedMessages))
         
         self.listNode = context.sharedContext.makeChatHistoryListNode(context: context, updatedPresentationData: updatedPresentationData ?? (context.sharedContext.currentPresentationData.with({ $0 }), context.sharedContext.presentationData), chatLocation: chatLocation, chatLocationContextHolder: chatLocationContextHolder, tag: .tag(tagMask), source: .default, subject: nil, controllerInteraction: chatControllerInteraction, selectedMessages: self.selectedMessagesPromise.get(), mode: .list(search: false, reversed: false, reverseGroups: false, displayHeaders: .allButLast, hintLinks: tagMask == .webPage, isGlobalSearch: false))
-        self.listNode.clipsToBounds = true
+        self.listNode.displayNode.clipsToBounds = true
         self.listNode.defaultToSynchronousTransactionWhileScrolling = true
-        self.listNode.scroller.bounces = false
+        self.listNode.scrollView.bounces = false
                 
         self.mediaAccessoryPanelContainer = PassthroughContainerNode()
         self.mediaAccessoryPanelContainer.clipsToBounds = true
@@ -91,7 +91,7 @@ final class PeerInfoListPaneNode: ASDisplayNode, PeerInfoPaneNode {
         super.init()
         
         self.listNode.preloadPages = true
-        self.addSubnode(self.listNode)
+        self.addSubnode(self.listNode.displayNode)
         self.addSubnode(self.mediaAccessoryPanelContainer)
         
         self.ready.set(self.listNode.historyState.get()
@@ -464,7 +464,7 @@ final class PeerInfoListPaneNode: ASDisplayNode, PeerInfoPaneNode {
         
         transition.updateFrame(node: self.mediaAccessoryPanelContainer, frame: CGRect(origin: CGPoint(x: 0.0, y: topInset), size: CGSize(width: size.width, height: MediaNavigationAccessoryHeaderNode.minimizedHeight)))
         
-        transition.updateFrame(node: self.listNode, frame: CGRect(origin: CGPoint(), size: size))
+        transition.updateFrame(node: self.listNode.displayNode, frame: CGRect(origin: CGPoint(), size: size))
         let (duration, curve) = listViewAnimationDurationAndCurve(transition: transition)
         self.listNode.updateLayout(transition: transition, updateSizeAndInsets: ListViewUpdateSizeAndInsets(size: size, insets: UIEdgeInsets(top: topPanelHeight + topInset, left: sideInset, bottom: bottomInset, right: sideInset), duration: duration, curve: curve))
         if isScrollingLockedAtTop {

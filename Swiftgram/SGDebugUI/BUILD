@@ -7,9 +7,19 @@ config_setting(
     },
 )
 
+config_setting(
+    name = "fastbuild_mode",
+    values = {
+        "compilation_mode": "fastbuild",
+    },
+)
+
 flex_dependency = select({
     ":debug_build": [
-        "@flex_sdk//:FLEX"
+        "@flex_sdk//:FLEX",
+    ],
+    ":fastbuild_mode": [
+        "@flex_sdk//:FLEX",
     ],
     "//conditions:default": [],
 })

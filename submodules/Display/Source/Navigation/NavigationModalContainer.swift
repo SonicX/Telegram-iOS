@@ -501,7 +501,7 @@ final class NavigationModalContainer: ASDisplayNode, ASScrollViewDelegate, ASGes
     
     func dismiss(transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) -> ContainedViewLayoutTransition {
         for controller in self.container.controllers {
-            controller.viewWillDisappear(transition.isAnimated)
+            controller.beginAppearanceTransition(false, animated: transition.isAnimated)
         }
         
         if let firstController = self.container.controllers.first, case .standaloneModal = firstController.navigationPresentation {
@@ -509,7 +509,7 @@ final class NavigationModalContainer: ASDisplayNode, ASScrollViewDelegate, ASGes
                 controller.setIgnoreAppearanceMethodInvocations(true)
                 controller.displayNode.removeFromSupernode()
                 controller.setIgnoreAppearanceMethodInvocations(false)
-                controller.viewDidDisappear(transition.isAnimated)
+                controller.endAppearanceTransition()
             }
             completion()
             return transition
@@ -526,7 +526,7 @@ final class NavigationModalContainer: ASDisplayNode, ASScrollViewDelegate, ASGes
                         return
                     }
                     for controller in strongSelf.container.controllers {
-                        controller.viewDidDisappear(transition.isAnimated)
+                        controller.endAppearanceTransition()
                     }
                     completion()
                 })
@@ -536,7 +536,7 @@ final class NavigationModalContainer: ASDisplayNode, ASScrollViewDelegate, ASGes
                     controller.setIgnoreAppearanceMethodInvocations(true)
                     controller.displayNode.removeFromSupernode()
                     controller.setIgnoreAppearanceMethodInvocations(false)
-                    controller.viewDidDisappear(transition.isAnimated)
+                    controller.endAppearanceTransition()
                 }
                 completion()
                 return transition

@@ -214,7 +214,7 @@ public final class BrowserBookmarksScreen: ViewController {
             
             self.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
             
-            self.addSubnode(self.historyNode)
+            self.addSubnode(self.historyNode.displayNode)
             self.addSubnode(self.bottomPanelNode)
             
             openMessageImpl = { [weak controller] message in
@@ -319,7 +319,7 @@ public final class BrowserBookmarksScreen: ViewController {
             self.validLayout = (layout, navigationBarHeight, actualNavigationBarHeight)
             
             let historyFrame = CGRect(origin: .zero, size: layout.size)
-            transition.updateFrame(node: self.historyNode, frame: historyFrame)
+            transition.updateFrame(node: self.historyNode.displayNode, frame: historyFrame)
             
             var insets = layout.insets(options: [.input])
             insets.top += navigationBarHeight

@@ -65,7 +65,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
         }
     }
     
-    var adjustedDeleteIndices: [ListViewDeleteItem] = []
+    var adjustedDeleteIndices: [ChatHistoryDeleteItem] = []
     let previousCount: Int
     if let fromView = fromView {
         previousCount = fromView.filteredEntries.count
@@ -73,31 +73,31 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
         previousCount = 0
     }
     for index in mergeResult.deleteIndices {
-        adjustedDeleteIndices.append(ListViewDeleteItem(index: previousCount - 1 - index, directionHint: nil))
+        adjustedDeleteIndices.append(ChatHistoryDeleteItem(index: previousCount - 1 - index, directionHint: nil))
     }
     
     var adjustedIndicesAndItems: [ChatHistoryViewTransitionInsertEntry] = []
     var adjustedUpdateItems: [ChatHistoryViewTransitionUpdateEntry] = []
     let updatedCount = toView.filteredEntries.count
     
-    var options: ListViewDeleteAndInsertOptions = []
+    var options: ChatHistoryTransitionOptions = []
     var animateIn = false
     var maxAnimatedInsertionIndex = -1
     var stationaryItemRange: (Int, Int)?
-    var scrollToItem: ListViewScrollToItem?
+    var scrollToItem: ChatHistoryScrollToItem?
     
     switch reason {
     case let .Initial(fadeIn):
         if fadeIn {
             animateIn = true
         } else {
-            let _ = options.insert(.LowLatency)
-            let _ = options.insert(.Synchronous)
-            let _ = options.insert(.PreferSynchronousResourceLoading)
+            options.insert(.lowLatency)
+            options.insert(.synchronous)
+            options.insert(.preferSynchronousResourceLoading)
         }
     case .InteractiveChanges:
-        let _ = options.insert(.AnimateAlpha)
-        let _ = options.insert(.AnimateInsertion)
+        options.insert(.animateAlpha)
+        options.insert(.animateInsertion)
         
         for (index, _, _) in mergeResult.indicesAndItems.sorted(by: { $0.0 > $1.0 }) {
             let adjustedIndex = updatedCount - 1 - index
@@ -121,9 +121,9 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
             adjustedPrevousIndex = nil
         }
         
-        var directionHint: ListViewItemOperationDirectionHint?
+        var directionHint: ChatHistoryItemOperationDirectionHint?
         if maxAnimatedInsertionIndex >= 0 && adjustedIndex <= maxAnimatedInsertionIndex {
-            directionHint = .Down
+            directionHint = .down
         }
         
         adjustedIndicesAndItems.append(ChatHistoryViewTransitionInsertEntry(index: adjustedIndex, previousIndex: adjustedPrevousIndex, entry: entry, directionHint: directionHint))
@@ -133,14 +133,28 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
         let adjustedIndex = updatedCount - 1 - index
         let adjustedPreviousIndex = previousCount - 1 - previousIndex
         
-        let directionHint: ListViewItemOperationDirectionHint? = nil
+        let directionHint: ChatHistoryItemOperationDirectionHint? = nil
         adjustedUpdateItems.append(ChatHistoryViewTransitionUpdateEntry(index: adjustedIndex, previousIndex: adjustedPreviousIndex, entry: entry, directionHint: directionHint))
     }
     
     var scrolledToIndex: MessageHistoryScrollToSubject?
     var scrolledToSomeIndex = false
     
-    let curve: ListViewAnimationCurve = scrollAnimationCurve ?? .Default(duration: nil)
+    let curve: ChatHistoryScrollAnimationCurve
+    if let scrollAnimationCurve {
+        switch scrollAnimationCurve {
+        case let .Default(duration):
+            curve = .default(duration: duration)
+        case let .Spring(duration):
+            curve = .spring(duration: duration)
+        case let .Custom(duration, c1x, c1y, c2x, c2y):
+            curve = .custom(duration: duration, c1x, c1y, c2x, c2y)
+        @unknown default:
+            curve = .default(duration: nil)
+        }
+    } else {
+        curve = .default(duration: nil)
+    }
     
     var isSavedMusic = false
     if case let .custom(_, _, _, isSavedMusicValue, _, _) = source {
@@ -153,7 +167,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                 var index = toView.filteredEntries.count - 1
                 for entry in toView.filteredEntries {
                     if case .UnreadEntry = entry {
-                        scrollToItem = ListViewScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve, directionHint: .Down)
+                        scrollToItem = ChatHistoryScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve, directionHint: .down, displayLink: false)
                         break
                     }
                     index -= 1
@@ -163,7 +177,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                     var index = toView.filteredEntries.count - 1
                     for entry in toView.filteredEntries {
                         if entry.index >= unreadIndex {
-                            scrollToItem = ListViewScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve,  directionHint: .Down)
+                            scrollToItem = ChatHistoryScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve, directionHint: .down, displayLink: false)
                             break
                         }
                         index -= 1
@@ -176,7 +190,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                                 if entry.index.timestamp > 10 {
                                     break
                                 } else if case .ChatInfoEntry = entry {
-                                    scrollToItem = ListViewScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve,  directionHint: .Down)
+                                    scrollToItem = ChatHistoryScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve, directionHint: .down, displayLink: false)
                                     break
                                 }
                             }
@@ -189,7 +203,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                     var index = 0
                     for entry in toView.filteredEntries.reversed() {
                         if entry.index < unreadIndex {
-                            scrollToItem = ListViewScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve, directionHint: .Down)
+                            scrollToItem = ChatHistoryScrollToItem(index: index, position: .bottom(0.0), animated: false, curve: curve, directionHint: .down, displayLink: false)
                             break
                         }
                         index += 1
@@ -199,7 +213,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                 var index = toView.filteredEntries.count - 1
                 for entry in toView.filteredEntries {
                     if entry.index >= scrollIndex {
-                        scrollToItem = ListViewScrollToItem(index: index, position: .top(relativeOffset), animated: false, curve: curve,  directionHint: .Down)
+                        scrollToItem = ChatHistoryScrollToItem(index: index, position: .top(relativeOffset), animated: false, curve: curve, directionHint: .down, displayLink: false)
                         break
                     }
                     index -= 1
@@ -209,7 +223,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                     var index = 0
                     for entry in toView.filteredEntries.reversed() {
                         if entry.index < scrollIndex {
-                            scrollToItem = ListViewScrollToItem(index: index, position: .top(0.0), animated: false, curve: curve, directionHint: .Down)
+                            scrollToItem = ChatHistoryScrollToItem(index: index, position: .top(0.0), animated: false, curve: curve, directionHint: .down, displayLink: false)
                             break
                         }
                         index += 1
@@ -254,12 +268,12 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                     if isSavedMusic {
                         if case let .message(messageIndex) = scrollIndex.index, messageIndex.id == entry.index.id {
                             print(messageIndex.id)
-                            scrollToItem = ListViewScrollToItem(index: index, position: position, animated: animated, curve: curve, directionHint: directionHint, displayLink: displayLink)
+                            scrollToItem = ChatHistoryScrollToItem(index: index, position: historyScrollPosition(position), animated: animated, curve: curve, directionHint: historyScrollDirectionHint(directionHint), displayLink: displayLink)
                             break
                         }
                     } else {
                         if scrollIndex.index.isLessOrEqual(to: entry.index) {
-                            scrollToItem = ListViewScrollToItem(index: index, position: position, animated: animated, curve: curve, directionHint: directionHint, displayLink: displayLink)
+                            scrollToItem = ChatHistoryScrollToItem(index: index, position: historyScrollPosition(position), animated: animated, curve: curve, directionHint: historyScrollDirectionHint(directionHint), displayLink: displayLink)
                             break
                         }
                     }
@@ -271,7 +285,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
                     for entry in toView.filteredEntries.reversed() {
                         if !scrollIndex.index.isLess(than: entry.index) {
                             scrolledToSomeIndex = true
-                            scrollToItem = ListViewScrollToItem(index: index, position: position, animated: animated, curve: curve, directionHint: directionHint)
+                            scrollToItem = ChatHistoryScrollToItem(index: index, position: historyScrollPosition(position), animated: animated, curve: curve, directionHint: historyScrollDirectionHint(directionHint), displayLink: false)
                             break
                         }
                         index += 1
@@ -283,7 +297,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
         for entry in toView.filteredEntries {
             if case let .MessageEntry(message, _, _, _, _, _) = entry {
                 if let _ = message.adAttribute {
-                    scrollToItem = ListViewScrollToItem(index: index + 1, position: .top(0.0), animated: false, curve: curve, directionHint: .Down)
+                    scrollToItem = ChatHistoryScrollToItem(index: index + 1, position: .top(0.0), animated: false, curve: curve, directionHint: .down, displayLink: false)
                     break
                 }
             }
@@ -292,7 +306,7 @@ func preparedChatHistoryViewTransition(from fromView: ChatHistoryView?, to toVie
     }
     
     if updatedMessageSelection {
-        options.insert(.Synchronous)
+        options.insert(.synchronous)
     }
     
     return ChatHistoryViewTransition(historyView: toView, deleteItems: adjustedDeleteIndices, insertEntries: adjustedIndicesAndItems, updateEntries: adjustedUpdateItems, options: options, scrollToItem: scrollToItem, stationaryItemRange: stationaryItemRange, initialData: initialData, keyboardButtonsMessage: keyboardButtonsMessage, cachedData: cachedData, cachedDataMessages: cachedDataMessages, readStateData: readStateData, scrolledToIndex: scrolledToIndex, scrolledToSomeIndex: scrolledToSomeIndex || scrolledToIndex != nil, animateIn: animateIn, reason: reason, flashIndicators: flashIndicators)

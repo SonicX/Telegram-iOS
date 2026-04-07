@@ -11,6 +11,10 @@ load("@build_bazel_rules_apple//apple:ios.bzl",
     "ios_unit_test",
     "ios_ui_test",
 )
+load(
+    "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_runner.bzl",
+    "ios_xctestrun_runner",
+)
 
 # MARK: Swiftgram
 load("@build_bazel_rules_apple//apple:watchos.bzl",
@@ -35,6 +39,8 @@ load(
 )
 
 load("@build_bazel_rules_apple//apple:apple.bzl", "local_provisioning_profile")
+
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 load("//build-system/bazel-utils:plist_fragment.bzl",
     "plist_fragment",
@@ -178,7 +184,8 @@ empty_languages = [
     genrule(
         name = "Localizable_{}.strings".format(language),
         outs = ["{}.lproj/Localizable.strings".format(language)],
-        cmd = "touch $(OUTS)",
+        # Zero-byte files make NSBundle fail with "Cannot parse a NULL or zero-length data".
+        cmd = "printf '%s\\n' '\"_\" = \"\";' > $(OUTS)",
     ) for language in empty_languages
 ]
 
@@ -2109,17 +2116,57 @@ ios_application(
     visibility = ["//visibility:public"],
 )
 
+swift_library(
+    name = "SwiftgramUITestsLib",
+    testonly = True,
+    srcs = glob(["SwiftgramUITests/**/*.swift"]),
+    module_name = "SwiftgramUITests",
+    tags = ["manual"],
+)
+
+# Explicit simulator: the stock ios_default_runner can pick a legacy device type that
+# pairs badly with the newest iOS runtime (xctest exits immediately, e.g. code 15).
+ios_xctestrun_runner(
+    name = "SwiftgramUITestSimulatorRunner",
+    attachment_lifetime = "keepAlways",
+    device_type = "iPhone 17 Pro",
+    visibility = ["//visibility:private"],
+)
+
+ios_ui_test(
+    name = "SwiftgramUITests",
+    bundle_id = "{}.SwiftgramUITests".format(telegram_bundle_id),
+    minimum_os_version = minimum_os_version,
+    runner = ":SwiftgramUITestSimulatorRunner",
+    tags = ["manual"],
+    test_host = ":Swiftgram",
+    deps = [":SwiftgramUITestsLib"],
+    visibility = ["//visibility:public"],
+)
+
 xcodeproj(
     name = "Telegram_xcodeproj",
     bazel_path = telegram_bazel_path,
     project_name = "Swiftgram",
     tags = ["manual"],
+    pre_build = """
+if [ "$ACTION" != "build" ]; then
+  exit 0
+fi
+cd "$SRCROOT"
+./scripts/fix-build-permissions.sh
+""",
     top_level_targets = top_level_targets(
         labels = [
             ":Swiftgram",
         ],
         target_environments = ["device", "simulator"],
-    ),
+    ) + [
+        top_level_target(
+            label = ":SwiftgramUITests",
+            target_environments = ["simulator"],
+        ),
+    ],
     xcode_configurations = {
         "Debug": {
             "//command_line_option:compilation_mode": "dbg",
@@ -2128,7 +2175,7 @@ xcodeproj(
             "//command_line_option:compilation_mode": "opt",
         },
     },
-    default_xcode_configuration = "Debug"
+    default_xcode_configuration = "Debug",
 )
 
 # Temporary targets used to simplify build tests

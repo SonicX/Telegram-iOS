@@ -37,3 +37,6 @@ url=https://github.com/TelegramMessenger/tgcalls.git
 [submodule "build-system/bazel-rules/sourcekit-bazel-bsp"]
 	path = build-system/bazel-rules/sourcekit-bazel-bsp
 url=https://github.com/ali-fareed/sourcekit-bazel-bsp.git
+[submodule "build-system/bazel-central-registry"]
+	path = build-system/bazel-central-registry
+	url = https://github.com/bazelbuild/bazel-central-registry.git

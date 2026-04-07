@@ -152,8 +152,10 @@ final class GlobalOverlayPresentationContext {
                             view.addSubview(controller.view)
                         }
                         (controller as? UIViewController)?.setIgnoreAppearanceMethodInvocations(false)
-                        controller.viewWillAppear(false)
-                        controller.viewDidAppear(false)
+                        if let uiController = controller as? UIViewController {
+                            uiController.beginAppearanceTransition(true, animated: false)
+                            uiController.endAppearanceTransition()
+                        }
                     }
                 }
             }))
@@ -169,9 +171,13 @@ final class GlobalOverlayPresentationContext {
     private func dismiss(_ controller: ContainableController) {
         if let index = self.controllers.firstIndex(where: { $0 === controller }) {
             self.controllers.remove(at: index)
-            controller.viewWillDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.beginAppearanceTransition(false, animated: false)
+            }
             controller.view.removeFromSuperview()
-            controller.viewDidDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.endAppearanceTransition()
+            }
         }
     }
     
@@ -235,8 +241,8 @@ final class GlobalOverlayPresentationContext {
                     }
                 }
                 if let view = self.currentPresentationView(underStatusBar: underStatusBar) {
-                    if !justMove {
-                        controller.viewWillAppear(false)
+                    if !justMove, let uiController = controller as? UIViewController {
+                        uiController.beginAppearanceTransition(true, animated: false)
                     }
                     view.addSubview(controller.view)
                     if !justMove {
@@ -246,7 +252,9 @@ final class GlobalOverlayPresentationContext {
                             controller.view.frame = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: layout.size)
                         }
                         controller.containerLayoutUpdated(layout, transition: .immediate)
-                        controller.viewDidAppear(false)
+                        if let uiController = controller as? UIViewController {
+                            uiController.endAppearanceTransition()
+                        }
                     }
                 }
             }
@@ -263,9 +271,13 @@ final class GlobalOverlayPresentationContext {
     
     private func removeViews() {
         for controller in self.controllers {
-            controller.viewWillDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.beginAppearanceTransition(false, animated: false)
+            }
             controller.view.removeFromSuperview()
-            controller.viewDidDisappear(false)
+            if let uiController = controller as? UIViewController {
+                uiController.endAppearanceTransition()
+            }
         }
         
         for globalPortalView in self.globalPortalViews {

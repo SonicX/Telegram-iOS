@@ -4499,7 +4499,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                                                         return
                                                     }
                                                     
-                                                    self.chatListDisplayNode.mainContainerNode.currentItemNode.scroller.panGestureRecognizer.state = .cancelled
+                                                    self.chatListDisplayNode.mainContainerNode.currentItemNode.cancelTracking()
                                                 })
                                             }
                                         }

@@ -44,7 +44,7 @@ final class ChatListContainerItemNode: ASDisplayNode {
     private(set) var emptyNode: ChatListEmptyNode?
     var emptyShimmerEffectNode: ChatListShimmerNode?
     private var shimmerNodeOffset: CGFloat = 0.0
-    let listNode: ChatListNode
+    let listNode: ChatListDisplayNode
     
     private var topPanel: TopPanelItem?
     
@@ -72,7 +72,7 @@ final class ChatListContainerItemNode: ASDisplayNode {
         self.openArchiveSettings = openArchiveSettings
         self.isInlineMode = isInlineMode
         
-        self.listNode = ChatListNode(getNavigationController: { return controller?.navigationController as? NavigationController }, context: context, location: location, chatListFilter: filter, previewing: previewing, fillPreloadItems: controlsHistoryPreload, mode: chatListMode, theme: presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, animationCache: animationCache, animationRenderer: animationRenderer, disableAnimations: true, isInlineMode: isInlineMode, autoSetReady: autoSetReady, isMainTab: isMainTab)
+        self.listNode = ChatListDisplayNode(getNavigationController: { return controller?.navigationController as? NavigationController }, context: context, location: location, chatListFilter: filter, previewing: previewing, fillPreloadItems: controlsHistoryPreload, mode: chatListMode, theme: presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, animationCache: animationCache, animationRenderer: animationRenderer, disableAnimations: true, isInlineMode: isInlineMode, autoSetReady: autoSetReady, isMainTab: isMainTab)
         
         if let controller, case .chatList(groupId: .root) = controller.location {
             self.listNode.scrollHeightTopInset = ChatListNavigationBar.searchScrollHeight + ChatListNavigationBar.storiesScrollHeight
@@ -292,10 +292,6 @@ final class ChatListContainerItemNode: ASDisplayNode {
     
     func updatePresentationData(_ presentationData: PresentationData) {
         self.presentationData = presentationData
-        
-        self.listNode.accessibilityPageScrolledString = { row, count in
-            return presentationData.strings.VoiceOver_ScrollStatus(row, count).string
-        }
         
         self.listNode.updateThemeAndStrings(theme: presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, disableAnimations: true)
         

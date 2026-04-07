@@ -376,9 +376,9 @@ public func nativeWindowHostView() -> (UIWindow & WindowHost, WindowHostView) {
     
     let rootViewController = WindowRootViewController()
     window.rootViewController = rootViewController
-    rootViewController.viewWillAppear(false)
+    rootViewController.beginAppearanceTransition(true, animated: false)
     rootViewController.view.frame = CGRect(origin: CGPoint(), size: window.bounds.size)
-    rootViewController.viewDidAppear(false)
+    rootViewController.endAppearanceTransition()
     
     let hostView = WindowHostView(
         containerView: rootViewController.view,

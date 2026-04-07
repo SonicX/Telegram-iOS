@@ -390,9 +390,9 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
             }
         }
         
-        self.peerSelectionNode.contentScrollingEnded = { [weak self] listView in
+        self.peerSelectionNode.contentScrollingEnded = { [weak self] _ in
             if let strongSelf = self, let searchContentNode = strongSelf.searchContentNode {
-                return fixNavigationSearchableListNodeScrolling(listView, searchNode: searchContentNode)
+                return strongSelf.peerSelectionNode.chatListNode?.fixNavigationSearchableScrolling(searchNode: searchContentNode) ?? false
             } else {
                 return false
             }

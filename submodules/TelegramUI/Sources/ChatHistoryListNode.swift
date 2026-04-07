@@ -103,27 +103,80 @@ enum ChatHistoryViewTransitionReason {
     case HoleReload
 }
 
+enum ChatHistoryItemOperationDirectionHint {
+    case up
+    case down
+}
+
+struct ChatHistoryDeleteItem {
+    let index: Int
+    let directionHint: ChatHistoryItemOperationDirectionHint?
+}
+
+enum ChatHistoryScrollDirectionHint {
+    case up
+    case down
+}
+
+enum ChatHistoryScrollAnimationCurve {
+    case `default`(duration: Double?)
+    case spring(duration: Double)
+    case custom(duration: Double, Float, Float, Float, Float)
+}
+
+enum ChatHistoryScrollCenterPosition {
+    case top
+    case bottom
+    case custom((ASDisplayNode) -> CGFloat)
+}
+
+enum ChatHistoryScrollPosition {
+    case top(CGFloat)
+    case bottom(CGFloat)
+    case center(ChatHistoryScrollCenterPosition)
+    case visible
+}
+
+struct ChatHistoryScrollToItem {
+    let index: Int
+    let position: ChatHistoryScrollPosition
+    let animated: Bool
+    let curve: ChatHistoryScrollAnimationCurve
+    let directionHint: ChatHistoryScrollDirectionHint
+    let displayLink: Bool
+}
+
+struct ChatHistoryTransitionOptions: OptionSet {
+    let rawValue: Int
+    
+    static let lowLatency = ChatHistoryTransitionOptions(rawValue: 1 << 0)
+    static let synchronous = ChatHistoryTransitionOptions(rawValue: 1 << 1)
+    static let preferSynchronousResourceLoading = ChatHistoryTransitionOptions(rawValue: 1 << 2)
+    static let animateAlpha = ChatHistoryTransitionOptions(rawValue: 1 << 3)
+    static let animateInsertion = ChatHistoryTransitionOptions(rawValue: 1 << 4)
+}
+
 struct ChatHistoryViewTransitionInsertEntry {
     let index: Int
     let previousIndex: Int?
     let entry: ChatHistoryEntry
-    let directionHint: ListViewItemOperationDirectionHint?
+    let directionHint: ChatHistoryItemOperationDirectionHint?
 }
 
 struct ChatHistoryViewTransitionUpdateEntry {
     let index: Int
     let previousIndex: Int
     let entry: ChatHistoryEntry
-    let directionHint: ListViewItemOperationDirectionHint?
+    let directionHint: ChatHistoryItemOperationDirectionHint?
 }
 
 struct ChatHistoryViewTransition {
     var historyView: ChatHistoryView
-    var deleteItems: [ListViewDeleteItem]
+    var deleteItems: [ChatHistoryDeleteItem]
     var insertEntries: [ChatHistoryViewTransitionInsertEntry]
     var updateEntries: [ChatHistoryViewTransitionUpdateEntry]
-    var options: ListViewDeleteAndInsertOptions
-    var scrollToItem: ListViewScrollToItem?
+    var options: ChatHistoryTransitionOptions
+    var scrollToItem: ChatHistoryScrollToItem?
     var stationaryItemRange: (Int, Int)?
     var initialData: InitialMessageHistoryData?
     var keyboardButtonsMessage: Message?
@@ -158,6 +211,140 @@ struct ChatHistoryListViewTransition {
     var reason: ChatHistoryViewTransitionReason
     var flashIndicators: Bool
     var animateFromPreviousFilter: Bool
+}
+
+private func listViewDirectionHint(_ hint: ChatHistoryItemOperationDirectionHint?) -> ListViewItemOperationDirectionHint? {
+    switch hint {
+    case .up:
+        return .Up
+    case .down:
+        return .Down
+    case .none:
+        return nil
+    }
+}
+
+func historyScrollDirectionHint(_ hint: ListViewScrollToItemDirectionHint) -> ChatHistoryScrollDirectionHint {
+    switch hint {
+    case .Up:
+        return .up
+    case .Down:
+        return .down
+    @unknown default:
+        return .down
+    }
+}
+
+func historyScrollPosition(_ position: ListViewScrollPosition) -> ChatHistoryScrollPosition {
+    switch position {
+    case let .top(inset):
+        return .top(inset)
+    case let .bottom(inset):
+        return .bottom(inset)
+    case let .center(center):
+        switch center {
+        case .top:
+            return .center(.top)
+        case .bottom:
+            return .center(.bottom)
+        case let .custom(f):
+            return .center(.custom({ itemNode in
+                if let itemNode = itemNode as? ListViewItemNode {
+                    return f(itemNode)
+                } else {
+                    return 0.0
+                }
+            }))
+        @unknown default:
+            return .center(.bottom)
+        }
+    case .visible:
+        return .visible
+    @unknown default:
+        return .bottom(0.0)
+    }
+}
+
+private func listViewDeleteItems(_ items: [ChatHistoryDeleteItem]) -> [ListViewDeleteItem] {
+    return items.map { item in
+        ListViewDeleteItem(index: item.index, directionHint: listViewDirectionHint(item.directionHint))
+    }
+}
+
+private func listViewOptions(_ options: ChatHistoryTransitionOptions) -> ListViewDeleteAndInsertOptions {
+    var result: ListViewDeleteAndInsertOptions = []
+    if options.contains(.lowLatency) {
+        result.insert(.LowLatency)
+    }
+    if options.contains(.synchronous) {
+        result.insert(.Synchronous)
+    }
+    if options.contains(.preferSynchronousResourceLoading) {
+        result.insert(.PreferSynchronousResourceLoading)
+    }
+    if options.contains(.animateAlpha) {
+        result.insert(.AnimateAlpha)
+    }
+    if options.contains(.animateInsertion) {
+        result.insert(.AnimateInsertion)
+    }
+    return result
+}
+
+private func listViewScrollDirectionHint(_ hint: ChatHistoryScrollDirectionHint) -> ListViewScrollToItemDirectionHint {
+    switch hint {
+    case .up:
+        return .Up
+    case .down:
+        return .Down
+    }
+}
+
+private func listViewAnimationCurve(_ curve: ChatHistoryScrollAnimationCurve) -> ListViewAnimationCurve {
+    switch curve {
+    case let .default(duration):
+        return .Default(duration: duration)
+    case let .spring(duration):
+        return .Spring(duration: duration)
+    case let .custom(duration, c1x, c1y, c2x, c2y):
+        return .Custom(duration: duration, c1x, c1y, c2x, c2y)
+    }
+}
+
+private func listViewScrollPosition(_ position: ChatHistoryScrollPosition) -> ListViewScrollPosition {
+    switch position {
+    case let .top(inset):
+        return .top(inset)
+    case let .bottom(inset):
+        return .bottom(inset)
+    case let .center(center):
+        switch center {
+        case .top:
+            return .center(.top)
+        case .bottom:
+            return .center(.bottom)
+        case let .custom(f):
+            return .center(.custom({ itemNode in
+                return f(itemNode)
+            }))
+        }
+    case .visible:
+        return .visible
+    }
+}
+
+private func listViewScrollToItem(_ item: ChatHistoryScrollToItem?) -> ListViewScrollToItem? {
+    guard let item else {
+        return nil
+    }
+    return ListViewScrollToItem(
+        index: item.index,
+        position: listViewScrollPosition(item.position),
+        animated: item.animated,
+        curve: listViewAnimationCurve(item.curve),
+        directionHint: listViewScrollDirectionHint(item.directionHint),
+        displayLink: item.displayLink
+    )
 }
 
 private func maxMessageIndexForEntries(_ view: ChatHistoryView, indexRange: (Int, Int)) -> (incoming: MessageIndex?, overall: MessageIndex?) {
@@ -223,126 +410,94 @@ extension ListMessageItemInteraction {
     }
 }
 
-private func mappedInsertEntries(context: AccountContext, chatLocation: ChatLocation, associatedData: ChatMessageItemAssociatedData, controllerInteraction: ChatControllerInteraction, mode: ChatHistoryListMode, lastHeaderId: Int64, isSavedMusic: Bool, canReorder: Bool, entries: [ChatHistoryViewTransitionInsertEntry]) -> [ListViewInsertItem] {
+func mappedChatHistoryEntryItem(context: AccountContext, chatLocation: ChatLocation, associatedData: ChatMessageItemAssociatedData, controllerInteraction: ChatControllerInteraction, mode: ChatHistoryListMode, lastHeaderId: Int64, isSavedMusic: Bool, canReorder: Bool, entry: ChatHistoryEntry) -> ListViewItem {
     var disableFloatingDateHeaders = false
     if case .customChatContents = chatLocation {
         disableFloatingDateHeaders = true
     }
     
-    return entries.map { entry -> ListViewInsertItem in
-        switch entry.entry {
-            case let .MessageEntry(message, presentationData, read, location, selection, attributes):
-                let item: ListViewItem
-                switch mode {
-                    case .bubbles:
-                        item = ChatMessageItemImpl(presentationData: presentationData, context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders || message.timestamp < 10)
-                    case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
-                        let displayHeader: Bool
-                        switch displayHeaders {
-                        case .none:
-                            displayHeader = false
-                        case .all:
-                            displayHeader = true
-                        case .allButLast:
-                            displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != lastHeaderId
-                        }
-                        item = ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch, isSavedMusic: isSavedMusic, canReorder: canReorder)
-                }
-                return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
-            case let .MessageGroupEntry(_, messages, presentationData):
-                let item: ListViewItem
-                switch mode {
-                    case .bubbles:
-                        item = ChatMessageItemImpl(presentationData: presentationData, context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, content: .group(messages: messages), disableDate: disableFloatingDateHeaders)
-                    case .list:
-                        assertionFailure()
-                        item = ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: messages[0].0, selection: .none, displayHeader: false)
-                }
-                return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
-            case let .UnreadEntry(_, presentationData):
-                return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatUnreadItem(index: entry.entry.index, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context), directionHint: entry.directionHint)
-            case let .ReplyCountEntry(_, isComments, count, presentationData):
-                return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatReplyCountItem(index: entry.entry.index, isComments: isComments, count: count, presentationData: presentationData, context: context, controllerInteraction: controllerInteraction), directionHint: entry.directionHint)
-            case let .ChatInfoEntry(data, presentationData):
-                let item: ListViewItem
-                switch data {
-                case let .botInfo(title, text, photo, video):
-                    item = ChatBotInfoItem(title: title, text: text, photo: photo, video: video, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
-                case let .userInfo(peer, verification, registrationDate, phoneCountry, groupsInCommonCount):
-                    item = ChatUserInfoItem(peer: peer, verification: verification, registrationDate: registrationDate, phoneCountry: phoneCountry, groupsInCommonCount: groupsInCommonCount, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
-                case .newThreadInfo:
-                    item = ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
-                }
-                return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
-            case let .SearchEntry(theme, strings):
-                return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatListSearchItem(theme: theme, placeholder: strings.Common_Search, activate: {
-                    controllerInteraction.openSearch()
-                }), directionHint: entry.directionHint)
+    switch entry {
+    case let .MessageEntry(message, presentationData, read, location, selection, attributes):
+        switch mode {
+        case .bubbles:
+            return ChatMessageItemImpl(presentationData: presentationData, context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders || message.timestamp < 10)
+        case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
+            let displayHeader: Bool
+            switch displayHeaders {
+            case .none:
+                displayHeader = false
+            case .all:
+                displayHeader = true
+            case .allButLast:
+                displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != lastHeaderId
+            }
+            return ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch, isSavedMusic: isSavedMusic, canReorder: canReorder)
         }
+    case let .MessageGroupEntry(_, messages, presentationData):
+        switch mode {
+        case .bubbles:
+            return ChatMessageItemImpl(presentationData: presentationData, context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, content: .group(messages: messages), disableDate: disableFloatingDateHeaders)
+        case .list:
+            assertionFailure()
+            return ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: messages[0].0, selection: .none, displayHeader: false)
+        }
+    case let .UnreadEntry(_, presentationData):
+        return ChatUnreadItem(index: entry.index, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context)
+    case let .ReplyCountEntry(_, isComments, count, presentationData):
+        return ChatReplyCountItem(index: entry.index, isComments: isComments, count: count, presentationData: presentationData, context: context, controllerInteraction: controllerInteraction)
+    case let .ChatInfoEntry(data, presentationData):
+        switch data {
+        case let .botInfo(title, text, photo, video):
+            return ChatBotInfoItem(title: title, text: text, photo: photo, video: video, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
+        case let .userInfo(peer, verification, registrationDate, phoneCountry, groupsInCommonCount):
+            return ChatUserInfoItem(peer: peer, verification: verification, registrationDate: registrationDate, phoneCountry: phoneCountry, groupsInCommonCount: groupsInCommonCount, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
+        case .newThreadInfo:
+            return ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
+        }
+    case let .SearchEntry(theme, strings):
+        return ChatListSearchItem(theme: theme, placeholder: strings.Common_Search, activate: {
+            controllerInteraction.openSearch()
+        })
+    }
+}
+
+private func mappedInsertEntries(context: AccountContext, chatLocation: ChatLocation, associatedData: ChatMessageItemAssociatedData, controllerInteraction: ChatControllerInteraction, mode: ChatHistoryListMode, lastHeaderId: Int64, isSavedMusic: Bool, canReorder: Bool, entries: [ChatHistoryViewTransitionInsertEntry]) -> [ListViewInsertItem] {
+    return entries.map { entry -> ListViewInsertItem in
+        let item = mappedChatHistoryEntryItem(context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, mode: mode, lastHeaderId: lastHeaderId, isSavedMusic: isSavedMusic, canReorder: canReorder, entry: entry.entry)
+        return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: listViewDirectionHint(entry.directionHint))
     }
 }
 
 private func mappedUpdateEntries(context: AccountContext, chatLocation: ChatLocation, associatedData: ChatMessageItemAssociatedData, controllerInteraction: ChatControllerInteraction, mode: ChatHistoryListMode, lastHeaderId: Int64, isSavedMusic: Bool, canReorder: Bool, entries: [ChatHistoryViewTransitionUpdateEntry]) -> [ListViewUpdateItem] {
-    var disableFloatingDateHeaders = false
-    if case .customChatContents = chatLocation {
-        disableFloatingDateHeaders = true
-    }
-    
     return entries.map { entry -> ListViewUpdateItem in
-        switch entry.entry {
-            case let .MessageEntry(message, presentationData, read, location, selection, attributes):
-                let item: ListViewItem
-                switch mode {
-                    case .bubbles:
-                        item = ChatMessageItemImpl(presentationData: presentationData, context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders || message.timestamp < 10)
-                    case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
-                        let displayHeader: Bool
-                        switch displayHeaders {
-                        case .none:
-                            displayHeader = false
-                        case .all:
-                            displayHeader = true
-                        case .allButLast:
-                            displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != lastHeaderId
-                        }
-                        item = ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch, isSavedMusic: isSavedMusic, canReorder: canReorder)
-                }
-                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
-            case let .MessageGroupEntry(_, messages, presentationData):
-                let item: ListViewItem
-                switch mode {
-                    case .bubbles:
-                        item = ChatMessageItemImpl(presentationData: presentationData, context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, content: .group(messages: messages), disableDate: disableFloatingDateHeaders)
-                    case .list:
-                        assertionFailure()
-                        item = ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: messages[0].0, selection: .none, displayHeader: false)
-                }
-                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
-            case let .UnreadEntry(_, presentationData):
-                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatUnreadItem(index: entry.entry.index, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context), directionHint: entry.directionHint)
-            case let .ReplyCountEntry(_, isComments, count, presentationData):
-                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatReplyCountItem(index: entry.entry.index, isComments: isComments, count: count, presentationData: presentationData, context: context, controllerInteraction: controllerInteraction), directionHint: entry.directionHint)
-            case let .ChatInfoEntry(data, presentationData):
-                let item: ListViewItem
-                switch data {
-                case let .botInfo(title, text, photo, video):
-                    item = ChatBotInfoItem(title: title, text: text, photo: photo, video: video, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
-                case let .userInfo(peer, verification, registrationDate, phoneCountry, groupsInCommonCount):
-                    item = ChatUserInfoItem(peer: peer, verification: verification, registrationDate: registrationDate, phoneCountry: phoneCountry, groupsInCommonCount: groupsInCommonCount, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
-                case .newThreadInfo:
-                    item = ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
-                }
-                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
-            case let .SearchEntry(theme, strings):
-                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatListSearchItem(theme: theme, placeholder: strings.Common_Search, activate: {
-                    controllerInteraction.openSearch()
-                }), directionHint: entry.directionHint)
-        }
+        let item = mappedChatHistoryEntryItem(context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, mode: mode, lastHeaderId: lastHeaderId, isSavedMusic: isSavedMusic, canReorder: canReorder, entry: entry.entry)
+        return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: listViewDirectionHint(entry.directionHint))
     }
 }
 
 private func mappedChatHistoryViewListTransition(context: AccountContext, chatLocation: ChatLocation, associatedData: ChatMessageItemAssociatedData, controllerInteraction: ChatControllerInteraction, mode: ChatHistoryListMode, lastHeaderId: Int64, isSavedMusic: Bool, canReorder: Bool, animateFromPreviousFilter: Bool, transition: ChatHistoryViewTransition) -> ChatHistoryListViewTransition {
-    return ChatHistoryListViewTransition(historyView: transition.historyView, deleteItems: transition.deleteItems, insertItems: mappedInsertEntries(context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, mode: mode, lastHeaderId: lastHeaderId, isSavedMusic: isSavedMusic, canReorder: canReorder, entries: transition.insertEntries), updateItems: mappedUpdateEntries(context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, mode: mode, lastHeaderId: lastHeaderId, isSavedMusic: isSavedMusic, canReorder: canReorder, entries: transition.updateEntries), options: transition.options, scrollToItem: transition.scrollToItem, stationaryItemRange: transition.stationaryItemRange, initialData: transition.initialData, keyboardButtonsMessage: transition.keyboardButtonsMessage, cachedData: transition.cachedData, cachedDataMessages: transition.cachedDataMessages, readStateData: transition.readStateData, scrolledToIndex: transition.scrolledToIndex, scrolledToSomeIndex: transition.scrolledToSomeIndex, peerType: associatedData.automaticDownloadPeerType, networkType: associatedData.automaticDownloadNetworkType, animateIn: transition.animateIn, reason: transition.reason, flashIndicators: transition.flashIndicators, animateFromPreviousFilter: animateFromPreviousFilter)
+    return ChatHistoryListViewTransition(
+        historyView: transition.historyView,
+        deleteItems: listViewDeleteItems(transition.deleteItems),
+        insertItems: mappedInsertEntries(context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, mode: mode, lastHeaderId: lastHeaderId, isSavedMusic: isSavedMusic, canReorder: canReorder, entries: transition.insertEntries),
+        updateItems: mappedUpdateEntries(context: context, chatLocation: chatLocation, associatedData: associatedData, controllerInteraction: controllerInteraction, mode: mode, lastHeaderId: lastHeaderId, isSavedMusic: isSavedMusic, canReorder: canReorder, entries: transition.updateEntries),
+        options: listViewOptions(transition.options),
+        scrollToItem: listViewScrollToItem(transition.scrollToItem),
+        stationaryItemRange: transition.stationaryItemRange,
+        initialData: transition.initialData,
+        keyboardButtonsMessage: transition.keyboardButtonsMessage,
+        cachedData: transition.cachedData,
+        cachedDataMessages: transition.cachedDataMessages,
+        readStateData: transition.readStateData,
+        scrolledToIndex: transition.scrolledToIndex,
+        scrolledToSomeIndex: transition.scrolledToSomeIndex,
+        peerType: associatedData.automaticDownloadPeerType,
+        networkType: associatedData.automaticDownloadNetworkType,
+        animateIn: transition.animateIn,
+        reason: transition.reason,
+        flashIndicators: transition.flashIndicators,
+        animateFromPreviousFilter: animateFromPreviousFilter
+    )
 }
 
 final class ChatHistoryTransactionOpaqueState {
@@ -480,19 +635,30 @@ private struct ChatHistoryAnimatedEmojiConfiguration {
 
 private var nextClientId: Int32 = 1
 
-public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHistoryListNode {
+public class LegacyChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHistoryListNode {
     static let fixedAdMessageStableId: UInt32 = UInt32.max - 5000
     
+    public var displayNode: ASDisplayNode {
+        return self
+    }
+    
+    public var scrollView: UIScrollView {
+        return self.scroller
+    }
+    
     public let context: AccountContext
-    private(set) var chatLocation: ChatLocation
+    var chatLocation: ChatLocation
     private let chatLocationContextHolder: Atomic<ChatLocationContextHolder?>
-    private let source: ChatHistoryListSource
-    private let subject: ChatControllerSubject?
-    private(set) var tag: HistoryViewInputTag?
-    private let controllerInteraction: ChatControllerInteraction
+    let source: ChatHistoryListSource
+    let subject: ChatControllerSubject?
+    var tag: HistoryViewInputTag?
+    let controllerInteraction: ChatControllerInteraction
     private let selectedMessages: Signal<Set<MessageId>?, NoError>
     var messageTransitionNode: () -> ChatMessageTransitionNodeImpl?
-    private let mode: ChatHistoryListMode
+    let mode: ChatHistoryListMode
+    var baseCanReorder: Bool = false
+    var currentIsSavedMusic: Bool = false
+    var historyListViewTransitionUpdated: ((ChatHistoryListViewTransition) -> Void)?
     
     var enableUnreadAlignment: Bool = true
     var areContentAnimationsEnabled: Bool = false
@@ -1854,6 +2020,8 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
             }
         }
+        self.currentIsSavedMusic = isSavedMusic
+        self.baseCanReorder = canReorder
         
         let previousView = self.previousView
         let automaticDownloadNetworkType = context.account.networkType
@@ -3157,7 +3325,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                             } else if let attribute = attribute as? ReactionsMessageAttribute, attribute.hasUnseen {
                                 hasUnseenReactions = true
                             } else if let attribute = attribute as? AdMessageAttribute {
-                                if message.stableId != ChatHistoryListNodeImpl.fixedAdMessageStableId {
+                                if message.stableId != Self.fixedAdMessageStableId {
                                     visibleAdOpaqueIds.append(attribute.opaqueId)
                                 }
                             } else if let _ = attribute as? ReplyStoryAttribute {
@@ -3928,6 +4096,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     }
     
     private func enqueueHistoryViewTransition(_ transition: ChatHistoryListViewTransition) {
+        self.historyListViewTransitionUpdated?(transition)
         self.enqueuedHistoryViewTransitions.append(transition)
         self.prefetchManager.updateOptions(InChatPrefetchOptions(networkType: transition.networkType, peerType: transition.peerType))
                 

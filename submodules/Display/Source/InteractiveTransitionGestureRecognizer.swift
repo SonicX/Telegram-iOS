@@ -75,7 +75,6 @@ public class InteractiveTransitionGestureRecognizer: UIPanGestureRecognizer {
         super.init(target: target, action: action)
         
         self.maximumNumberOfTouches = 1
-        self.delaysTouchesBegan = false
     }
     
     override public func reset() {
