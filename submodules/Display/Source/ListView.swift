@@ -993,6 +993,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        guard scrollView === self.scroller else {
+            return
+        }
         self.interruptAccessibilitySpeechIfNeeded()
         self.lastContentOffsetTimestamp = 0.0
         self.resetHeaderItemsFlashTimer(start: false)
@@ -1021,12 +1024,18 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     public func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+        guard scrollView === self.scroller else {
+            return
+        }
         if let shouldStopScrolling = self.shouldStopScrolling, shouldStopScrolling(velocity.y) {
             targetContentOffset.pointee.y = scrollView.contentOffset.y
         }
     }
     
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+    open func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard scrollView === self.scroller else {
+            return
+        }
         self.isDragging = false
         if decelerate {
             self.lastContentOffsetTimestamp = CACurrentMediaTime()
@@ -1056,7 +1065,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
     }
     
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+    open func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        guard scrollView === self.scroller else {
+            return
+        }
         self.lastContentOffsetTimestamp = 0.0
         self.isDeceleratingAfterTracking = false
         self.resetHeaderItemsFlashTimer(start: true)

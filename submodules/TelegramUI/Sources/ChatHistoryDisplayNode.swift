@@ -114,9 +114,10 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
     private var isSyncingToLegacy = false
     private var latestHistoryView: ChatHistoryView?
     private var tableOffsetObservation: NSKeyValueObservation?
-    /// Debounced row reloads so bursts of height corrections collapse into one pass (avoids empty `performBatchUpdates` fighting scroll).
+    /// Coalesces row height corrections onto the next main-queue turn (same-tick bursts merge into one `reloadRows`).
     private var tableHeightRefreshWorkItem: DispatchWorkItem?
-    private var pendingHeightReloadIndexPaths: Set<IndexPath> = []
+    /// Rows whose `approximateHeight` changed and need a UITableView pass (prefer `reloadRows` over global `beginUpdates`/`endUpdates`).
+    private var pendingHeightReloadRowIndices: Set<Int> = []
     /// Defer `UITableView.reloadData()` until the table is in a window with non-zero bounds (avoids UIKit “layout without being in the view hierarchy”).
     private var deferredHistoryTableReload = false
     
@@ -191,7 +192,6 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
             guard let self, !self.isSyncingFromLegacy else {
                 return
             }
-            self.view.bringSubviewToFront(self.tableView)
             let tableOffset = self.tableView.contentOffset
             let scrollerOffset = self.scroller.contentOffset
             if abs(tableOffset.y - scrollerOffset.y) < 0.5 && abs(tableOffset.x - scrollerOffset.x) < 0.5 {
@@ -223,10 +223,23 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         return self.tableView.bounds.width >= 1.0 && self.tableView.bounds.height >= 1.0
     }
     
+    /// `reloadData()` resets `UITableView` scroll state; `ListView` already updated `scroller` for history transitions (e.g. loading older messages). Resync immediately to avoid a visible jump/gap.
+    private func reloadHistoryTableDataPreservingLegacyScroll() {
+        guard self.canLayOutHistoryTableContent else {
+            if !self.tableRows.isEmpty {
+                self.deferredHistoryTableReload = true
+            }
+            return
+        }
+        self.tableView.reloadData()
+        self.tableView.layoutIfNeeded()
+        self.syncTableFromLegacy()
+    }
+    
     private func flushOrDeferHistoryTableReload() {
         if self.canLayOutHistoryTableContent {
             self.deferredHistoryTableReload = false
-            self.tableView.reloadData()
+            self.reloadHistoryTableDataPreservingLegacyScroll()
         } else {
             self.deferredHistoryTableReload = true
         }
@@ -237,21 +250,34 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
             return
         }
         self.deferredHistoryTableReload = false
-        self.tableView.reloadData()
+        self.reloadHistoryTableDataPreservingLegacyScroll()
     }
     
     fileprivate func historyTableDidAttachToWindow() {
         self.flushDeferredHistoryTableReloadIfNeeded()
         self.suppressLegacyListViewRendering()
+        Queue.mainQueue().async { [weak self] in
+            guard let self else {
+                return
+            }
+            self.flushDeferredHistoryTableReloadIfNeeded()
+            self.suppressLegacyListViewRendering()
+        }
     }
     
     public override func layout() {
         super.layout()
-        self.tableView.transform = self.needsUITableViewVerticalFlipTransform ? CGAffineTransform(scaleX: 1.0, y: -1.0) : .identity
-        self.tableView.frame = self.bounds
         if let latestHistoryView, self.tableRows.isEmpty {
             self.rebuildTableRows(from: latestHistoryView)
         }
+        guard self.canLayOutHistoryTableContent else {
+            if !self.tableRows.isEmpty {
+                self.deferredHistoryTableReload = true
+            }
+            return
+        }
+        self.tableView.transform = self.needsUITableViewVerticalFlipTransform ? CGAffineTransform(scaleX: 1.0, y: -1.0) : .identity
+        self.tableView.frame = self.bounds
         if abs(self.tableView.contentOffset.y - self.scroller.contentOffset.y) > 0.5 || abs(self.tableView.contentOffset.x - self.scroller.contentOffset.x) > 0.5 {
             self.syncTableFromLegacy()
         }
@@ -261,6 +287,12 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
     
     public override func updateLayout(transition: ContainedViewLayoutTransition, updateSizeAndInsets: ListViewUpdateSizeAndInsets) {
         super.updateLayout(transition: transition, updateSizeAndInsets: updateSizeAndInsets)
+        guard self.canLayOutHistoryTableContent else {
+            if !self.tableRows.isEmpty {
+                self.deferredHistoryTableReload = true
+            }
+            return
+        }
         self.tableView.frame = CGRect(origin: .zero, size: updateSizeAndInsets.size)
         self.tableView.contentInset = updateSizeAndInsets.insets
         self.tableView.scrollIndicatorInsets = updateSizeAndInsets.insets
@@ -271,6 +303,12 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
     
     public override func updateLayout(transition: ContainedViewLayoutTransition, updateSizeAndInsets: ListViewUpdateSizeAndInsets, additionalScrollDistance: CGFloat, scrollToTop: Bool, completion: @escaping () -> Void) {
         super.updateLayout(transition: transition, updateSizeAndInsets: updateSizeAndInsets, additionalScrollDistance: additionalScrollDistance, scrollToTop: scrollToTop, completion: completion)
+        guard self.canLayOutHistoryTableContent else {
+            if !self.tableRows.isEmpty {
+                self.deferredHistoryTableReload = true
+            }
+            return
+        }
         self.tableView.frame = CGRect(origin: .zero, size: updateSizeAndInsets.size)
         self.tableView.contentInset = updateSizeAndInsets.insets
         self.tableView.scrollIndicatorInsets = updateSizeAndInsets.insets
@@ -314,6 +352,9 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         guard !self.isSyncingToLegacy else {
             return
         }
+        guard self.canLayOutHistoryTableContent else {
+            return
+        }
         let target = self.scroller.contentOffset
         let current = self.tableView.contentOffset
         if abs(current.y - target.y) < 0.5 && abs(current.x - target.x) < 0.5 {
@@ -332,17 +373,18 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         }
         let width = max(1.0, self.tableView.bounds.width > 0.0 ? self.tableView.bounds.width : self.bounds.width)
         let params = ListViewItemLayoutParams(width: width, leftInset: 0.0, rightInset: 0.0, availableHeight: chatHistoryTableLayoutUnboundedHeight)
-        var measured = max(88.0, item.approximateHeight)
+        var measured = max(1.0, item.approximateHeight)
         item.nodeConfiguredForParams(async: { f in f() }, params: params, synchronousLoads: true, previousItem: previousItem, nextItem: nextItem, completion: { itemNode, _ in
-            measured = max(measured, itemNode.contentSize.height + itemNode.insets.top + itemNode.insets.bottom)
+            measured = itemNode.contentSize.height + itemNode.insets.top + itemNode.insets.bottom
         })
+        measured = max(ceilToScreenPixels(measured), UIScreenPixel)
         self.heightCache[stableId] = measured
         return measured
     }
     
-    private func actualNodeHeight(_ itemNode: ListViewItemNode, fallback: CGFloat) -> CGFloat {
+    private func actualNodeHeight(_ itemNode: ListViewItemNode) -> CGFloat {
         let measured = itemNode.contentSize.height + itemNode.insets.top + itemNode.insets.bottom
-        return max(fallback, measured)
+        return max(ceilToScreenPixels(measured), UIScreenPixel)
     }
     
     private func updateRowHeightIfNeeded(stableId: UInt64, measuredHeight: CGFloat) {
@@ -350,20 +392,46 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
             return
         }
         let current = self.tableRows[index].approximateHeight
-        // Tight threshold: channel rows include reactions + discussion bar; missing even a few pt breaks alignment.
-        guard abs(current - measuredHeight) > 1.0 else {
+        guard abs(current - measuredHeight) > 0.5 else {
             return
         }
         self.tableRows[index].approximateHeight = measuredHeight
         self.heightCache[stableId] = measuredHeight
-        self.pendingHeightReloadIndexPaths.insert(IndexPath(row: index, section: 0))
+        self.pendingHeightReloadRowIndices.insert(index)
         self.enqueueCoalescedTableHeightRefresh()
     }
     
     private func cancelPendingTableHeightRefresh() {
         self.tableHeightRefreshWorkItem?.cancel()
         self.tableHeightRefreshWorkItem = nil
-        self.pendingHeightReloadIndexPaths.removeAll()
+        self.pendingHeightReloadRowIndices.removeAll()
+    }
+    
+    private func applyPendingTableHeightReloadIfPossible() {
+        guard self.canLayOutHistoryTableContent else {
+            return
+        }
+        guard !self.pendingHeightReloadRowIndices.isEmpty else {
+            return
+        }
+        // `performWithoutAnimation` keeps `reloadRows` from adding visible flicker.
+        let rowCount = self.tableRows.count
+        let validIndices = self.pendingHeightReloadRowIndices.filter { $0 >= 0 && $0 < rowCount }
+        self.pendingHeightReloadRowIndices.removeAll()
+        guard !validIndices.isEmpty else {
+            return
+        }
+        let paths = validIndices.sorted().map { IndexPath(row: $0, section: 0) }
+        UIView.performWithoutAnimation {
+            self.tableView.reloadRows(at: paths, with: .none)
+        }
+    }
+    
+    private func flushDeferredHeightRefreshAfterScrollIfNeeded() {
+        guard !self.pendingHeightReloadRowIndices.isEmpty else {
+            return
+        }
+        self.applyPendingTableHeightReloadIfPossible()
     }
     
     private func enqueueCoalescedTableHeightRefresh() {
@@ -373,22 +441,10 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
                 return
             }
             self.tableHeightRefreshWorkItem = nil
-            guard self.canLayOutHistoryTableContent else {
-                return
-            }
-            let paths = Array(self.pendingHeightReloadIndexPaths).filter { path in
-                path.section == 0 && path.row >= 0 && path.row < self.tableRows.count
-            }
-            self.pendingHeightReloadIndexPaths.removeAll()
-            guard !paths.isEmpty else {
-                return
-            }
-            UIView.performWithoutAnimation {
-                self.tableView.reloadRows(at: paths, with: .none)
-            }
+            self.applyPendingTableHeightReloadIfPossible()
         }
         self.tableHeightRefreshWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: item)
+        DispatchQueue.main.async(execute: item)
     }
     
     private func rebuildTableRows(from historyView: ChatHistoryView) {
@@ -440,7 +496,7 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         let width = max(1.0, tableView.bounds.width)
         let params = ListViewItemLayoutParams(width: width, leftInset: 0.0, rightInset: 0.0, availableHeight: chatHistoryTableLayoutUnboundedHeight)
         itemNode.layoutForParams(params, item: row.item, previousItem: previousItem, nextItem: nextItem)
-        let actualHeight = self.actualNodeHeight(itemNode, fallback: row.approximateHeight)
+        let actualHeight = self.actualNodeHeight(itemNode)
         itemNode.frame = CGRect(origin: .zero, size: CGSize(width: width, height: actualHeight))
         cell.setItemNode(itemNode)
         self.copyAccessibility(from: itemNode, to: cell)
@@ -467,7 +523,7 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
                 guard let self, let cell, cell.currentStableId == stableId else {
                     return
                 }
-                let actualHeight = self.actualNodeHeight(cachedNode, fallback: row.approximateHeight)
+                let actualHeight = self.actualNodeHeight(cachedNode)
                 cachedNode.frame = CGRect(origin: .zero, size: CGSize(width: max(1.0, tableView.bounds.width), height: actualHeight))
                 cell.setItemNode(cachedNode)
                 self.copyAccessibility(from: cachedNode, to: cell)
@@ -484,7 +540,7 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
                 guard let cell, cell.currentStableId == stableId else {
                     return
                 }
-                let actualHeight = self.actualNodeHeight(itemNode, fallback: row.approximateHeight)
+                let actualHeight = self.actualNodeHeight(itemNode)
                 itemNode.frame = CGRect(origin: .zero, size: CGSize(width: max(1.0, tableView.bounds.width), height: actualHeight))
                 cell.setItemNode(itemNode)
                 self.copyAccessibility(from: itemNode, to: cell)
@@ -492,9 +548,29 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
             })
         }
     }
+    
+    public override func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        super.scrollViewDidEndDragging(scrollView, willDecelerate: decelerate)
+        if scrollView === self.tableView, !decelerate {
+            self.flushDeferredHeightRefreshAfterScrollIfNeeded()
+        }
+    }
+    
+    public override func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        super.scrollViewDidEndDecelerating(scrollView)
+        if scrollView === self.tableView {
+            self.flushDeferredHeightRefreshAfterScrollIfNeeded()
+        }
+    }
 }
 
-extension ChatHistoryListNodeImpl: UITableViewDataSource, UITableViewDelegate, UIScrollViewDelegate {
+extension ChatHistoryListNodeImpl: UITableViewDataSource, UITableViewDelegate {
+    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        if scrollView === self.tableView {
+            self.flushDeferredHeightRefreshAfterScrollIfNeeded()
+        }
+    }
+    
     public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return self.tableRows.count
     }

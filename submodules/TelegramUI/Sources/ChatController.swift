@@ -525,6 +525,8 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     let joinChannelDisposable = MetaDisposable()
     
     var shouldDisplayDownButton = false
+    /// Coalesces `shouldDisplayDownButton` updates from `contentPositionChanged` bursts (table ↔ legacy ListView sync, layout passes).
+    private var shouldDisplayDownButtonApplyWorkItem: DispatchWorkItem?
 
     var hasEmbeddedTitleContent = false
     var isEmbeddedTitleContentHidden = false
@@ -6207,6 +6209,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     }
     
     deinit {
+        self.shouldDisplayDownButtonApplyWorkItem?.cancel()
         // MARK: Swiftgram
         if let observer = sgShowHiddenPinnedMessagesObserver { NotificationCenter.default.removeObserver(observer) }
         let _ = ChatControllerCount.modify { value in
@@ -8655,6 +8658,24 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         self.raiseToListenActivateRecordingTimer?.invalidate()
         self.raiseToListenActivateRecordingTimer = nil
         self.dismissMediaRecorder(.pause)
+    }
+    
+    func scheduleShouldDisplayDownButtonUpdate(desiredValue: Bool) {
+        self.shouldDisplayDownButtonApplyWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else {
+                return
+            }
+            self.shouldDisplayDownButtonApplyWorkItem = nil
+            guard self.shouldDisplayDownButton != desiredValue else {
+                return
+            }
+            self.shouldDisplayDownButton = desiredValue
+            self.controllerInteraction?.recommendedChannelsOpenUp = !self.shouldDisplayDownButton
+            self.updateDownButtonVisibility()
+        }
+        self.shouldDisplayDownButtonApplyWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
     
     func updateDownButtonVisibility() {

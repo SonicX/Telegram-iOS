@@ -4969,9 +4969,7 @@ extension ChatControllerImpl {
                     plainInputSeparatorAlpha = 0.0
             }
             
-            strongSelf.shouldDisplayDownButton = !offsetAlpha.isZero
-            strongSelf.controllerInteraction?.recommendedChannelsOpenUp = !strongSelf.shouldDisplayDownButton
-            strongSelf.updateDownButtonVisibility()
+            strongSelf.scheduleShouldDisplayDownButtonUpdate(desiredValue: !offsetAlpha.isZero)
             strongSelf.chatDisplayNode.updatePlainInputSeparatorAlpha(plainInputSeparatorAlpha, transition: .animated(duration: 0.2, curve: .easeInOut))
         }
         
