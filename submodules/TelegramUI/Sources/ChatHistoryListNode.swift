@@ -5094,6 +5094,10 @@ public class LegacyChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         }
     }
     
+    /// UITableView-backed history (`ChatHistoryListNodeImpl`) overrides this to refresh visible rows; `ListView`-only hosts no-op.
+    func performHistoryTablePresentationReloadForMessageId(_ id: MessageId) {
+    }
+    
     func requestMessageUpdate(_ id: MessageId, andScrollToItem scroll: Bool = false) {
         if let historyView = self.historyView {
             var messageItem: ChatMessageItem?
@@ -5108,65 +5112,73 @@ public class LegacyChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
             })
             
+            let associatedData: ChatMessageItemAssociatedData
+            let disableFloatingDateHeaders: Bool
             if let messageItem = messageItem {
-                let associatedData = messageItem.associatedData
-                let disableFloatingDateHeaders = messageItem.disableDate
-                
-                loop: for i in 0 ..< historyView.filteredEntries.count {
-                    switch historyView.filteredEntries[i] {
-                    case let .MessageEntry(message, presentationData, read, location, selection, attributes):
-                        if message.id == id {
-                            let index = historyView.filteredEntries.count - 1 - i
-                            let item: ListViewItem
-                            switch self.mode {
-                            case .bubbles:
-                                item = ChatMessageItemImpl(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, associatedData: associatedData, controllerInteraction: self.controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders)
-                            case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
-                                let displayHeader: Bool
-                                switch displayHeaders {
-                                case .none:
-                                    displayHeader = false
-                                case .all:
-                                    displayHeader = true
-                                case .allButLast:
-                                    displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != historyView.lastHeaderId
-                                }
-                                item = ListMessageItem(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: self.controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch)
+                associatedData = messageItem.associatedData
+                disableFloatingDateHeaders = messageItem.disableDate
+            } else {
+                // UITableView-backed chat often has no `ChatMessageItemView` in `ListView.itemNodes` (nodes live in table cells).
+                associatedData = historyView.associatedData
+                disableFloatingDateHeaders = false
+            }
+            
+            loop: for i in 0 ..< historyView.filteredEntries.count {
+                switch historyView.filteredEntries[i] {
+                case let .MessageEntry(message, presentationData, read, location, selection, attributes):
+                    if message.id == id {
+                        let index = historyView.filteredEntries.count - 1 - i
+                        let item: ListViewItem
+                        switch self.mode {
+                        case .bubbles:
+                            item = ChatMessageItemImpl(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, associatedData: associatedData, controllerInteraction: self.controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders)
+                        case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
+                            let displayHeader: Bool
+                            switch displayHeaders {
+                            case .none:
+                                displayHeader = false
+                            case .all:
+                                displayHeader = true
+                            case .allButLast:
+                                displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != historyView.lastHeaderId
                             }
-                            let updateItem = ListViewUpdateItem(index: index, previousIndex: index, item: item, directionHint: nil)
-                            
-                            var scrollToItem: ListViewScrollToItem?
-                            if scroll {
-                                scrollToItem = ListViewScrollToItem(index: index, position: .center(.top), animated: true, curve: .Spring(duration: 0.4), directionHint: .Down, displayLink: true)
-                            }
-                            
-                            self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [updateItem], options: [.AnimateInsertion], scrollToItem: scrollToItem, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
-                            break loop
+                            item = ListMessageItem(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: self.controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch)
                         }
-                    case let .MessageGroupEntry(_, messages, presentationData):
-                        if messages.contains(where: { $0.0.id == id }) {
-                            let index = historyView.filteredEntries.count - 1 - i
-                            let item: ListViewItem
-                            switch self.mode {
-                            case .bubbles:
-                            item = ChatMessageItemImpl(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, associatedData: associatedData, controllerInteraction: self.controllerInteraction, content: .group(messages: messages), disableDate: disableFloatingDateHeaders)
-                            case .list:
-                                assertionFailure()
-                                item = ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: messages[0].0, selection: .none, displayHeader: false)
-                            }
-                            let updateItem = ListViewUpdateItem(index: index, previousIndex: index, item: item, directionHint: nil)
-                            
-                            var scrollToItem: ListViewScrollToItem?
-                            if scroll {
-                                scrollToItem = ListViewScrollToItem(index: index, position: .center(.top), animated: true, curve: .Spring(duration: 0.4), directionHint: .Down, displayLink: true)
-                            }
-                            
-                            self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [updateItem], options: [.AnimateInsertion], scrollToItem: scrollToItem, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
-                            break loop
+                        let updateItem = ListViewUpdateItem(index: index, previousIndex: index, item: item, directionHint: nil)
+                        
+                        var scrollToItem: ListViewScrollToItem?
+                        if scroll {
+                            scrollToItem = ListViewScrollToItem(index: index, position: .center(.top), animated: true, curve: .Spring(duration: 0.4), directionHint: .Down, displayLink: true)
                         }
-                    default:
-                        break
+                        
+                        self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [updateItem], options: [.AnimateInsertion], scrollToItem: scrollToItem, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
+                        self.performHistoryTablePresentationReloadForMessageId(id)
+                        break loop
                     }
+                case let .MessageGroupEntry(_, messages, presentationData):
+                    if messages.contains(where: { $0.0.id == id }) {
+                        let index = historyView.filteredEntries.count - 1 - i
+                        let item: ListViewItem
+                        switch self.mode {
+                        case .bubbles:
+                        item = ChatMessageItemImpl(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, associatedData: associatedData, controllerInteraction: self.controllerInteraction, content: .group(messages: messages), disableDate: disableFloatingDateHeaders)
+                        case .list:
+                            assertionFailure()
+                            item = ListMessageItem(presentationData: presentationData, context: context, chatLocation: chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: controllerInteraction), message: messages[0].0, selection: .none, displayHeader: false)
+                        }
+                        let updateItem = ListViewUpdateItem(index: index, previousIndex: index, item: item, directionHint: nil)
+                        
+                        var scrollToItem: ListViewScrollToItem?
+                        if scroll {
+                            scrollToItem = ListViewScrollToItem(index: index, position: .center(.top), animated: true, curve: .Spring(duration: 0.4), directionHint: .Down, displayLink: true)
+                        }
+                        
+                        self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [updateItem], options: [.AnimateInsertion], scrollToItem: scrollToItem, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
+                        self.performHistoryTablePresentationReloadForMessageId(id)
+                        break loop
+                    }
+                default:
+                    break
                 }
             }
         }
@@ -5186,38 +5198,44 @@ public class LegacyChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
             })
 
+            let associatedData: ChatMessageItemAssociatedData
+            let disableFloatingDateHeaders: Bool
             if let messageItem = messageItem {
-                let associatedData = messageItem.associatedData
-                let disableFloatingDateHeaders = messageItem.disableDate
+                associatedData = messageItem.associatedData
+                disableFloatingDateHeaders = messageItem.disableDate
+            } else {
+                associatedData = historyView.associatedData
+                disableFloatingDateHeaders = false
+            }
 
-                loop: for i in 0 ..< historyView.filteredEntries.count {
-                    switch historyView.filteredEntries[i] {
-                        case let .MessageEntry(message, presentationData, read, location, selection, attributes):
-                            if message.stableId == stableId {
-                                let index = historyView.filteredEntries.count - 1 - i
-                                let item: ListViewItem
-                                switch self.mode {
-                                    case .bubbles:
-                                        item = ChatMessageItemImpl(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, associatedData: associatedData, controllerInteraction: self.controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders)
-                                    case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
-                                        let displayHeader: Bool
-                                        switch displayHeaders {
-                                        case .none:
-                                            displayHeader = false
-                                        case .all:
-                                            displayHeader = true
-                                        case .allButLast:
-                                            displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != historyView.lastHeaderId
-                                        }
-                                        item = ListMessageItem(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: self.controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch)
-                                }
-                                let updateItem = ListViewUpdateItem(index: index, previousIndex: index, item: item, directionHint: nil)
-                                self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [updateItem], options: [.AnimateInsertion], scrollToItem: nil, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
-                                break loop
+            loop: for i in 0 ..< historyView.filteredEntries.count {
+                switch historyView.filteredEntries[i] {
+                    case let .MessageEntry(message, presentationData, read, location, selection, attributes):
+                        if message.stableId == stableId {
+                            let index = historyView.filteredEntries.count - 1 - i
+                            let item: ListViewItem
+                            switch self.mode {
+                                case .bubbles:
+                                    item = ChatMessageItemImpl(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, associatedData: associatedData, controllerInteraction: self.controllerInteraction, content: .message(message: message, read: read, selection: selection, attributes: attributes, location: location), disableDate: disableFloatingDateHeaders)
+                                case let .list(_, _, _, displayHeaders, hintLinks, isGlobalSearch):
+                                    let displayHeader: Bool
+                                    switch displayHeaders {
+                                    case .none:
+                                        displayHeader = false
+                                    case .all:
+                                        displayHeader = true
+                                    case .allButLast:
+                                        displayHeader = listMessageDateHeaderId(timestamp: message.timestamp) != historyView.lastHeaderId
+                                    }
+                                    item = ListMessageItem(presentationData: presentationData, context: self.context, chatLocation: self.chatLocation, interaction: ListMessageItemInteraction(controllerInteraction: self.controllerInteraction), message: message, translateToLanguage: associatedData.translateToLanguage, selection: selection, displayHeader: displayHeader, hintIsLink: hintLinks, isGlobalSearchResult: isGlobalSearch)
                             }
-                        default:
-                            break
-                    }
+                            let updateItem = ListViewUpdateItem(index: index, previousIndex: index, item: item, directionHint: nil)
+                            self.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [updateItem], options: [.AnimateInsertion], scrollToItem: nil, additionalScrollDistance: 0.0, updateSizeAndInsets: nil, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
+                            self.performHistoryTablePresentationReloadForMessageId(message.id)
+                            break loop
+                        }
+                    default:
+                        break
                 }
             }
         }

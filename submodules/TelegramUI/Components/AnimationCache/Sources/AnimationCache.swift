@@ -7,6 +7,16 @@ import Compression
 
 private let algorithm: compression_algorithm = COMPRESSION_LZFSE
 
+/// Xcode 26 imports `compression_stream` with non-optional pointer fields; zero the struct before `compression_stream_init` (C header: callers initialize buffer fields before `compression_stream_process`).
+private func zeroedCompressionStream() -> compression_stream {
+    let byteCount = MemoryLayout<compression_stream>.size
+    let alignment = MemoryLayout<compression_stream>.alignment
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: alignment)
+    defer { raw.deallocate() }
+    raw.initializeMemory(as: UInt8.self, repeating: 0, count: byteCount)
+    return raw.load(as: compression_stream.self)
+}
+
 private func alignUp(size: Int, align: Int) -> Int {
     precondition(((align - 1) & align) == 0, "Align must be a power of two")
 
@@ -730,7 +740,7 @@ private final class AnimationCacheItemAccessor {
             let frameType = Int(try compressedDataReader.readUInt32())
             
             let dctCoefficients: DctCoefficientsYUVA420
-            if let sharedDctCoefficients = self.sharedDctCoefficients, sharedDctCoefficients.yPlane.width == self.width, sharedDctCoefficients.yPlane.height == self.height, !"".isEmpty {
+            if let sharedDctCoefficients = self.sharedDctCoefficients, sharedDctCoefficients.yPlane.width == self.width, sharedDctCoefficients.yPlane.height == self.height {
                 dctCoefficients = sharedDctCoefficients
             } else {
                 dctCoefficients = DctCoefficientsYUVA420(width: self.width, height: self.height)
@@ -958,7 +968,8 @@ private final class CompressedFileWriter {
     }
     
     private let file: ManagedFile
-    private let stream: UnsafeMutablePointer<compression_stream>
+    /// Inline storage matches Apple’s samples; heap `allocate`/`deallocate` for `compression_stream` risk allocator mismatches under scroll pressure.
+    private var stream: compression_stream
     
     private let tempOutputBufferSize: Int = 64 * 1024
     private let tempOutputBuffer: UnsafeMutablePointer<UInt8>
@@ -971,19 +982,20 @@ private final class CompressedFileWriter {
     init?(file: ManagedFile) {
         self.file = file
         
-        self.stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
-        guard compression_stream_init(self.stream, COMPRESSION_STREAM_ENCODE, algorithm) != COMPRESSION_STATUS_ERROR else {
-            self.stream.deallocate()
+        var stream = zeroedCompressionStream()
+        guard compression_stream_init(&stream, COMPRESSION_STREAM_ENCODE, algorithm) != COMPRESSION_STATUS_ERROR else {
             return nil
         }
+        self.stream = stream
         
         self.tempOutputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: self.tempOutputBufferSize)
         self.tempInputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: self.tempInputBufferCapacity)
     }
     
     deinit {
-        compression_stream_destroy(self.stream)
-        self.stream.deallocate()
+        withUnsafeMutablePointer(to: &self.stream) {
+            _ = compression_stream_destroy($0)
+        }
         self.tempOutputBuffer.deallocate()
         self.tempInputBuffer.deallocate()
     }
@@ -997,20 +1009,22 @@ private final class CompressedFileWriter {
             return
         }
         
-        self.stream.pointee.src_ptr = UnsafePointer(self.tempInputBuffer)
-        self.stream.pointee.src_size = self.tempInputBufferSize
+        self.stream.src_ptr = UnsafePointer(self.tempInputBuffer)
+        self.stream.src_size = self.tempInputBufferSize
         
         while true {
-            self.stream.pointee.dst_ptr = self.tempOutputBuffer
-            self.stream.pointee.dst_size = self.tempOutputBufferSize
+            self.stream.dst_ptr = self.tempOutputBuffer
+            self.stream.dst_size = self.tempOutputBufferSize
             
-            let status = compression_stream_process(self.stream, 0)
+            let status = withUnsafeMutablePointer(to: &self.stream) {
+                compression_stream_process($0, 0)
+            }
             if status == COMPRESSION_STATUS_ERROR {
                 self.didFail = true
                 throw WriteError.generic
             }
             
-            let writtenBytes = self.tempOutputBufferSize - self.stream.pointee.dst_size
+            let writtenBytes = self.tempOutputBufferSize - self.stream.dst_size
             if writtenBytes > 0 {
                 let _ = self.file.write(self.tempOutputBuffer, count: writtenBytes)
             }
@@ -1018,7 +1032,7 @@ private final class CompressedFileWriter {
             if status == COMPRESSION_STATUS_END {
                 break
             } else {
-                if self.stream.pointee.src_size == 0 {
+                if self.stream.src_size == 0 {
                     break
                 }
             }
@@ -1051,16 +1065,18 @@ private final class CompressedFileWriter {
         try self.flushBuffer()
         
         while true {
-            self.stream.pointee.dst_ptr = self.tempOutputBuffer
-            self.stream.pointee.dst_size = self.tempOutputBufferSize
+            self.stream.dst_ptr = self.tempOutputBuffer
+            self.stream.dst_size = self.tempOutputBufferSize
             
-            let status = compression_stream_process(self.stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+            let status = withUnsafeMutablePointer(to: &self.stream) {
+                compression_stream_process($0, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+            }
             if status == COMPRESSION_STATUS_ERROR {
                 self.didFail = true
                 throw WriteError.generic
             }
             
-            let writtenBytes = self.tempOutputBufferSize - self.stream.pointee.dst_size
+            let writtenBytes = self.tempOutputBufferSize - self.stream.dst_size
             if writtenBytes > 0 {
                 let _ = self.file.write(self.tempOutputBuffer, count: writtenBytes)
             }
@@ -1091,30 +1107,44 @@ private final class DecompressedData {
         case didReadToEnd
     }
     
-    private let compressedData: Data
-    private let dataRange: Range<Int>
-    private let stream: UnsafeMutablePointer<compression_stream>
+    private var stream: compression_stream
+    /// Stable backing for `compression_stream.src_ptr`. `Data.withUnsafeBytes` is only valid inside its
+    /// closure; retaining a pointer into `Data` after `init` returns corrupts the heap under scroll/memory pressure.
+    private let sourceBuffer: UnsafeMutablePointer<UInt8>
+    private let sourceBufferCapacity: Int
     private var isComplete = false
     
     init?(compressedData: Data, dataRange: Range<Int>) {
-        self.compressedData = compressedData
-        self.dataRange = dataRange
-        
-        self.stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
-        guard compression_stream_init(self.stream, COMPRESSION_STREAM_DECODE, algorithm) != COMPRESSION_STATUS_ERROR else {
-            self.stream.deallocate()
+        guard dataRange.lowerBound >= 0, dataRange.upperBound <= compressedData.count, dataRange.lowerBound <= dataRange.upperBound else {
             return nil
         }
+        let byteCount = dataRange.count
         
-        self.compressedData.withUnsafeBytes { bytes in
-            self.stream.pointee.src_ptr = bytes.baseAddress!.assumingMemoryBound(to: UInt8.self).advanced(by: dataRange.lowerBound)
-            self.stream.pointee.src_size = dataRange.upperBound - dataRange.lowerBound
+        let capacity = max(byteCount, 1)
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
+        if byteCount > 0 {
+            compressedData.copyBytes(to: buffer, from: dataRange)
         }
+        
+        self.sourceBuffer = buffer
+        self.sourceBufferCapacity = capacity
+        
+        var stream = zeroedCompressionStream()
+        guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, algorithm) != COMPRESSION_STATUS_ERROR else {
+            buffer.deallocate()
+            return nil
+        }
+        self.stream = stream
+        
+        self.stream.src_ptr = UnsafePointer(buffer)
+        self.stream.src_size = byteCount
     }
     
     deinit {
-        compression_stream_destroy(self.stream)
-        self.stream.deallocate()
+        withUnsafeMutablePointer(to: &self.stream) {
+            _ = compression_stream_destroy($0)
+        }
+        self.sourceBuffer.deallocate()
     }
     
     func read(bytes: UnsafeMutablePointer<UInt8>, count: Int) throws {
@@ -1122,21 +1152,23 @@ private final class DecompressedData {
             throw ReadError.didReadToEnd
         }
         
-        self.stream.pointee.dst_ptr = bytes
-        self.stream.pointee.dst_size = count
+        self.stream.dst_ptr = bytes
+        self.stream.dst_size = count
         
-        let status = compression_stream_process(self.stream, 0)
+        let status = withUnsafeMutablePointer(to: &self.stream) {
+            compression_stream_process($0, 0)
+        }
         
         if status == COMPRESSION_STATUS_ERROR {
             self.isComplete = true
             throw ReadError.didReadToEnd
         } else if status == COMPRESSION_STATUS_END {
-            if self.stream.pointee.src_size == 0 {
+            if self.stream.src_size == 0 {
                 self.isComplete = true
             }
         }
          
-        if self.stream.pointee.dst_size != 0 {
+        if self.stream.dst_size != 0 {
             throw ReadError.didReadToEnd
         }
     }
@@ -1190,6 +1222,11 @@ private func loadItem(path: String) throws -> AnimationCacheItem {
     }
     let height = readUInt32(data: compressedData, offset: offset)
     offset += 4
+    
+    // Reject corrupt or hostile dimensions before any ImagePlane / Data(count:) allocations.
+    guard width > 0, height > 0, width <= 4096, height <= 4096 else {
+        throw LoadItemError.dataError
+    }
     
     if offset + 4 > dataLength {
         throw LoadItemError.dataError

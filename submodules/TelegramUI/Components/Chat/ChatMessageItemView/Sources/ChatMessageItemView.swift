@@ -710,6 +710,27 @@ open class ChatMessageItemView: ListViewItemNode, ChatMessageItemNodeProtocol {
         self.accessibilityData = accessibilityData
     }
     
+    /// When non-nil, VoiceOver linear navigation uses only these views for the row so swipes move between messages instead of inner controls.
+    open func messageVoiceOverGroupingAccessibilityElements() -> [Any]? {
+        return nil
+    }
+    
+    public final func applyMessageVoiceOverAccessibilityGrouping() {
+        guard self.isNodeLoaded else {
+            return
+        }
+        if let elements = self.messageVoiceOverGroupingAccessibilityElements(), !elements.isEmpty {
+            self.view.accessibilityElements = elements
+        } else {
+            self.view.accessibilityElements = nil
+        }
+    }
+    
+    override open func didLoad() {
+        super.didLoad()
+        self.applyMessageVoiceOverAccessibilityGrouping()
+    }
+    
     override open func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, previousItem: ListViewItem?, nextItem: ListViewItem?) {
         if let item = item as? ChatMessageItem {
             let doLayout = self.asyncLayout()

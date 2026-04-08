@@ -52,6 +52,11 @@ private final class ChatHistoryHostedCell: UITableViewCell {
     
     override func prepareForReuse() {
         super.prepareForReuse()
+        self.evictItemSubtreeForOffScreenMemory()
+    }
+    
+    /// Drop hosted nodes while the cell is off-screen so `ListViewItemNode` / video decode (`FFMpegMediaFrameSource`) can deallocate. UITableView reuse alone keeps a strong ref until the next `prepareForReuse`.
+    fileprivate func evictItemSubtreeForOffScreenMemory() {
         if let itemNode = self.itemNode {
             itemNode.removeFromSupernode()
             itemNode.view.removeFromSuperview()
@@ -213,6 +218,9 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         self.view.bringSubviewToFront(self.tableView)
     }
     
+    /// Window + superview checks, and **list node** non-zero bounds. Do not require `tableView.bounds`
+    /// here — `frame` is assigned inside `layout`/`updateLayout` only when this is true; using
+    /// `tableView.bounds` created a deadlock (zero table frame → never reload → empty chat).
     private var canLayOutHistoryTableContent: Bool {
         guard self.view.window != nil, self.tableView.window != nil else {
             return false
@@ -220,7 +228,7 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         guard self.view.superview != nil, self.tableView.superview != nil else {
             return false
         }
-        return self.tableView.bounds.width >= 1.0 && self.tableView.bounds.height >= 1.0
+        return self.bounds.width >= 1.0 && self.bounds.height >= 1.0
     }
     
     /// `reloadData()` resets `UITableView` scroll state; `ListView` already updated `scroller` for history transitions (e.g. loading older messages). Resync immediately to avoid a visible jump/gap.
@@ -414,16 +422,18 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         guard !self.pendingHeightReloadRowIndices.isEmpty else {
             return
         }
-        // `performWithoutAnimation` keeps `reloadRows` from adding visible flicker.
+        // Height-only corrections: `beginUpdates`/`endUpdates` forces the table to re-query
+        // `heightForRowAt` without `reloadRows` tearing down cells. That avoids visible “gaps”
+        // and inflated rows while async content (media, previews) settles — same data, new height.
         let rowCount = self.tableRows.count
         let validIndices = self.pendingHeightReloadRowIndices.filter { $0 >= 0 && $0 < rowCount }
         self.pendingHeightReloadRowIndices.removeAll()
         guard !validIndices.isEmpty else {
             return
         }
-        let paths = validIndices.sorted().map { IndexPath(row: $0, section: 0) }
         UIView.performWithoutAnimation {
-            self.tableView.reloadRows(at: paths, with: .none)
+            self.tableView.beginUpdates()
+            self.tableView.endUpdates()
         }
     }
     
@@ -445,6 +455,50 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
         }
         self.tableHeightRefreshWorkItem = item
         DispatchQueue.main.async(execute: item)
+    }
+    
+    /// `requestMessageUpdate` updates the hidden `ListView` only; the visible `UITableView` must reload or row heights stay stale (e.g. “Read more” / expanded text).
+    override func performHistoryTablePresentationReloadForMessageId(_ id: MessageId) {
+        guard let historyView = self.latestHistoryView else {
+            return
+        }
+        guard !self.tableRows.isEmpty else {
+            return
+        }
+        let entries = self.isTableRowOrderReversedFromHistoryEntries ? Array(historyView.filteredEntries.reversed()) : historyView.filteredEntries
+        var rowIndex: Int?
+        var stableId: UInt64?
+        for (i, entry) in entries.enumerated() {
+            switch entry {
+            case let .MessageEntry(message, _, _, _, _, _):
+                if message.id == id {
+                    rowIndex = i
+                    stableId = entry.stableId
+                }
+            case let .MessageGroupEntry(_, messages, _):
+                if messages.contains(where: { $0.0.id == id }) {
+                    rowIndex = i
+                    stableId = entry.stableId
+                }
+            default:
+                break
+            }
+            if rowIndex != nil {
+                break
+            }
+        }
+        guard let resolvedRow = rowIndex, let resolvedStable = stableId, resolvedRow < self.tableRows.count, self.tableRows[resolvedRow].stableId == resolvedStable else {
+            return
+        }
+        self.heightCache.removeValue(forKey: resolvedStable)
+        let row = self.tableRows[resolvedRow]
+        let previousItem = resolvedRow > 0 ? self.tableRows[resolvedRow - 1].item : nil
+        let nextItem = resolvedRow + 1 < self.tableRows.count ? self.tableRows[resolvedRow + 1].item : nil
+        let newHeight = self.measuredHeight(for: row.item, stableId: resolvedStable, previousItem: previousItem, nextItem: nextItem)
+        self.tableRows[resolvedRow].approximateHeight = newHeight
+        UIView.performWithoutAnimation {
+            self.tableView.reloadRows(at: [IndexPath(row: resolvedRow, section: 0)], with: .none)
+        }
     }
     
     private func rebuildTableRows(from historyView: ChatHistoryView) {
@@ -536,10 +590,10 @@ public final class ChatHistoryListNodeImpl: LegacyChatHistoryListNodeImpl {
                 }
                 let (_, apply) = getApply()
                 apply(ListViewItemApply(isOnScreen: true))
-                self.nodeCache[stableId] = itemNode
                 guard let cell, cell.currentStableId == stableId else {
                     return
                 }
+                self.nodeCache[stableId] = itemNode
                 let actualHeight = self.actualNodeHeight(itemNode)
                 itemNode.frame = CGRect(origin: .zero, size: CGSize(width: max(1.0, tableView.bounds.width), height: actualHeight))
                 cell.setItemNode(itemNode)
@@ -584,5 +638,17 @@ extension ChatHistoryListNodeImpl: UITableViewDataSource, UITableViewDelegate {
         cell.isReversed = self.needsUITableViewVerticalFlipTransform
         self.configureHistoryHostedCell(cell, at: indexPath, tableView: tableView)
         return cell
+    }
+    
+    public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard tableView === self.tableView, indexPath.row >= 0, indexPath.row < self.tableRows.count else {
+            return
+        }
+        let stableId = self.tableRows[indexPath.row].stableId
+        guard let hosted = cell as? ChatHistoryHostedCell, hosted.currentStableId == stableId else {
+            return
+        }
+        self.nodeCache.removeValue(forKey: stableId)
+        hosted.evictItemSubtreeForOffScreenMemory()
     }
 }

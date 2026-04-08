@@ -238,6 +238,17 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         self.messageAccessibilityArea.focused = { [weak self] in
             self?.accessibilityElementDidBecomeFocused()
         }
+        
+        self.messageAccessibilityArea.activate = { [weak self] in
+            guard let strongSelf = self else {
+                return false
+            }
+            if let selectionNode = strongSelf.selectionNode {
+                selectionNode.toggleSelectionFromAccessibility()
+                return true
+            }
+            return false
+        }
     }
     
     deinit {
@@ -799,6 +810,11 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         } else {
             self.messageAccessibilityArea.accessibilityCustomActions = nil
         }
+        self.applyMessageVoiceOverAccessibilityGrouping()
+    }
+    
+    override public func messageVoiceOverGroupingAccessibilityElements() -> [Any]? {
+        return [self.messageAccessibilityArea.view]
     }
     
     @objc private func performLocalAccessibilityCustomAction(_ action: UIAccessibilityCustomAction) {

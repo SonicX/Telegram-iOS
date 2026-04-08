@@ -288,6 +288,14 @@ final class NetworkFrameworkTcpConnectionInterface: NSObject, MTTcpConnectionInt
             }
             if let connection = self.connection {
                 self.connection = nil
+                // Clear handlers before cancel so Network.framework does not deliver path/state
+                // callbacks that retain a connection being torn down (avoids "Resurrection of an object"
+                // traps in _os_object_retain on com.apple.network.interface).
+                connection.stateUpdateHandler = nil
+                connection.pathUpdateHandler = nil
+                connection.viabilityUpdateHandler = nil
+                self.currentReadRequest = nil
+                self.readRequests.removeAll()
                 connection.cancel()
             }
         }

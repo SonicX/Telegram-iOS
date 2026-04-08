@@ -11,6 +11,10 @@ private func alignUp(size: Int, align: Int) -> Int {
 }
 
 final class ImagePlane: CustomStringConvertible {
+    /// Bounds single-plane allocation; corrupt animation metadata must not build multi‑GB `Data`.
+    private static let maxDimension = 4096
+    private static let maxBackedBytes = 48 * 1024 * 1024
+    
     let width: Int
     let height: Int
     let bytesPerRow: Int
@@ -19,12 +23,18 @@ final class ImagePlane: CustomStringConvertible {
     var data: Data
     
     init(width: Int, height: Int, components: Int, rowAlignment: Int?) {
+        precondition(width > 0 && height > 0 && components > 0)
+        precondition(width <= Self.maxDimension && height <= Self.maxDimension)
         self.width = width
         self.height = height
         self.rowAlignment = rowAlignment ?? 1
-        self.bytesPerRow = alignUp(size: width * components, align: self.rowAlignment)
+        let rawStride = width.multipliedReportingOverflow(by: components)
+        precondition(!rawStride.overflow)
+        self.bytesPerRow = alignUp(size: rawStride.partialValue, align: self.rowAlignment)
         self.components = components
-        self.data = Data(count: self.bytesPerRow * height)
+        let total = self.bytesPerRow.multipliedReportingOverflow(by: height)
+        precondition(!total.overflow && total.partialValue > 0 && total.partialValue <= Self.maxBackedBytes)
+        self.data = Data(count: total.partialValue)
     }
     
     var description: String {

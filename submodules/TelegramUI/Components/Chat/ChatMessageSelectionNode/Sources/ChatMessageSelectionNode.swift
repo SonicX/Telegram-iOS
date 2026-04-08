@@ -42,6 +42,10 @@ public final class ChatMessageSelectionNode: ASDisplayNode {
         }
     }
     
+    public func toggleSelectionFromAccessibility() {
+        self.toggle(!self.selected)
+    }
+    
     @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
         if case .ended = recognizer.state {
             self.toggle(!self.selected)
