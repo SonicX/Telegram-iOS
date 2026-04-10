@@ -25,6 +25,7 @@ import ChatListHeaderComponent
 import UndoUI
 import NewSessionInfoScreen
 import PresentationDataUtils
+import SGSimpleSettings
 
 private final class ChatListTableContainerView: UIView {
     weak var escapeHandler: ChatListTableNode?
@@ -133,6 +134,36 @@ private func chatListTableApproximateHeight(entry: ChatListNodeEntry) -> CGFloat
         return 74.0
     case .ContactEntry:
         return 60.0
+    }
+}
+
+/// UITableView uses fixed row heights; `ChatListItemNode` applies the same `/ 1.5` height reduction as in `ChatListItem.asyncLayout` when compact chat list is enabled.
+private func chatListTablePreferredRowHeight(entry: ChatListNodeEntry) -> CGFloat {
+    var height = chatListTableApproximateHeight(entry: entry)
+    switch entry {
+    case .PeerEntry, .GroupReferenceEntry:
+        if SGSimpleSettings.shared.compactChatList {
+            height /= 1.5
+        }
+    default:
+        break
+    }
+    return height
+}
+
+private func updateListItemNodeVisibilityForHostedCell(_ cell: ChatListHostedCell, visible: Bool) {
+    guard let itemNode = cell.itemNode else {
+        return
+    }
+    if visible {
+        let size = cell.contentView.bounds.size
+        if size.width > 0.0, size.height > 0.0 {
+            itemNode.visibility = .visible(1.0, CGRect(origin: .zero, size: size))
+        } else {
+            itemNode.visibility = .visible(1.0, CGRect.infinite)
+        }
+    } else {
+        itemNode.visibility = .none
     }
 }
 
@@ -674,7 +705,7 @@ final class ChatListTableNode: ASDisplayNode, ChatListDisplayNodeBackend, UITabl
                     isPeerEnabled: isPeerEnabled,
                     entry: entry
                 )
-                let preferredHeight = chatListTableApproximateHeight(entry: entry)
+                let preferredHeight = chatListTablePreferredRowHeight(entry: entry)
                 let itemHeight = max(0.0, item.approximateHeight)
                 let resolvedHeight: CGFloat
                 switch entry {
@@ -1036,6 +1067,7 @@ final class ChatListTableNode: ASDisplayNode, ChatListDisplayNodeBackend, UITabl
         itemNode.frame = CGRect(origin: .zero, size: CGSize(width: width, height: row.approximateHeight))
         cell.setItemNode(itemNode)
         self.copyAccessibility(from: itemNode, to: cell)
+        updateListItemNodeVisibilityForHostedCell(cell, visible: true)
         return true
     }
 
@@ -1060,6 +1092,7 @@ final class ChatListTableNode: ASDisplayNode, ChatListDisplayNodeBackend, UITabl
                 current.frame = CGRect(origin: .zero, size: CGSize(width: max(1.0, tableView.bounds.width), height: row.approximateHeight))
                 cell.setItemNode(current)
                 self.copyAccessibility(from: current, to: cell)
+                updateListItemNodeVisibilityForHostedCell(cell, visible: true)
             })
         } else {
             row.item.nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: true, previousItem: previousItem, nextItem: nextItem, completion: { [weak self, weak cell] itemNode, getApply in
@@ -1076,6 +1109,7 @@ final class ChatListTableNode: ASDisplayNode, ChatListDisplayNodeBackend, UITabl
                 itemNode.frame = CGRect(origin: .zero, size: CGSize(width: max(1.0, tableView.bounds.width), height: row.approximateHeight))
                 cell.setItemNode(itemNode)
                 self.copyAccessibility(from: itemNode, to: cell)
+                updateListItemNodeVisibilityForHostedCell(cell, visible: true)
             })
         }
     }
@@ -1104,6 +1138,18 @@ final class ChatListTableNode: ASDisplayNode, ChatListDisplayNodeBackend, UITabl
         let cell = tableView.dequeueReusableCell(withIdentifier: "c", for: indexPath) as! ChatListHostedCell
         self.configureHostedCell(cell, at: indexPath, tableView: tableView)
         return cell
+    }
+
+    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if let hosted = cell as? ChatListHostedCell {
+            updateListItemNodeVisibilityForHostedCell(hosted, visible: true)
+        }
+    }
+
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if let hosted = cell as? ChatListHostedCell {
+            updateListItemNodeVisibilityForHostedCell(hosted, visible: false)
+        }
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

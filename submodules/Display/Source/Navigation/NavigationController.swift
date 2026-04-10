@@ -1992,9 +1992,9 @@ open class NavigationController: UINavigationController, ContainableController, 
             performPop()
         }) {
             performPop()
+            return true
         }
-        
-        return true
+        return false
     }
     
     public func updateRootContainerTransitionOffset(_ offset: CGFloat, transition: ContainedViewLayoutTransition) {

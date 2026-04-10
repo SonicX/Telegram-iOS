@@ -95,6 +95,23 @@ public final class ListViewBackingView: UIView {
         voDebugLog("[VO-DEBUG] ListViewBackingView.accessibilityScroll called, direction=\(direction.rawValue), target=\(self.target != nil)")
         return self.target?.accessibilityScroll(direction) ?? false
     }
+    
+    override public func accessibilityPerformEscape() -> Bool {
+        guard let target = self.target else {
+            return super.accessibilityPerformEscape()
+        }
+        var responder: UIResponder? = target.view
+        while let current = responder {
+            if let navigationController = current as? NavigationController {
+                return navigationController.accessibilityPerformEscape()
+            }
+            if let viewController = current as? UIViewController, let navigationController = viewController.navigationController as? NavigationController {
+                return navigationController.accessibilityPerformEscape()
+            }
+            responder = current.next
+        }
+        return super.accessibilityPerformEscape()
+    }
 }
 
 private final class ListViewTimerProxy: NSObject {

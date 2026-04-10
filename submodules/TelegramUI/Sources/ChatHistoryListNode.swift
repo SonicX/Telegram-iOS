@@ -4096,7 +4096,6 @@ public class LegacyChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     }
     
     private func enqueueHistoryViewTransition(_ transition: ChatHistoryListViewTransition) {
-        self.historyListViewTransitionUpdated?(transition)
         self.enqueuedHistoryViewTransitions.append(transition)
         self.prefetchManager.updateOptions(InChatPrefetchOptions(networkType: transition.networkType, peerType: transition.peerType))
                 
@@ -4305,6 +4304,7 @@ public class LegacyChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
         let completion: (Bool, ListViewDisplayedItemRange) -> Void = { [weak self] wasTransformed, visibleRange in
             if let strongSelf = self {
+                strongSelf.historyListViewTransitionUpdated?(transition)
                 strongSelf.currentAppliedDeleteAnimationCorrelationIds.removeAll()
                 
                 var newIncomingReactions: [MessageId: (value: MessageReaction.Reaction, isLarge: Bool)] = [:]
