@@ -1385,7 +1385,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
-        var activeSourceViewIds = Set<ObjectIdentifier>()
+        var activeLocalIndices = Set<Int>()
         let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
@@ -1425,13 +1425,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 guard !intersection.isNull, intersection.height > 1.0, intersection.width > 1.0 else {
                     return
                 }
-                let viewId = ObjectIdentifier(itemNode.view)
-                activeSourceViewIds.insert(viewId)
+                activeLocalIndices.insert(itemIndex)
                 if itemNode.isAccessibilityElement {
                     guard let itemData = self.accessibilityData(for: itemNode.view, clippedTo: visibleScreenRect) else {
                         return
                     }
-                    let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
+                    let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: 0, sourceView: itemNode.view)
                     element.accessibilityFrame = itemData.frame
                     element.accessibilityLabel = itemData.label
                     element.accessibilityValue = itemData.value
@@ -1472,7 +1471,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     }
                     let composedLabel = labels.joined(separator: ", ")
                     if !composedLabel.isEmpty, let frame = combinedFrame, frame.width > 1.0, frame.height > 1.0 {
-                        let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
+                        let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: 0, sourceView: itemNode.view)
                         element.accessibilityFrame = frame
                         element.accessibilityLabel = composedLabel
                         element.accessibilityValue = nil
@@ -1517,7 +1516,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     return lhs.order < rhs.order
                 }
             }).map(\.element)
-            self.cleanupDirectionalElementPool(activeSourceViewIds: activeSourceViewIds)
+            self.cleanupDirectionalElementPool(activeLocalIndices: activeLocalIndices)
         } else {
             accessibilityElements = accessibilityElements.enumerated().sorted(by: { lhs, rhs in
                 let lhsFrame = (lhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null

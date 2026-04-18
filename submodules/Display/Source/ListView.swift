@@ -244,6 +244,26 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
     }
     
+    // When set (e.g. while VoiceOver is active), overrides `invisibleInset` at
+    // state-creation time.  Used to force `ListView` to materialise *every*
+    // item in the list so that the accessibility array really contains all of
+    // them – otherwise VoiceOver can only traverse the ~screen-sized buffer
+    // that ListView normally keeps realised and eventually escapes the list.
+    public var accessibilityInvisibleInsetOverride: CGFloat? {
+        didSet {
+            if self.accessibilityInvisibleInsetOverride != oldValue {
+                self.enqueueUpdateVisibleItems(synchronous: false)
+            }
+        }
+    }
+    
+    private var effectiveInvisibleInset: CGFloat {
+        if let override = self.accessibilityInvisibleInsetOverride {
+            return override
+        }
+        return self.invisibleInset
+    }
+    
     public final var keepMinimalScrollHeightWithTopInset: CGFloat?
     
     public final var itemNodeHitTest: ((CGPoint) -> Bool)?
@@ -476,7 +496,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
-        var activeSourceViewIds = Set<ObjectIdentifier>()
+        var activeLocalIndices = Set<Int>()
         let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
@@ -488,27 +508,53 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
         }
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
-        let visibleBoundsRect = CGRect(
-            x: 0.0,
-            y: self.rotated ? self.insets.bottom : self.insets.top,
-            width: self.visibleSize.width,
-            height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
-        )
-        let visibleScreenRect = UIAccessibility.convertToScreenCoordinates(visibleBoundsRect, in: self.view)
+        // Expanded accessibility inclusion zone.
+        //
+        // Rationale (see investigation summarised in ListView comments and
+        // commit log): when we only include item nodes whose frames strictly
+        // intersect the visible rect, each programmatic silent-scroll of one
+        // row drops *both* accessibility children of the cell exiting at the
+        // top (≈2 elements removed) while the cell entering at the bottom
+        // contributes only one element at a time (its second child is still
+        // clipped to zero height by the visible screen rect), which produces
+        // a monotonically shrinking array (8 → 7 → 6 → … → 0) that
+        // inevitably pushes VoiceOver focus out of the list.
+        //
+        // Instead we expand the inclusion zone by one full visible screen in
+        // each direction so that the entire render buffer of already-
+        // materialised item nodes is admitted. Children are then passed
+        // through with their *original* (potentially partially off-screen)
+        // accessibilityFrame, which is something VoiceOver handles natively:
+        // it keeps the element in its traversal order and — paired with the
+        // offscreen-focus-scroll handling below — lets the user walk through
+        // items beyond the viewport without the array ever collapsing.
+        let accessibilityInclusionRect: CGRect
+        if self.accessibilityInvisibleInsetOverride != nil {
+            // Full-materialisation mode: include *every* materialised item,
+            // regardless of on-screen position.  Combined with the huge
+            // `invisibleInset` override and the on-focus
+            // `scrollAccessibilityFocusIntoViewIfNeeded` path below, this lets
+            // VoiceOver traverse the complete list (e.g. all 51 chats)
+            // without the accessibility array ever collapsing to a screen-
+            // sized window.
+            let huge = CGFloat(1_000_000_000.0)
+            accessibilityInclusionRect = CGRect(x: -huge / 2.0, y: -huge / 2.0, width: huge, height: huge)
+        } else {
+            accessibilityInclusionRect = visibleRect.insetBy(dx: 0.0, dy: -max(visibleRect.height, 1.0))
+        }
         self.forEachItemNode({ node in
             if trackDirectionalFocus {
                 guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
                     return
                 }
-                let intersection = itemNode.frame.intersection(visibleRect)
+                let intersection = itemNode.frame.intersection(accessibilityInclusionRect)
                 guard !intersection.isNull, intersection.height > 1.0, intersection.width > 1.0 else {
                     return
                 }
-                let viewId = ObjectIdentifier(itemNode.view)
-                activeSourceViewIds.insert(viewId)
+                activeLocalIndices.insert(itemIndex)
                 if itemNode.isAccessibilityElement {
-                    let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: 0)
-                    let frame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view).intersection(visibleScreenRect)
+                    let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: 0, sourceView: itemNode.view)
+                    let frame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
                     guard !frame.isNull, frame.height > 1.0, frame.width > 1.0 else {
                         return
                     }
@@ -523,11 +569,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 } else if let nodeChildren = itemNode.accessibilityElements {
                     for (order, childElement) in nodeChildren.enumerated() {
                         if let child = childElement as? UIAccessibilityElement {
-                            let frame = child.accessibilityFrame.intersection(visibleScreenRect)
+                            let frame = child.accessibilityFrame
                             guard !frame.isNull, frame.height > 1.0, frame.width > 1.0 else {
                                 continue
                             }
-                            let element = self.reuseOrCreateDirectionalElement(sourceView: itemNode.view, childOrder: order)
+                            let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: order, sourceView: itemNode.view)
                             element.accessibilityFrame = frame
                             element.accessibilityLabel = child.accessibilityLabel
                             element.accessibilityValue = child.accessibilityValue
@@ -565,7 +611,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     return lhs.order < rhs.order
                 }
             }).map(\.element)
-            self.cleanupDirectionalElementPool(activeSourceViewIds: activeSourceViewIds)
+            self.cleanupDirectionalElementPool(activeLocalIndices: activeLocalIndices)
         } else {
             accessibilityElements = accessibilityElements.enumerated().sorted(by: { lhs, rhs in
                 let lhsFrame = (lhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
@@ -2005,7 +2051,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 nodes.append(.Placeholder(frame: node.apparentFrame))
             }
         }
-        return ListViewState(insets: self.insets, itemOffsetInsets: self.itemOffsetInsets ?? self.insets, visibleSize: self.visibleSize, invisibleInset: self.invisibleInset, nodes: nodes, scrollPosition: nil, stationaryOffset: nil, stackFromBottom: self.stackFromBottom)
+        return ListViewState(insets: self.insets, itemOffsetInsets: self.itemOffsetInsets ?? self.insets, visibleSize: self.visibleSize, invisibleInset: self.effectiveInvisibleInset, nodes: nodes, scrollPosition: nil, stationaryOffset: nil, stackFromBottom: self.stackFromBottom)
     }
     
     public func addAfterTransactionsCompleted(_ f: @escaping () -> Void) {
@@ -5483,13 +5529,24 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var accessibilityBoundaryRecenterInProgress = false
     private var accessibilityLastBoundaryRecenterTimestamp: CFTimeInterval = 0.0
     private var accessibilityIgnoreOffscreenUntil: CFTimeInterval = 0.0
-    private var accessibilityBoundaryAdvanceTimestamp: CFTimeInterval = 0.0
-    private var accessibilityBoundaryHitIndex: Int?
-    private var accessibilityBoundaryHitStreak: Int = 0
-    private var accessibilityBoundaryHitTimestamp: CFTimeInterval = 0.0
     private var accessibilityLastLoggedArraySnapshot: [String] = []
     private var accessibilityLastLoggedGlobalPosition: Int?
-    private var accessibilityDirectionalElementPool: [ObjectIdentifier: [FocusTrackingAccessibilityElement]] = [:]
+    // Element pool keyed by the list item's stable *local index* rather than
+    // by the transient UIView pointer holding the item. Keying by UIView was
+    // the source of a subtle accessibility regression: ListView recycles
+    // item nodes (and therefore their backing UIViews) as the user scrolls,
+    // so right after a programmatic silent-scroll, the same UIView might
+    // already be rendering a *different* chat. Looking the element up by
+    // UIView pointer then returned the *same* FocusTrackingAccessibilityElement
+    // instance and rewrote its label/frame to reflect the new chat, while
+    // VoiceOver — which tracks focus by element identity — believed the
+    // user was still on their previously focused element. Visually that
+    // looked like "the cursor sticks to the bottom of the screen and
+    // announces whichever item just slid under it" (exactly what shows up
+    // in the user-captured logs as repeated `elementY=[712..788]` with the
+    // cursor label changing chat after chat). Keying by item index makes
+    // the element identity travel with the item across view reuse.
+    private var accessibilityDirectionalElementPool: [Int: [FocusTrackingAccessibilityElement]] = [:]
     private var accessibilityEdgeScrollPending = false
     private var accessibilityLastProgrammaticEdgeScrollTimestamp: CFTimeInterval = 0.0
     private var accessibilityBoundaryAutoScrollTimestamp: CFTimeInterval = 0.0
@@ -5632,6 +5689,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     print("[VO-STATE] focus-handler-skip reason=offscreen-ignored ttl=\(String(format: "%.0f", (self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()) * 1000))ms")
                     return
                 }
+                // The focused view legitimately belongs to our list but its
+                // geometry has drifted outside the visible window. Instead
+                // of treating this as a lost-focus condition and kicking in
+                // the containment fallback (which yanks focus back onto
+                // whichever element happens to be visible, breaking the
+                // user's progression), scroll the list so the element lands
+                // back inside the visible rect. The subsequent focus
+                // notification from VoiceOver will re-enter this method with
+                // the element fully on-screen and naturally continue.
+                if self.scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: focusedScreenFrame) {
+                    print("[VO-STATE] focus-handler-skip reason=scrolled-focus-into-view (view)")
+                    return
+                }
                 self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-offscreen")
                 return
             }
@@ -5673,7 +5743,28 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
         let toIndex: Int?
         let matchKind: String
-        if let focusedSourceViewIdentifier, let sourceViewCandidate = elementData.first(where: { item in
+        // 1) Element-identity match.
+        //
+        // Because `reuseOrCreateDirectionalElement` now keys the pool by
+        // `localIndex` (the list item's stable identity), the very same
+        // FocusTrackingAccessibilityElement instance that VoiceOver picked
+        // up on the previous focus notification should still be present in
+        // the freshly-built array — even if the underlying UIView has in
+        // the meantime been reassigned to a different chat by ListView's
+        // node recycler. Matching by instance therefore preserves focus on
+        // the user's original item across recycling, which is what fixes
+        // the "cursor glued to bottom of the screen while labels cycle
+        // chat after chat" symptom observed in the logs.
+        if let focusedTrackedElement = focusedAny as? FocusTrackingAccessibilityElement,
+           let exactInstanceCandidate = elementData.first(where: { item in
+               guard let trackedElement = item.element as? FocusTrackingAccessibilityElement else {
+                   return false
+               }
+               return trackedElement === focusedTrackedElement
+           }) {
+            toIndex = exactInstanceCandidate.index
+            matchKind = "exact-instance"
+        } else if let focusedSourceViewIdentifier, let sourceViewCandidate = elementData.first(where: { item in
             guard let trackedElement = item.element as? FocusTrackingAccessibilityElement,
                   let sourceView = trackedElement.sourceView else {
                 return false
@@ -5705,6 +5796,32 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.accessibilityLastSystemFocusedIndex = toIndex
         self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
         self.accessibilityFocusLeftListFailureCount = 0
+
+        // Deterministic scroll-into-view pass. After the
+        // expanded-inclusion fix in `customAccessibilityElements` the
+        // accessibility array reliably contains buffered items around the
+        // visible window, which means VoiceOver can legitimately land on an
+        // element whose real frame is partly or fully off-screen. Whenever
+        // that happens we immediately scroll the list so that the focused
+        // element is brought back inside the visible rect — the same
+        // behaviour users get on UITableView. This replaces the fragile
+        // "predict the next step at the array edge and silent-scroll
+        // towards it" heuristic with a simpler invariant: whatever element
+        // VoiceOver chooses to focus, it is visible.
+        // Bring the focused element into view if it landed in the expanded
+        // buffer zone but outside the strictly visible rect. We do NOT
+        // return here any more (previously we did): after scrolling we
+        // still want to run the boundary-advance check below so that the
+        // list keeps materialising fresh items ahead of the cursor. With
+        // element-identity pinning, VoiceOver's focus stays on the same
+        // item across both the scroll-into-view pass *and* the buffer
+        // extension, so it is safe — and actually necessary — to run
+        // both in the same notification cycle.
+        if let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? UIAccessibilityElement {
+            if self.scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: focusedElement.accessibilityFrame) {
+                print("[VO-STATE] focus-scroll-triggered toIndex=\(toIndex) visibleCount=\(elements.count) match=\(matchKind)")
+            }
+        }
 
         var fromIndex: Int?
         if let previousSourceViewIdentifier = self.accessibilityLastSystemFocusedSourceViewIdentifier {
@@ -5758,37 +5875,64 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 cursorDescription: cursorDescription
             )
                     print("[VO-STATE] cursor-log-source=system-step from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
-            let nextForwardIndex: Int
-            if self.accessibilityNavigationOrder == .reversed {
-                nextForwardIndex = toIndex - 1
-            } else {
-                nextForwardIndex = toIndex + 1
-            }
-            let nextIsEdge = nextForwardIndex >= 0 && nextForwardIndex < elements.count &&
-                (nextForwardIndex == 0 || nextForwardIndex == elements.count - 1)
-            let forwardEdge = self.accessibilityNavigationOrder == .reversed ? 0 : elements.count - 1
-            let atEdge = (toIndex == forwardEdge)
-            if nextIsEdge || atEdge {
-                let edgeIndex = atEdge ? toIndex : nextForwardIndex
-                let now = CACurrentMediaTime()
-                if self.accessibilityBoundaryHitIndex == edgeIndex, now - self.accessibilityBoundaryHitTimestamp < 0.9 {
-                    self.accessibilityBoundaryHitStreak += 1
-                } else {
-                    self.accessibilityBoundaryHitIndex = edgeIndex
-                    self.accessibilityBoundaryHitStreak = 1
-                }
-                self.accessibilityBoundaryHitTimestamp = now
+            // VoiceOver always walks the accessibilityElements array in ascending index
+            // order regardless of our accessibilityNavigationOrder flag (that flag only
+            // controls the order we *expose* elements in). So the direction of VO motion
+            // is simply the sign of toIndex - fromIndex. If the next step in that same
+            // direction would leave the visible array, VO is about to escape the list.
+            let voDirection = toIndex - fromIndex
+            let projectedNextIndex = toIndex + voDirection
+            let nextStepLeavesArray = projectedNextIndex < 0 || projectedNextIndex >= elements.count
+            let atTrailingEdge = (voDirection > 0 && toIndex == elements.count - 1)
+            let atLeadingEdge = (voDirection < 0 && toIndex == 0)
+            let atEdge = atTrailingEdge || atLeadingEdge
+            // Eagerly extend the render buffer *one step* ahead of the
+            // user's position. Triggering only at the hard edge (`atEdge`)
+            // was unreliable because VoiceOver can request the next
+            // element immediately on the same runloop iteration that
+            // carried the user onto the last array slot — if our
+            // materialisation hasn't produced a follow-up element by
+            // then, VO promotes focus to the next sibling container
+            // (navbar). By firing when the *next* swipe would land on
+            // the edge we always have a fresh item ready when VoiceOver
+            // actually asks for it.
+            //
+            // Safe to combine with `scrollAccessibilityFocusIntoViewIfNeeded`
+            // now that focus identity is pinned to the stable element
+            // instance (see `reuseOrCreateDirectionalElement` keyed by
+            // localIndex): the buffer extension does not re-anchor
+            // focus, so there is no double-scroll / leaping-cursor
+            // conflict.
+            let nextIsEdge = (voDirection > 0 && (toIndex + 1) >= elements.count - 1) ||
+                             (voDirection < 0 && (toIndex - 1) <= 0)
+            if atEdge || nextStepLeavesArray || nextIsEdge {
+                let edgeIndex: Int = toIndex
                 var visibleHeightForBoundary: CGFloat = .greatestFiniteMagnitude
                 if let edgeItem = elementData.first(where: { $0.index == edgeIndex }),
                    let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() {
                     let visibleHeight = edgeItem.data.frame.intersection(clipFrame).height
                     visibleHeightForBoundary = visibleHeight
                 }
-                print("[VO-STATE] boundary-page-scroll step=1-detected toIndex=\(toIndex) edgeIndex=\(edgeIndex) atEdge=\(atEdge) edgeVisH=\(Int(visibleHeightForBoundary.isFinite ? visibleHeightForBoundary : -1)) visibleCount=\(elements.count) globalPos=\(self.accessibilityLastLoggedGlobalPosition ?? -1)")
-                let _ = self.advanceAtBoundaryIfNeeded(toIndex: edgeIndex, visibleHeight: visibleHeightForBoundary, visibleCount: elements.count)
-            } else {
-                self.accessibilityBoundaryHitIndex = nil
-                self.accessibilityBoundaryHitStreak = 0
+                print("[VO-STATE] boundary-page-scroll step=1-detected toIndex=\(toIndex) edgeIndex=\(edgeIndex) atEdge=\(atEdge) voDirection=\(voDirection) edgeVisH=\(Int(visibleHeightForBoundary.isFinite ? visibleHeightForBoundary : -1)) visibleCount=\(elements.count) globalPos=\(self.accessibilityLastLoggedGlobalPosition ?? -1)")
+                // Capture the identity of the element the user is focused on *right now*
+                // so that after the silent scroll we can deterministically re-anchor
+                // VoiceOver focus onto the "next" element in the user's traversal
+                // direction — without relying on VoiceOver's own focus tracking,
+                // which is geometry-anchored and gets confused by our programmatic
+                // scroll (the symptom observed in the logs: the cursor label keeps
+                // changing while `position` stays stuck, then focus leaves the list
+                // altogether when the accessibility array shrinks to zero).
+                let focusedKey = self.accessibilityDebugStableKey(from: focusedData)
+                let focusedFrame = focusedData.frame
+                let _ = self.advanceAtBoundaryIfNeeded(
+                    toIndex: edgeIndex,
+                    visibleHeight: visibleHeightForBoundary,
+                    visibleCount: elements.count,
+                    voDirection: voDirection,
+                    focusedStableKey: focusedKey,
+                    focusedFrame: focusedFrame,
+                    atEdge: atEdge || nextStepLeavesArray
+                )
             }
         } else {
             let summary = self.accessibilityDebugSummary(data: focusedData)
@@ -5918,48 +6062,194 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
     }
 
-    private func advanceAtBoundaryIfNeeded(toIndex: Int, visibleHeight: CGFloat, visibleCount: Int) -> Bool {
-        let now = CACurrentMediaTime()
+    private func advanceAtBoundaryIfNeeded(
+        toIndex: Int,
+        visibleHeight: CGFloat,
+        visibleCount: Int,
+        voDirection: Int,
+        focusedStableKey: String,
+        focusedFrame: CGRect,
+        atEdge: Bool
+    ) -> Bool {
         // #region agent log
-        print("[AGENT-DBG][H4] boundary-check toIndex=\(toIndex) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) hitStreak=\(self.accessibilityBoundaryHitStreak)")
-        print("[VO-STATE] boundary-check toIndex=\(toIndex) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) hitStreak=\(self.accessibilityBoundaryHitStreak)")
+        print("[AGENT-DBG][H4] boundary-check toIndex=\(toIndex) voDir=\(voDirection) atEdge=\(atEdge) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) pending=\(self.accessibilityEdgeScrollPending)")
+        print("[VO-STATE] boundary-check toIndex=\(toIndex) voDir=\(voDirection) atEdge=\(atEdge) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) pending=\(self.accessibilityEdgeScrollPending)")
         // #endregion
-        let cooldownOk = now - self.accessibilityBoundaryAdvanceTimestamp > 0.8
+
+        // Gating is purely event-/state-based — no time thresholds:
+        //   • `pendingOk` is a *proper* mutex that remains held through the
+        //     full scroll → re-query → explicit focus post cycle, so a
+        //     follow-up focus notification generated by our own
+        //     `UIAccessibility.post(.layoutChanged,…)` cannot re-enter this
+        //     method and cause a cascade.
+        //   • `countOk` is a geometric invariant: we need at least two
+        //     visible elements to make a meaningful decision; if the user is
+        //     literally *at* the edge (`atEdge=true`) one element is
+        //     sufficient, otherwise we would rather wait for the list to
+        //     repopulate than risk a blind scroll.
         let pendingOk = !self.accessibilityEdgeScrollPending
-        let countOk = visibleCount >= 4
-        let streakOk = self.accessibilityBoundaryHitStreak >= 1
-        if !(cooldownOk && pendingOk && countOk && streakOk) {
-            print("[VO-STATE] boundary-skip cooldownOk=\(cooldownOk) pendingOk=\(pendingOk) countOk=\(countOk) streakOk=\(streakOk)")
+        let minCount = atEdge ? 1 : 2
+        let countOk = visibleCount >= minCount
+        let voStep = voDirection >= 0 ? 1 : -1
+        guard voDirection != 0 else {
+            print("[VO-STATE] boundary-skip reason=voDirection-zero")
             return false
         }
-        self.accessibilityBoundaryAdvanceTimestamp = now
-        let triggerStreak = self.accessibilityBoundaryHitStreak
-        self.accessibilityBoundaryHitStreak = 0
-        self.accessibilityIgnoreOffscreenUntil = now + 0.35
-        self.accessibilityEdgeScrollPending = true
-        let boundaryDirection = (toIndex == 0) ? -1 : 1
-        print("[VO-STATE] boundary-page-scroll step=2-scroll-triggered edgeIndex=\(toIndex) direction=\(boundaryDirection) streak=\(triggerStreak)")
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.accessibilityEdgeScrollPending = false
-            self.scrollForAccessibilityEdge(arrayDirection: boundaryDirection)
+        if !(pendingOk && countOk) {
+            print("[VO-STATE] boundary-skip pendingOk=\(pendingOk) countOk=\(countOk) atEdge=\(atEdge)")
+            return false
         }
-        voDebugLog("[VO-BOUNDARY-DEBUG] boundary-advance-trigger direction=\(boundaryDirection) visibleHeight=\(Int(visibleHeight.rounded())) streak=\(triggerStreak)")
+
+        self.accessibilityEdgeScrollPending = true
+        self.accessibilityIgnoreOffscreenUntil = CACurrentMediaTime() + 0.2
+        print("[VO-STATE] boundary-page-scroll step=2-scroll-triggered edgeIndex=\(toIndex) voDir=\(voDirection)")
+
+        // Buffer-extension pass. The scroll is executed *synchronously*
+        // here — we do NOT defer it through DispatchQueue.main.async as
+        // before — because the focus notification that triggered us may
+        // have been the very last one VoiceOver posts before deciding
+        // the current container has no more elements and promoting focus
+        // to a sibling (navbar). By the time a deferred block runs, VO
+        // has already escaped.
+        //
+        // With the localIndex-keyed element pool and the instance-match
+        // path in `handleSystemAccessibilityFocusNotification`, the
+        // focused element's identity travels with the item across the
+        // scroll — we therefore deliberately DO NOT post focus onto a
+        // "next" element the way the previous implementation did.
+        // Re-anchoring focus by hand caused the cursor to visibly leap
+        // forward without the user swiping. Letting VoiceOver follow
+        // its own focused instance keeps one swipe == one item, which
+        // is what the user expects.
+        let scrolled = self.performAccessibilityEdgeScroll(voDirection: voStep)
+        _ = focusedStableKey
+        _ = focusedFrame
+        print("[VO-STATE] boundary-page-scroll step=3-buffer-extended scrolled=\(scrolled)")
+
+        // Release the mutex after two run-loop ticks. The subsequent
+        // focus notifications (which VoiceOver emits in response to the
+        // synchronous layout change) are matched against our localIndex-
+        // pinned element instances and do not need to be silenced.
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.accessibilityEdgeScrollPending = false
+            }
+        }
+        voDebugLog("[VO-BOUNDARY-DEBUG] boundary-advance-trigger voDirection=\(voDirection) visibleHeight=\(Int(visibleHeight.rounded()))")
         return true
     }
 
-    private func scrollForAccessibilityEdge(arrayDirection: Int) {
+    private func performAccessibilityEdgeScroll(voDirection: Int) -> Bool {
+        // Map the VoiceOver array direction to a physical scroll direction.
+        // For a non-rotated list (chat list, settings, …) VoiceOver walking
+        // "downwards" on-screen corresponds to voDirection < 0 when the list
+        // uses reversed navigation order (chat list) and voDirection > 0
+        // otherwise. Either way, if the user just reached the bottom edge of
+        // the visible window we need to scroll content upwards (i.e. .down
+        // in ListViewScrollDirection semantics) so that the next items
+        // materialise at the bottom.
         let scrollDirection: ListViewScrollDirection
-        if arrayDirection < 0 {
+        if voDirection < 0 {
             scrollDirection = self.rotated ? .up : .down
         } else {
             scrollDirection = self.rotated ? .down : .up
         }
+        // A modest one-row step keeps the visible accessibility window
+        // stable. Larger steps were tried and caused the array to shrink
+        // faster than it refilled, because more off-screen items got pruned
+        // than newly materialised ones were added back.
         let visibleArea = self.visibleSize.height - self.insets.top - self.insets.bottom
-        let distance = floor(visibleArea * 0.3)
-        print("[VO-STATE] boundary-page-scroll silent-scroll direction=\(scrollDirection) distance=\(Int(distance)) visibleArea=\(Int(visibleArea)) arrayDirection=\(arrayDirection)")
-        _ = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: false, postScrollStatus: false)
+        let approxRowHeight: CGFloat = 76.0
+        let maxStep: CGFloat = max(approxRowHeight, visibleArea * 0.18)
+        let distance = floor(min(maxStep, approxRowHeight))
+        print("[VO-STATE] boundary-page-scroll silent-scroll direction=\(scrollDirection) distance=\(Int(distance)) visibleArea=\(Int(visibleArea)) voDirection=\(voDirection)")
+        let result = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: false, postScrollStatus: false)
         self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
+        // Force a *synchronous* materialisation pass so that brand-new item
+        // nodes at the trailing edge (and therefore their accessibility
+        // counterparts) are available on the very next
+        // `customAccessibilityElements` query — otherwise VoiceOver may
+        // reach the list's edge before the default, vsync-deferred update
+        // lands and escape to the next container (typically the navbar).
+        self.enqueueUpdateVisibleItems(synchronous: true)
+        return result
+    }
+
+    // Deterministic "scroll the focused accessibility element into view" pass.
+    //
+    // Companion of the expanded-inclusion change in
+    // `customAccessibilityElements`: now that the accessibility array also
+    // contains items that are part of the render buffer but strictly
+    // off-screen, VoiceOver can legitimately land on an element whose
+    // accessibilityFrame is partially or fully outside the visible window.
+    // In that situation we do what UITableView does natively — scroll the
+    // list just enough to expose the focused element — which lets VoiceOver
+    // progress through the entire list without ever encountering an "empty"
+    // array and without relying on timing heuristics.
+    @discardableResult
+    private func scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: CGRect) -> Bool {
+        guard !self.accessibilityEdgeScrollPending,
+              !self.accessibilityBoundaryRecenterInProgress else {
+            return false
+        }
+        guard let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() else {
+            return false
+        }
+        guard !screenFrame.isNull, screenFrame.height > 0.5, screenFrame.width > 0.5 else {
+            return false
+        }
+
+        // Small bias so the element lands one-ish point inside the visible
+        // area rather than flush with its edge. Prevents oscillation on
+        // sub-pixel boundaries.
+        let margin: CGFloat = 2.0
+
+        let scrollDirection: ListViewScrollDirection
+        let rawDistance: CGFloat
+        if screenFrame.maxY > clipFrame.maxY - margin {
+            // Element hangs below the visible window. Moving the content up
+            // on screen corresponds to `.down` on a non-rotated list (and
+            // `.up` on a rotated one — e.g. message history).
+            scrollDirection = self.rotated ? .up : .down
+            rawDistance = (screenFrame.maxY - clipFrame.maxY) + margin
+        } else if screenFrame.minY < clipFrame.minY + margin {
+            // Element is above the visible window.
+            scrollDirection = self.rotated ? .down : .up
+            rawDistance = (clipFrame.minY - screenFrame.minY) + margin
+        } else {
+            return false
+        }
+        let distance = ceil(max(rawDistance, 1.0))
+        guard distance >= 1.0 else {
+            return false
+        }
+
+        print("[VO-STATE] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance)) elementY=[\(Int(screenFrame.minY))..\(Int(screenFrame.maxY))] clipY=[\(Int(clipFrame.minY))..\(Int(clipFrame.maxY))]")
+
+        self.accessibilityEdgeScrollPending = true
+        // Suppress the "focus is offscreen" hot-path for a short window: the
+        // programmatic scroll we are about to issue will itself generate a
+        // focus notification (VoiceOver re-reports the element at its new
+        // coordinates) and we don't want to recurse into either scroll or
+        // boundary-advance handling while layout settles.
+        self.accessibilityIgnoreOffscreenUntil = CACurrentMediaTime() + 0.2
+        let scrolled = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: false, postScrollStatus: false)
+        self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
+        // Force a *synchronous* materialisation pass so newly revealed item
+        // nodes are part of the accessibility array before VoiceOver
+        // re-queries it — otherwise the array appears to "shrink" after a
+        // scroll (items leave at one edge faster than they arrive at the
+        // other) and eventually reaches zero, at which point VoiceOver
+        // escapes the list.
+        self.enqueueUpdateVisibleItems(synchronous: true)
+        // Release the mutex after two run-loop ticks so that the focus
+        // notification produced by the scroll itself is ignored.
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.accessibilityEdgeScrollPending = false
+            }
+        }
+        return scrolled
     }
 
     private func isAccessibilityObjectInsideListView(_ object: Any) -> Bool {
@@ -6144,24 +6434,27 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return true
     }
 
-    public func reuseOrCreateDirectionalElement(sourceView: UIView, childOrder: Int) -> FocusTrackingAccessibilityElement {
-        let key = ObjectIdentifier(sourceView)
-        if let cached = self.accessibilityDirectionalElementPool[key], childOrder < cached.count {
-            return cached[childOrder]
-        }
-        var elements = self.accessibilityDirectionalElementPool[key] ?? []
+    public func reuseOrCreateDirectionalElement(localIndex: Int, childOrder: Int, sourceView: UIView) -> FocusTrackingAccessibilityElement {
+        var elements = self.accessibilityDirectionalElementPool[localIndex] ?? []
         while elements.count <= childOrder {
             let element = FocusTrackingAccessibilityElement(accessibilityContainer: self)
-            element.sourceView = sourceView
             elements.append(element)
         }
-        self.accessibilityDirectionalElementPool[key] = elements
+        // Always refresh `sourceView` on the pooled element so the various
+        // focus-by-view lookups (see `isAccessibilityObjectInsideListView`
+        // and the source-view matching in `handleSystemAccessibilityFocusNotification`)
+        // can map the *currently* rendering UIView back to the stable
+        // per-item element. The element instance itself, however, remains
+        // pinned to `localIndex`, which is what VoiceOver needs to keep
+        // focus continuity across scrolls.
+        elements[childOrder].sourceView = sourceView
+        self.accessibilityDirectionalElementPool[localIndex] = elements
         return elements[childOrder]
     }
 
-    public func cleanupDirectionalElementPool(activeSourceViewIds: Set<ObjectIdentifier>) {
+    public func cleanupDirectionalElementPool(activeLocalIndices: Set<Int>) {
         for key in self.accessibilityDirectionalElementPool.keys {
-            if !activeSourceViewIds.contains(key) {
+            if !activeLocalIndices.contains(key) {
                 self.accessibilityDirectionalElementPool.removeValue(forKey: key)
             }
         }

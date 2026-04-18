@@ -1297,6 +1297,7 @@ public final class ChatListNode: ListView {
     
     private var dequeuedInitialTransitionOnLayout = false
     private var enqueuedTransition: (ChatListNodeListViewTransition, () -> Void)?
+    private var voiceOverStatusObserver: NSObjectProtocol?
     
     public private(set) var currentState: ChatListNodeState
     private let statePromise: ValuePromise<ChatListNodeState>
@@ -1446,6 +1447,36 @@ public final class ChatListNode: ListView {
         self.accessibilityPageScrolledUsesVisibleRange = true
         self.accessibilityInterruptSpeechOnUserAction = true
         self.accessibilityNavigationOrder = .reversed
+
+        // VoiceOver-driven full materialisation of the chat list.
+        //
+        // Principle: rather than trying to keep the accessibility array in
+        // sync with a constantly-changing screen-sized render buffer (which is
+        // fragile and produces the familiar "cursor escapes to the nav bar"
+        // bug once the buffer churns), we simply force `ListView` to
+        // materialise *every* chat entry while VoiceOver is active.  The
+        // accessibility array then contains a stable, complete list of all
+        // chats and VoiceOver can walk through them freely — the on-focus
+        // `scrollAccessibilityFocusIntoViewIfNeeded` path inside `ListView`
+        // takes care of scrolling each focused (possibly off-screen) item
+        // into view.  A very large `invisibleInset` is what unlocks this on
+        // the `ListView` side.
+        let updateFullMaterialization: () -> Void = { [weak self] in
+            guard let self else { return }
+            let shouldForce = UIAccessibility.isVoiceOverRunning
+            let desired: CGFloat? = shouldForce ? 1_000_000.0 : nil
+            if self.accessibilityInvisibleInsetOverride != desired {
+                self.accessibilityInvisibleInsetOverride = desired
+            }
+        }
+        updateFullMaterialization()
+        self.voiceOverStatusObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            updateFullMaterialization()
+        }
         self.accessibilityDirectionalAnnouncement = { [weak self] fromIndex, toIndex in
             guard let self, abs(toIndex - fromIndex) == 1 else { return nil }
             let strings = self.currentState.presentationData.strings
@@ -3419,6 +3450,9 @@ public final class ChatListNode: ListView {
         self.pollFilterUpdatesDisposable?.dispose()
         self.chatFilterUpdatesDisposable?.dispose()
         self.updateIsMainTabDisposable?.dispose()
+        if let observer = self.voiceOverStatusObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
     
     func updateFilter(_ filter: ChatListFilter?) {
