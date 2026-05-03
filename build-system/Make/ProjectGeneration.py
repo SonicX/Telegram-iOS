@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 
 from BuildEnvironment import is_apple_silicon, call_executable, BuildEnvironment
 
@@ -9,7 +10,28 @@ def remove_directory(path):
     if os.path.isdir(path):
         shutil.rmtree(path)
 
+
+def run_fix_build_permissions(base_path):
+    """Removes read-only flags Bazel sets on its outputs.
+
+    Run before regenerating the Xcode project so the bazel-out tree and
+    any existing DerivedData can be overwritten without "Permission denied"
+    errors.  The same script is wired in as a pre-build run script of the
+    generated `BazelDependencies` target (via `pre_build` on the `xcodeproj`
+    rule in `Telegram/BUILD`), so it also fires on every Xcode build.
+    """
+    script = os.path.join(base_path, 'scripts', 'fix-build-permissions.sh')
+    if not os.path.isfile(script):
+        return
+    try:
+        subprocess.call(['sh', script])
+    except Exception as exception:  # noqa: BLE001 - best-effort, never fail generation
+        print('fix-build-permissions: skipped due to {}'.format(exception))
+
+
 def generate_xcodeproj(build_environment: BuildEnvironment, disable_extensions, disable_provisioning_profiles, include_release, generate_dsym, bazel_app_arguments, target_name):
+    run_fix_build_permissions(build_environment.base_path)
+
     if '/' in target_name:
         app_target_spec = target_name.split('/')[0] + '/' + target_name.split('/')[1] + ':' + target_name.split('/')[1]
         app_target = target_name

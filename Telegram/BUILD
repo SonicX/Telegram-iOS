@@ -2128,7 +2128,20 @@ xcodeproj(
             "//command_line_option:compilation_mode": "opt",
         },
     },
-    default_xcode_configuration = "Debug"
+    default_xcode_configuration = "Debug",
+    # Removes the read-only bits Bazel sets on its outputs so subsequent
+    # xcodebuild copy/codesign passes don't fail with "Permission denied"
+    # or "No such file or directory" on .swiftmodule / Info.plist.
+    # Implementation lives in scripts/fix-build-permissions.sh.
+    pre_build = """\
+script="$SRCROOT/../scripts/fix-build-permissions.sh"
+if [ ! -x "$script" ] && [ -n "$BUILD_WORKSPACE_DIRECTORY" ]; then
+    script="$BUILD_WORKSPACE_DIRECTORY/scripts/fix-build-permissions.sh"
+fi
+if [ -x "$script" ]; then
+    sh "$script"
+fi
+""",
 )
 
 # Temporary targets used to simplify build tests
