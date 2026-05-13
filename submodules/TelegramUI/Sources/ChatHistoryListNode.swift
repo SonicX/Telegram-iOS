@@ -1632,7 +1632,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // subtree, where the framework expects mutations to be
             // legal between layout passes.
             node.isAccessibilityElement = false
-            if node.isNodeLoaded {
+            // CRITICAL: `node.view` is undefined on layer-backed nodes
+            // (e.g. `ASImageNode` for chat photo thumbnails). The
+            // `isNodeLoaded` check is *not* enough — layer-backed
+            // nodes load their CALayer but never an associated view,
+            // and `-[ASDisplayNode view]` aborts with
+            // `'Call to -view undefined on layer-backed nodes'` if we
+            // touch it. Skip them entirely; their accessibility
+            // surface is already controlled via the node-level flag
+            // we just cleared above, and they cannot host a
+            // VoiceOver leaf without a backing view anyway.
+            if node.isNodeLoaded && !node.isLayerBacked {
                 let backingView = node.view
                 backingView.isAccessibilityElement = false
                 backingView.accessibilityLabel = nil
