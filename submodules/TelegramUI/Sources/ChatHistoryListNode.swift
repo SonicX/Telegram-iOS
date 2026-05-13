@@ -1038,7 +1038,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // swipes to traverse messages in array order instead of jumping
         // to "…" placeholders.
         //
-        // **20_000 pt** is a deliberate compromise:
+        // **10_000 pt** is a deliberate compromise:
         //  • Earlier value 1_000_000 materialised *every* loaded entry
         //    at once.  On media-heavy channels with tall image bubbles
         //    (e.g. «ТАРАС СИДОРЕЦ💡» — 77 entries, span 63 551 pt,
@@ -1047,24 +1047,27 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         //    serialisation buffer and aborted with
         //    `Failed to allocate ... bytes` in
         //    `CA::Render::Encoder::grow` (logged 2026-05-13).
-        //  • 20 000 pt of inset on each side of the viewport covers
-        //    roughly ~50 medium text bubbles or ~20-30 media bubbles
-        //    — enough to keep VoiceOver swipe navigation flowing in
-        //    typical conversations without committing the entire
-        //    channel history to CA in one transaction.
-        //  • If a user navigates beyond the buffer, ListView's
-        //    edge-scroll mechanism materialises the next batch
-        //    organically, just at a coarser granularity than full
-        //    materialisation.
+        //  • 20_000 fixed the crash but the user reported visible
+        //    slowdown on channel entry — materialising even ~50
+        //    medium bubbles up-front is still expensive for image-
+        //    backed content.
+        //  • 10_000 pt covers ~20-25 medium text bubbles or ~10
+        //    media bubbles on each side of viewport — enough that
+        //    swipe navigation flows over a screenful or two, but
+        //    cheap enough that channel entry doesn't stall.
+        //  • Past the buffer, ListView's edge-scroll mechanism
+        //    materialises the next batch organically.  This is
+        //    coarser than full materialisation but matches the
+        //    UITableView accessibility model users are familiar
+        //    with.
         //
         // If `customAccessibilityElements` consistently runs out of
         // entries on media-light channels, raise the value here in
-        // 20k increments; for very heavy channels lower it further
-        // (e.g. 10_000) until commits stop crashing.
+        // 10k increments; for very heavy channels lower it further.
         let updateFullMaterialization: () -> Void = { [weak self] in
             guard let self else { return }
             let shouldForce = UIAccessibility.isVoiceOverRunning
-            let desired: CGFloat? = shouldForce ? 20_000.0 : nil
+            let desired: CGFloat? = shouldForce ? 10_000.0 : nil
             if self.accessibilityInvisibleInsetOverride != desired {
                 let previous = self.accessibilityInvisibleInsetOverride
                 self.accessibilityInvisibleInsetOverride = desired
