@@ -1031,24 +1031,40 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
         // VoiceOver buffer expansion.
         //
-        // We widen `invisibleInset` to 1_000_000pt while VO is active so
-        // that *every* loaded message node is materialised at once.  This
-        // is what lets `customAccessibilityElements` collect real
-        // `composeBubbleAccessibilityPayload` data for every entry in
-        // `filteredEntries` (instead of just the on-screen window) — so
-        // swipes can traverse the entire conversation in array order,
-        // not jump to "…" placeholders.
+        // We widen `invisibleInset` while VO is active so that more
+        // message nodes are materialised at once and
+        // `customAccessibilityElements` can collect real
+        // `composeBubbleAccessibilityPayload` data for them — allowing
+        // swipes to traverse messages in array order instead of jumping
+        // to "…" placeholders.
         //
-        // Trade-off: in channels with many media-heavy bubbles
-        // (>1300pt tall, image-backed) the CoreAnimation Render Encoder
-        // can hit its serialisation budget on commit and abort.  That
-        // is a separate, content-specific issue handled elsewhere —
-        // here we keep the buffer at the value that yields the best
-        // VoiceOver UX for the majority of conversations.
+        // **20_000 pt** is a deliberate compromise:
+        //  • Earlier value 1_000_000 materialised *every* loaded entry
+        //    at once.  On media-heavy channels with tall image bubbles
+        //    (e.g. «ТАРАС СИДОРЕЦ💡» — 77 entries, span 63 551 pt,
+        //    individual bubbles 1300–1644 pt) the resulting
+        //    CoreAnimation Render Encoder commit ran out of its
+        //    serialisation buffer and aborted with
+        //    `Failed to allocate ... bytes` in
+        //    `CA::Render::Encoder::grow` (logged 2026-05-13).
+        //  • 20 000 pt of inset on each side of the viewport covers
+        //    roughly ~50 medium text bubbles or ~20-30 media bubbles
+        //    — enough to keep VoiceOver swipe navigation flowing in
+        //    typical conversations without committing the entire
+        //    channel history to CA in one transaction.
+        //  • If a user navigates beyond the buffer, ListView's
+        //    edge-scroll mechanism materialises the next batch
+        //    organically, just at a coarser granularity than full
+        //    materialisation.
+        //
+        // If `customAccessibilityElements` consistently runs out of
+        // entries on media-light channels, raise the value here in
+        // 20k increments; for very heavy channels lower it further
+        // (e.g. 10_000) until commits stop crashing.
         let updateFullMaterialization: () -> Void = { [weak self] in
             guard let self else { return }
             let shouldForce = UIAccessibility.isVoiceOverRunning
-            let desired: CGFloat? = shouldForce ? 1_000_000.0 : nil
+            let desired: CGFloat? = shouldForce ? 20_000.0 : nil
             if self.accessibilityInvisibleInsetOverride != desired {
                 let previous = self.accessibilityInvisibleInsetOverride
                 self.accessibilityInvisibleInsetOverride = desired
