@@ -2077,16 +2077,36 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                         //
                         // (Other experiments tried here and reverted
                         // because they crashed or broke navigation:
-                        //  • `accessibilityElementsHidden = true` —
-                        //    drops VO focus on the next swipe.
                         //  • Recursive demotion of subview leaves —
                         //    triggered an objc_terminate abort,
                         //    likely from setting
                         //    isAccessibilityElement on a view in an
                         //    unexpected state during layout.
                         //  • `self.view.accessibilityElementsHidden`
-                        //    — same drop-focus symptom.)
-                        itemNode.view.accessibilityElementsHidden = false
+                        //    on the *list* root — drops VO focus on
+                        //    the next swipe (navbar escape).
+                        //  • `itemNode.view.accessibilityElementsHidden
+                        //    = true` on **every** bubble — same drop-
+                        //    focus symptom: with all bubbles hidden
+                        //    iOS can't find a spatially-adjacent
+                        //    element when our proxy releases focus
+                        //    transiently and escapes to the navbar.)
+                        //
+                        // Hide subviews of **off-screen** bubbles only.
+                        // Visible bubbles keep their subview tree
+                        // exposed (so tap-on-bubble still works and
+                        // iOS has a spatial neighbour to fall back
+                        // to when focus transients), while off-screen
+                        // ones become opaque blobs for VoiceOver —
+                        // removing the `_ASDisplayView` competitors
+                        // that surfaced in logs as
+                        // `focus-handler-skip reason=offscreen-uiview-
+                        // ignored type=_ASDisplayView`. The pooled
+                        // proxy for the off-screen bubble is still
+                        // in `customAccessibilityElements`, so
+                        // sequential swipe-navigation reaches it
+                        // unimpeded.
+                        itemNode.view.accessibilityElementsHidden = !isVisible
                         itemNode.isAccessibilityElement = true
                         itemNode.accessibilityLabel = payload?.label
                         itemNode.accessibilityValue = payload?.value
