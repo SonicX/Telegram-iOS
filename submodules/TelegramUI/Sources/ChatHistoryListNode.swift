@@ -1594,24 +1594,56 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     ///   normal `voPromotedItemNodes` cleanup loop.
     fileprivate static func suppressCompetingLeaves(in node: ASDisplayNode, isRoot: Bool) {
         if !isRoot {
-            if node.isAccessibilityElement {
-                node.isAccessibilityElement = false
+            // **Unconditional** demotion at both node- and view-level.
+            //
+            // The previous revision gated the node-level set behind
+            // `if node.isAccessibilityElement { ... }`, which silently
+            // skipped the (very common) case where the *node* reports
+            // `false` but the backing `_ASDisplayView` is treated as
+            // an accessibility leaf by VoiceOver anyway — either
+            // because UIKit infers it from a non-nil
+            // `accessibilityLabel` / `accessibilityValue`, or because
+            // ASDisplayKit's own
+            // `CollectAccessibilityElementsForView` exposes the view
+            // as a container when `[subnode accessibilityElementCount]
+            // > 0` (see `_ASDisplayViewAccessiblity.mm:252`). Those
+            // are the leaves that VoiceOver picks up as spatial
+            // competitors to our pooled proxies, manifesting as the
+            // "focus ping-pong between two visually-adjacent bubbles"
+            // logged with `focus-handler-skip reason=focus-left-list
+            // type=_ASDisplayView` / `offscreen-uiview-ignored`.
+            //
+            // Setting `node.isAccessibilityElement = false` forwards
+            // to the view at load time, but only if the view *was
+            // not yet loaded* when the property was assigned. For
+            // already-loaded views we also reach for `node.view`
+            // directly and stamp the same flag — plus null the
+            // `accessibilityLabel/value/hint/customActions` chain so
+            // UIKit's implicit-leaf heuristics have nothing left to
+            // grab onto.
+            //
+            // We still DO NOT walk `view.subviews` here — the older
+            // attempt that did crashed with `_objc_terminate` on
+            // async image / layout, almost certainly because mutating
+            // accessibility flags on a `_ASDisplayView` *during* its
+            // owning node's layout pass violates an invariant inside
+            // ASDisplayKit. By staying on `node.subnodes` we touch
+            // only views whose backing nodes are part of our managed
+            // subtree, where the framework expects mutations to be
+            // legal between layout passes.
+            node.isAccessibilityElement = false
+            if node.isNodeLoaded {
+                let backingView = node.view
+                backingView.isAccessibilityElement = false
+                backingView.accessibilityLabel = nil
+                backingView.accessibilityValue = nil
+                backingView.accessibilityHint = nil
+                backingView.accessibilityCustomActions = nil
             }
         }
         for sub in node.subnodes ?? [] {
             suppressCompetingLeaves(in: sub, isRoot: false)
         }
-        // NOTE: an earlier revision also walked `view.subviews`
-        // recursively to demote UIKit leaves that don't have a
-        // backing `ASDisplayNode`.  That crashed the app with
-        // `_objc_terminate` (NSException raised on the main queue
-        // during async image rendering / layout) — apparently
-        // mutating `isAccessibilityElement` on certain
-        // ASDisplayKit-managed `_ASDisplayView`s while their owning
-        // node is laying out violates an invariant.  We stay inside
-        // the subnode hierarchy here; any plain-UIView leaves that
-        // slip through remain as residual competitors, which is a
-        // smaller problem than the crash they cause when demoted.
     }
 
     /// Locate the bubble's main `AccessibilityAreaNode` by walking the
