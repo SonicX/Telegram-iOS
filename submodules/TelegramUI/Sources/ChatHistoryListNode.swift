@@ -631,6 +631,37 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private var currentPresentationData: ChatPresentationData
     private var chatPresentationDataPromise: Promise<ChatPresentationData>
     private var presentationDataDisposable: Disposable?
+
+    // Observer that flips `accessibilityInvisibleInsetOverride` so that, while
+    // VoiceOver is running, the entire loaded message window is materialised
+    // and present in the accessibility array. Same approach as in
+    // `ChatListNode` — instead of patching VoiceOver navigation with timing
+    // heuristics, we just give it a complete, stable list of elements.
+    private var voiceOverStatusObserver: NSObjectProtocol?
+
+    // Snapshot of the most recently produced accessibility array.  It is used
+    // by the `[VO-CHAT] cursor` log to translate the focused element pointer
+    // delivered by `UIAccessibility.elementFocusedNotification` into a
+    // human-readable "X / N" position whenever VoiceOver moves between
+    // messages.
+    private var lastAccessibilityElements: [Any] = []
+    private var lastFocusedElementIdentity: ObjectIdentifier?
+    private var elementFocusedObserver: NSObjectProtocol?
+
+    // Tracks message bubbles we *promoted* to a single accessibility leaf
+    // (via `isAccessibilityElement = true`) while VoiceOver is active —
+    // exactly the same trick `ChatListItemNode` uses unconditionally
+    // (`ChatListItem.swift:1662`).  Promoting the bubble at the *node*
+    // level is what stops UIKit from exposing the message's inner
+    // subnodes (comments button, share button, action buttons, the
+    // `AccessibilityAreaNode`, …) as separate accessibility elements,
+    // which in turn keeps VoiceOver swipes traversing the conversation
+    // strictly at the message-row level.  When VoiceOver turns off, we
+    // revert every promoted node back to a container so other assistive
+    // tools (Switch Control, automation, accessibility inspector) keep
+    // seeing the granular tree.  Dead entries are dropped by
+    // `NSHashTable.weakObjects()` automatically.
+    private var voPromotedItemNodes: NSHashTable<ListViewItemNode> = NSHashTable.weakObjects()
     
     private let historyAppearsClearedPromise = ValuePromise<Bool>(false)
     var historyAppearsCleared: Bool = false {
@@ -997,6 +1028,91 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.accessibilityLayoutChangedOnScroll = false
         self.accessibilityStatusAnnouncementOnScroll = false
         self.accessibilityNavigationOrder = .reversed
+
+        // VoiceOver buffer expansion.
+        //
+        // We widen `invisibleInset` to 1_000_000pt while VO is active so
+        // that *every* loaded message node is materialised at once.  This
+        // is what lets `customAccessibilityElements` collect real
+        // `composeBubbleAccessibilityPayload` data for every entry in
+        // `filteredEntries` (instead of just the on-screen window) — so
+        // swipes can traverse the entire conversation in array order,
+        // not jump to "…" placeholders.
+        //
+        // Trade-off: in channels with many media-heavy bubbles
+        // (>1300pt tall, image-backed) the CoreAnimation Render Encoder
+        // can hit its serialisation budget on commit and abort.  That
+        // is a separate, content-specific issue handled elsewhere —
+        // here we keep the buffer at the value that yields the best
+        // VoiceOver UX for the majority of conversations.
+        let updateFullMaterialization: () -> Void = { [weak self] in
+            guard let self else { return }
+            let shouldForce = UIAccessibility.isVoiceOverRunning
+            let desired: CGFloat? = shouldForce ? 1_000_000.0 : nil
+            if self.accessibilityInvisibleInsetOverride != desired {
+                let previous = self.accessibilityInvisibleInsetOverride
+                self.accessibilityInvisibleInsetOverride = desired
+                print("[VO-CHAT] full-materialisation toggled: voRunning=\(shouldForce) override=\(previous.map { String(format: "%.0f", $0) } ?? "nil")->\(desired.map { String(format: "%.0f", $0) } ?? "nil")")
+            }
+
+            // NOTE: tried `self.view.accessibilityElementsHidden =
+            // shouldForce` here to force iOS to consult only our
+            // `customAccessibilityElements` array, but it had the
+            // opposite of the intended effect — VoiceOver landed on
+            // the first proxy correctly, then on the very next swipe
+            // dropped focus entirely and escaped to the navbar
+            // (`NavigationButtonItemNode` in the captured logs).
+            // Apparently iOS uses `customAccessibilityElements` only
+            // for the initial query and relies on the subview tree
+            // for sequential navigation between elements.  Hiding the
+            // subtree therefore breaks the second-and-after step.
+            //
+            // We must accept a residual amount of `_ASDisplayView`
+            // competition for spatial focus and address bubble-vs-
+            // proxy conflicts by other means (e.g. matching focus
+            // back to a proxy via `match=source-view` in the focus
+            // handler, which is what already runs in ListView).
+
+            // When VoiceOver turns off, demote every bubble we promoted to
+            // a leaf back to a container.  Without this, Switch Control /
+            // automation / accessibility inspector would keep seeing each
+            // message as an opaque blob even after VoiceOver is gone.
+            // Dead entries are dropped automatically by
+            // `NSHashTable.weakObjects()`.
+            if !shouldForce {
+                // Restore every bubble we promoted to a leaf while
+                // VoiceOver was running.  Switch Control, automation,
+                // and the accessibility inspector all rely on the
+                // bubble's own accessibility tree being visible again.
+                for promotedNode in self.voPromotedItemNodes.allObjects {
+                    promotedNode.isAccessibilityElement = false
+                    promotedNode.view.accessibilityElementsHidden = false
+                    promotedNode.accessibilityLabel = nil
+                    promotedNode.accessibilityValue = nil
+                    promotedNode.accessibilityHint = nil
+                    promotedNode.accessibilityIdentifier = nil
+                    promotedNode.view.accessibilityCustomActions = nil
+                }
+                self.voPromotedItemNodes.removeAllObjects()
+            }
+        }
+        updateFullMaterialization()
+        self.voiceOverStatusObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            print("[VO-CHAT] voiceOverStatusDidChange notification received: voRunning=\(UIAccessibility.isVoiceOverRunning)")
+            updateFullMaterialization()
+        }
+        self.elementFocusedObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.elementFocusedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleVoiceOverFocusChanged(notification: notification)
+        }
+
         self.accessibilityDirectionalAnnouncement = { [weak self] fromIndex, toIndex in
             guard let self, abs(toIndex - fromIndex) == 1 else { return nil }
             let strings = self.currentPresentationData.strings
@@ -1009,6 +1125,45 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     ?? strings.secondaryComponent?.dict["VoiceOver.Chat.PreviousMessage"]
                     ?? "previous message"
             }
+        }
+
+        // **Custom VoiceOver rotor for messages.**
+        //
+        // Rationale: the standard `accessibilityElements` swipe-next
+        // traversal in chat history is unreliable for fully off-screen
+        // messages — VoiceOver filters elements whose
+        // `accessibilityFrame` falls outside the focus engine's
+        // "reachable region" (~1–2 viewport heights), so a 40 000pt
+        // chat buffer can't be navigated end-to-end with horizontal
+        // swipes alone.  A custom rotor gives us authoritative control:
+        // iOS calls our `itemSearchBlock` for each `.next`/`.previous`
+        // step, we compute the target `localIndex`, scroll the bubble
+        // into the viewport via `transaction(scrollToItem:)`, and
+        // return the now-materialised item node's view as the focus
+        // target.  No spatial heuristic, no oscillation, works for
+        // every message regardless of distance from the current scroll
+        // offset.
+        //
+        // Activation: VoiceOver user finds the "Сообщения" rotor with
+        // a two-finger rotation gesture (or vertical swipe with a
+        // single finger after selecting it via the rotor menu), then
+        // up/down swipes navigate one message at a time.
+        let rotorName: String = self.currentPresentationData.strings.primaryComponent.dict["VoiceOver.Chat.MessagesRotor"]
+            ?? self.currentPresentationData.strings.secondaryComponent?.dict["VoiceOver.Chat.MessagesRotor"]
+            ?? "Сообщения"
+        let messagesRotor = UIAccessibilityCustomRotor(name: rotorName) { [weak self] predicate in
+            guard let self else { return nil }
+            return self.rotorTarget(direction: predicate.searchDirection, currentItem: predicate.currentItem)
+        }
+        // `accessibilityCustomRotors` lives on UIView; defer until the
+        // view is loaded.  Touching `self.view` from init can trigger
+        // unexpected layout, so we install the rotor on the next run-
+        // loop tick.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            var existing = self.view.accessibilityCustomRotors ?? []
+            existing.append(messagesRotor)
+            self.view.accessibilityCustomRotors = existing
         }
 
         self.dynamicBounceEnabled = !self.currentPresentationData.disableAnimations
@@ -1326,6 +1481,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.genericReactionEffectDisposable?.dispose()
         self.adMessagesDisposable?.dispose()
         self.presentationDataDisposable?.dispose()
+        if let observer = self.voiceOverStatusObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = self.elementFocusedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
     
     private func makeMessageAccessibilityElement(for itemNode: ASDisplayNode) -> UIAccessibilityElement? {
@@ -1380,7 +1541,305 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
         return (label, value, hint, identifier, traits, customActions, frame)
     }
-    
+
+    /// Walks the **subnode** tree of a message item (`ASDisplayNode` level,
+    /// not `UIView`) and produces a single composed accessibility payload
+    /// built primarily from `AccessibilityAreaNode` instances and from any
+    /// other subnode that opts into `isAccessibilityElement = true` (custom
+    /// reactions, share/comments buttons, etc.).
+    ///
+    /// Why subnodes, not subviews?  `ChatMessageBubbleItemNode` calls
+    /// `messageAccessibilityArea.updateFrameClippedToAccessibilityContainers(...)`
+    /// which sets `isAccessibilityElement = false` and frame to `.zero`
+    /// whenever the bubble is currently clipped off-screen — a Telegram
+    /// optimisation to avoid laying out an accessibility frame for items
+    /// the user cannot see.  When the bubble materialises but is still
+    /// outside the visible window (full-materialisation mode), the area's
+    /// `accessibilityLabel` / `accessibilityValue` / `accessibilityCustomActions`
+    /// are *still set correctly* (the bubble's "common" accessibility
+    /// payload is recomputed on every layout pass), they just aren't being
+    /// surfaced as a UIKit leaf.  Walking the node tree lets us read the
+    /// data straight off the `AccessibilityAreaNode`, bypassing the leaf
+    /// gate, so VoiceOver can speak the actual message text instead of
+    /// whichever stray leaf (e.g. "1 комментарий") happens to still be
+    /// active.
+    /// Walk the ASDisplayKit subnode tree of a bubble and clear
+    /// `isAccessibilityElement` on every descendant.  This eliminates
+    /// `_ASDisplayView` leaves (date+status, reactions, share button,
+    /// comments button, link previews, text segments) that VoiceOver
+    /// otherwise picks up as spatial focus competitors next to our
+    /// pooled proxies and the bubble's promoted leaf — the
+    /// `focus-handler-skip reason=focus-left-list type=_ASDisplayView`
+    /// (and its `offscreen-uiview-ignored` cousin) cascade in the
+    /// logs that strands the cursor after two-three swipes.
+    ///
+    /// Notes on safety:
+    ///
+    /// • We walk `subnodes` (ASDisplayKit's own tree), not
+    ///   `view.subviews`.  An earlier attempt that walked
+    ///   `subviews` triggered an `objc_terminate` abort, almost
+    ///   certainly from mutating `isAccessibilityElement` on a
+    ///   `_ASDisplayView` whose backing node had assertions about
+    ///   its accessibility state.  Subnode traversal stays inside
+    ///   the framework's own hierarchy.
+    ///
+    /// • We DON'T demote the root (the item node itself) — it is
+    ///   promoted as the single bubble-level leaf elsewhere, which
+    ///   is what keeps `proxy.sourceView` a valid focus context.
+    ///
+    /// • No restore on VoiceOver-off: the affected subnodes are
+    ///   recycled along with the bubble on next layout / cell
+    ///   reuse; fresh instances come with default accessibility
+    ///   flags.  The bubble-level promotion is undone in the
+    ///   normal `voPromotedItemNodes` cleanup loop.
+    fileprivate static func suppressCompetingLeaves(in node: ASDisplayNode, isRoot: Bool) {
+        if !isRoot {
+            if node.isAccessibilityElement {
+                node.isAccessibilityElement = false
+            }
+        }
+        for sub in node.subnodes ?? [] {
+            suppressCompetingLeaves(in: sub, isRoot: false)
+        }
+        // NOTE: an earlier revision also walked `view.subviews`
+        // recursively to demote UIKit leaves that don't have a
+        // backing `ASDisplayNode`.  That crashed the app with
+        // `_objc_terminate` (NSException raised on the main queue
+        // during async image rendering / layout) — apparently
+        // mutating `isAccessibilityElement` on certain
+        // ASDisplayKit-managed `_ASDisplayView`s while their owning
+        // node is laying out violates an invariant.  We stay inside
+        // the subnode hierarchy here; any plain-UIView leaves that
+        // slip through remain as residual competitors, which is a
+        // smaller problem than the crash they cause when demoted.
+    }
+
+    /// Locate the bubble's main `AccessibilityAreaNode` by walking the
+    /// node subtree of a materialised message item.  Most chat rows have
+    /// exactly one such node (`ChatMessageBubbleItemNode.messageAccessibility
+    /// Area`), populated with the row's full label, value, traits and
+    /// custom actions; auxiliary nodes (date separators, comments
+    /// buttons, share buttons, reactions, …) live elsewhere in the tree
+    /// and are intentionally not used as the row's leaf so that
+    /// VoiceOver swipe traversal stays at the message-row granularity.
+    /// Returns the *first* AccessibilityAreaNode found in pre-order
+    /// traversal — which, in `ChatMessageBubbleItemNode`, is the
+    /// canonical message area added to the node hierarchy in the
+    /// initialiser.
+    private func findMessageAccessibilityArea(in node: ASDisplayNode) -> AccessibilityAreaNode? {
+        if let area = node as? AccessibilityAreaNode {
+            return area
+        }
+        if let subnodes = node.subnodes {
+            for subnode in subnodes {
+                if let area = self.findMessageAccessibilityArea(in: subnode) {
+                    return area
+                }
+            }
+        }
+        return nil
+    }
+
+    private func composeBubbleAccessibilityPayload(for itemNode: ListViewItemNode, clippedTo visibleScreenRect: CGRect) -> (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)? {
+        // AAN-only label so VoiceOver speaks the message text — and just
+        // the message text — when the cursor lands on the bubble.  Inner
+        // leaves (comments button, share button, reaction chips, …) used
+        // to be glued onto the label too, which gave the user a clumsy
+        // "2 комментария, Фотография" instead of "Фотография".  Their
+        // payload is preserved as `accessibilityCustomActions` so it
+        // remains reachable through the rotor while VO is active.
+        var primaryLabel: String?
+        var primaryValue: String?
+        var primaryHint: String?
+        var primaryIdentifier: String?
+        var primaryTraits: UIAccessibilityTraits = []
+        var combinedActions: [UIAccessibilityCustomAction] = []
+        var didFindAreaNode = false
+
+        func walk(_ node: ASDisplayNode, isRoot: Bool) {
+            if node.isHidden {
+                return
+            }
+            if let area = node as? AccessibilityAreaNode {
+                didFindAreaNode = true
+                if primaryLabel == nil, let label = area.accessibilityLabel, !label.isEmpty, !label.hasPrefix("<") {
+                    primaryLabel = label
+                }
+                if primaryValue == nil, let value = area.accessibilityValue, !value.isEmpty, !value.hasPrefix("<") {
+                    primaryValue = value
+                }
+                if primaryHint == nil, let hint = area.accessibilityHint, !hint.isEmpty {
+                    primaryHint = hint
+                }
+                if primaryIdentifier == nil, let identifier = area.accessibilityIdentifier, !identifier.isEmpty {
+                    primaryIdentifier = identifier
+                }
+                primaryTraits.formUnion(area.accessibilityTraits)
+                if let actions = area.view.accessibilityCustomActions {
+                    combinedActions.append(contentsOf: actions)
+                }
+                return
+            }
+            if !isRoot, node.isAccessibilityElement {
+                // Non-AAN leaf (comments / share / reactions): expose only
+                // its custom actions, and synthesise an action with the
+                // leaf's own label so the user can tap it via the rotor.
+                if let actions = node.view.accessibilityCustomActions {
+                    combinedActions.append(contentsOf: actions)
+                }
+                if let label = node.accessibilityLabel,
+                   !label.isEmpty,
+                   !label.hasPrefix("<") {
+                    let nodeRef = node
+                    let action = UIAccessibilityCustomAction(name: label) { _ in
+                        return nodeRef.view.accessibilityActivate()
+                    }
+                    combinedActions.append(action)
+                }
+                return
+            }
+            for subnode in node.subnodes ?? [] {
+                walk(subnode, isRoot: false)
+            }
+        }
+
+        walk(itemNode, isRoot: true)
+
+        if !didFindAreaNode || primaryLabel == nil {
+            // Fall back to the UIView walker for oddball cells (date
+            // headers, unread / loading markers, ad cells, …) that don't
+            // embed an `AccessibilityAreaNode`.
+            if let viewLeaf = self.collectMessageAccessibilityData(in: itemNode.view, clippedTo: visibleScreenRect) {
+                return (
+                    label: viewLeaf.label,
+                    value: viewLeaf.value,
+                    hint: viewLeaf.hint,
+                    identifier: viewLeaf.identifier,
+                    traits: viewLeaf.traits,
+                    customActions: viewLeaf.customActions
+                )
+            }
+        }
+
+        guard let primaryLabel else {
+            return nil
+        }
+        return (
+            label: primaryLabel,
+            value: primaryValue,
+            hint: primaryHint,
+            identifier: primaryIdentifier,
+            traits: primaryTraits,
+            customActions: combinedActions.isEmpty ? nil : combinedActions
+        )
+    }
+
+    /// Walks the subview hierarchy of a message item and produces a single
+    /// composed accessibility payload built **only** from real accessibility
+    /// leaves (i.e. views whose `isAccessibilityElement == true`).  Each chat
+    /// message exposes one primary leaf (`AccessibilityAreaNode`) carrying
+    /// the message body label; richer messages may expose extra leaves for
+    /// reactions or action buttons.  We combine their labels, custom actions
+    /// and frames so VoiceOver hears the message as a single entity.
+    private func collectMessageAccessibilityData(in rootView: UIView, clippedTo visibleScreenRect: CGRect) -> (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?, frame: CGRect)? {
+        var labels: [String] = []
+        var primaryValue: String?
+        var primaryHint: String?
+        var primaryIdentifier: String?
+        var combinedTraits: UIAccessibilityTraits = []
+        var combinedActions: [UIAccessibilityCustomAction] = []
+        var combinedFrame: CGRect?
+
+        func append(label: String?, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, actions: [UIAccessibilityCustomAction]?, frame: CGRect) {
+            if let label, !label.isEmpty, !label.hasPrefix("<") {
+                labels.append(label)
+            } else if let value, !value.isEmpty, !value.hasPrefix("<") {
+                labels.append(value)
+            }
+            if primaryValue == nil, let value, !value.isEmpty, !value.hasPrefix("<") {
+                primaryValue = value
+            }
+            if primaryHint == nil, let hint, !hint.isEmpty {
+                primaryHint = hint
+            }
+            if primaryIdentifier == nil, let identifier, !identifier.isEmpty {
+                primaryIdentifier = identifier
+            }
+            combinedTraits.formUnion(traits)
+            if let actions, !actions.isEmpty {
+                combinedActions.append(contentsOf: actions)
+            }
+            if !frame.isNull, frame.width > 1.0, frame.height > 1.0 {
+                if let current = combinedFrame {
+                    combinedFrame = current.union(frame)
+                } else {
+                    combinedFrame = frame
+                }
+            }
+        }
+
+        func walk(_ view: UIView, isRoot: Bool) {
+            if view.isHidden {
+                return
+            }
+            if view.isAccessibilityElement {
+                let rawFrame = view.accessibilityFrame.isNull
+                    ? UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+                    : view.accessibilityFrame
+                let frame = rawFrame.intersection(visibleScreenRect)
+                append(
+                    label: view.accessibilityLabel,
+                    value: view.accessibilityValue,
+                    hint: view.accessibilityHint,
+                    identifier: view.accessibilityIdentifier,
+                    traits: view.accessibilityTraits,
+                    actions: view.accessibilityCustomActions,
+                    frame: frame
+                )
+                // Don't descend into a leaf — its own children are private.
+                return
+            }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let element = element as? UIAccessibilityElement {
+                        let frame = element.accessibilityFrame.intersection(visibleScreenRect)
+                        append(
+                            label: element.accessibilityLabel,
+                            value: element.accessibilityValue,
+                            hint: element.accessibilityHint,
+                            identifier: element.accessibilityIdentifier,
+                            traits: element.accessibilityTraits,
+                            actions: element.accessibilityCustomActions,
+                            frame: frame
+                        )
+                    } else if let nestedView = element as? UIView {
+                        walk(nestedView, isRoot: false)
+                    }
+                }
+                return
+            }
+            for subview in view.subviews {
+                walk(subview, isRoot: false)
+            }
+        }
+
+        walk(rootView, isRoot: true)
+
+        guard !labels.isEmpty, let frame = combinedFrame else {
+            return nil
+        }
+        let composedLabel = labels.joined(separator: ", ")
+        return (
+            label: composedLabel,
+            value: primaryValue,
+            hint: primaryHint,
+            identifier: primaryIdentifier,
+            traits: combinedTraits,
+            customActions: combinedActions.isEmpty ? nil : combinedActions,
+            frame: frame
+        )
+    }
+
     override public func customAccessibilityElements() -> [Any]? {
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
@@ -1396,105 +1855,254 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             visibleTop = contentOffset.y + self.insets.top
             visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
         }
-        
-        let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
+
+        let voIsRunning = UIAccessibility.isVoiceOverRunning
+
         let visibleBoundsRect = CGRect(
             x: 0.0,
             y: self.rotated ? self.insets.bottom : self.insets.top,
             width: self.visibleSize.width,
             height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
         )
-        var visibleScreenRect = UIAccessibility.convertToScreenCoordinates(visibleBoundsRect, in: self.view)
-        var currentClippingNode: ASDisplayNode? = self
-        while let clippingNode = currentClippingNode {
-            if let clippingContainer = clippingNode as? AccessibilityClippingContainer, let clippingFrame = clippingContainer.accessibilityClippingFrameInScreenCoordinates() {
-                visibleScreenRect = visibleScreenRect.intersection(clippingFrame)
-                if visibleScreenRect.isNull || visibleScreenRect.width <= 1.0 || visibleScreenRect.height <= 1.0 {
-                    self.updateAccessibilityDirectionalElements([])
-                    return nil
-                }
-            }
-            currentClippingNode = clippingNode.supernode
+        // VoiceOver full-materialisation mode (see `accessibilityInvisibleInsetOverride`).
+        // While VO is active we want the accessibility array to contain *every*
+        // materialised message in the conversation, not just the on-screen ones.
+        // To do that we widen both the local content-space rect (used for picking
+        // item nodes) and the screen-space rect (used by `accessibilityData` to
+        // clip child frames) to effectively unbounded values, so frames are
+        // passed through with their natural geometry.  ListView's
+        // `scrollAccessibilityFocusIntoViewIfNeeded` then pages the focused
+        // element into view as the user swipes.
+        let isFullMaterializationActive = self.accessibilityInvisibleInsetOverride != nil
+        let visibleRect: CGRect
+        if isFullMaterializationActive {
+            let huge = CGFloat(1_000_000_000.0)
+            visibleRect = CGRect(x: -huge / 2.0, y: -huge / 2.0, width: huge, height: huge)
+        } else {
+            visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
         }
-        self.forEachItemNode({ node in
-            if trackDirectionalFocus {
-                guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
-                    return
-                }
-                let intersection = itemNode.frame.intersection(visibleRect)
-                guard !intersection.isNull, intersection.height > 1.0, intersection.width > 1.0 else {
-                    return
-                }
-                activeLocalIndices.insert(itemIndex)
-                if itemNode.isAccessibilityElement {
-                    guard let itemData = self.accessibilityData(for: itemNode.view, clippedTo: visibleScreenRect) else {
-                        return
-                    }
-                    let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: 0, sourceView: itemNode.view)
-                    element.accessibilityFrame = itemData.frame
-                    element.accessibilityLabel = itemData.label
-                    element.accessibilityValue = itemData.value
-                    element.accessibilityTraits = itemData.traits
-                    element.accessibilityHint = itemData.hint
-                    element.accessibilityIdentifier = itemData.identifier
-                    element.accessibilityCustomActions = itemData.customActions
-                    directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
-                } else if let nodeChildren = itemNode.accessibilityElements, !nodeChildren.isEmpty {
-                    var labels: [String] = []
-                    var customActions: [UIAccessibilityCustomAction] = []
-                    var combinedFrame: CGRect?
-                    var combinedHint: String?
-                    var combinedIdentifier = itemNode.accessibilityIdentifier
-                    for child in nodeChildren {
-                        guard let childData = self.accessibilityData(for: child, clippedTo: visibleScreenRect) else {
-                            continue
+        var visibleScreenRect = UIAccessibility.convertToScreenCoordinates(visibleBoundsRect, in: self.view)
+        if isFullMaterializationActive {
+            let huge = CGFloat(1_000_000_000.0)
+            visibleScreenRect = CGRect(x: -huge / 2.0, y: -huge / 2.0, width: huge, height: huge)
+        } else {
+            var currentClippingNode: ASDisplayNode? = self
+            while let clippingNode = currentClippingNode {
+                if let clippingContainer = clippingNode as? AccessibilityClippingContainer, let clippingFrame = clippingContainer.accessibilityClippingFrameInScreenCoordinates() {
+                    visibleScreenRect = visibleScreenRect.intersection(clippingFrame)
+                    if visibleScreenRect.isNull || visibleScreenRect.width <= 1.0 || visibleScreenRect.height <= 1.0 {
+                        if voIsRunning {
+                            print("[VO-CHAT] customAccessibilityElements: clipped-to-empty visibleScreenRect, returning nil")
                         }
-                        if let childLabel = childData.label, !childLabel.isEmpty {
-                            labels.append(childLabel)
-                        } else if let childValue = childData.value, !childValue.isEmpty {
-                            labels.append(childValue)
-                        }
-                        if let actions = childData.customActions {
-                            customActions.append(contentsOf: actions)
-                        }
-                        if combinedHint == nil, let childHint = childData.hint, !childHint.isEmpty {
-                            combinedHint = childHint
-                        }
-                        if combinedIdentifier == nil, let childIdentifier = childData.identifier, !childIdentifier.isEmpty {
-                            combinedIdentifier = childIdentifier
-                        }
-                        if let currentFrame = combinedFrame {
-                            combinedFrame = currentFrame.union(childData.frame)
-                        } else {
-                            combinedFrame = childData.frame
-                        }
-                    }
-                    let composedLabel = labels.joined(separator: ", ")
-                    if !composedLabel.isEmpty, let frame = combinedFrame, frame.width > 1.0, frame.height > 1.0 {
-                        let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: 0, sourceView: itemNode.view)
-                        element.accessibilityFrame = frame
-                        element.accessibilityLabel = composedLabel
-                        element.accessibilityValue = nil
-                        element.accessibilityTraits = itemNode.accessibilityTraits
-                        element.accessibilityHint = combinedHint
-                        element.accessibilityIdentifier = combinedIdentifier
-                        element.accessibilityCustomActions = customActions.isEmpty ? nil : customActions
-                        directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
+                        self.updateAccessibilityDirectionalElements([])
+                        return nil
                     }
                 }
-                return
+                currentClippingNode = clippingNode.supernode
+            }
+        }
+        if voIsRunning {
+            print("[VO-CHAT] customAccessibilityElements: enter rotated=\(self.rotated) fullMode=\(isFullMaterializationActive) trackDir=\(trackDirectionalFocus) contentOffsetY=\(Int(contentOffset.y)) visibleSize=\(Int(self.visibleSize.width))x\(Int(self.visibleSize.height)) windowY=[\(Int(visibleTop))..\(Int(visibleBottom))] navOrder=\(self.accessibilityNavigationOrder == .reversed ? "reversed" : "automatic")")
+        }
+        var voTotalNodesVisited = 0
+        var voNodesFilteredByRect = 0
+        var voNodesWithoutData = 0
+        var voItemFrameLog: [(li: Int, y: CGFloat, h: CGFloat)] = []
+
+        // Drive accessibility traversal off the **message data array**, not
+        // off whichever item nodes happen to be materialised right now.
+        //
+        // Why: ListView only renders a sliding window of item nodes.  In
+        // chat history, even with `accessibilityInvisibleInsetOverride =
+        // 1_000_000` (full materialisation), there are transient layout
+        // moments (right after a transition, during a programmatic scroll,
+        // pagination boundary) when an entry has no laid-out node yet — its
+        // frame is still `.zero` or its bounds haven't been computed.  The
+        // previous code skipped those entries via `guard !elementFrame.isNull,
+        // elementFrame.height > 1.0`, which dropped them from the
+        // accessibility array.  VoiceOver swipes that *should* land on those
+        // entries instead found nothing in the array at that index and
+        // either silently swallowed the swipe or escaped the list.
+        //
+        // By iterating `historyView.filteredEntries` we guarantee one proxy
+        // per message regardless of materialisation state.  Frame and
+        // payload are filled in from the item node when present; when
+        // absent we fall back to the visible clip rectangle so VoiceOver
+        // can still focus the proxy.  The very next layout pass — which
+        // runs immediately after the proxy is focused, because
+        // `scrollAccessibilityFocusIntoViewIfNeeded` triggers ListView to
+        // synchronise its render buffer — promotes the proxy from
+        // placeholder to fully-populated.
+        if trackDirectionalFocus {
+            var nodesByIndex: [Int: ListViewItemNode] = [:]
+            self.forEachItemNode { node in
+                guard let itemNode = node as? ListViewItemNode, let index = itemNode.index else { return }
+                nodesByIndex[index] = itemNode
+                if voIsRunning {
+                    voItemFrameLog.append((li: index, y: itemNode.frame.minY, h: itemNode.frame.height))
+                }
             }
 
-            let intersection = node.frame.intersection(visibleRect)
-            guard !intersection.isNull, intersection.height > node.frame.height * 0.5 else {
-                return
+            let entries = (self.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView.filteredEntries
+            // Fall back to materialised-node count when transaction state
+            // hasn't published a view yet (very brief window during chat
+            // open / location switch).  In that case `nodesByIndex` is the
+            // ground truth.
+            let entryCount = entries?.count ?? nodesByIndex.count
+
+            let clipFrameForProxies = self.accessibilityClippingFrameInScreenCoordinates() ?? CGRect(origin: .zero, size: self.visibleSize)
+
+            // ── Index-driven proxy layout ───────────────────────────
+            //
+            // Every entry — visible or not — gets a unique slot inside
+            // the visible clip, positioned strictly by its position in
+            // `filteredEntries`.  The real bubble frame is *never*
+            // consulted: not for the visible items, not for the
+            // off-screen ones, not for anything.  This is deliberate:
+            //
+            //  • iOS's swipe-next traversal sorts `accessibilityElements`
+            //    by `accessibilityFrame.y`.  Giving every proxy a
+            //    monotonic, deterministic y derived from its array
+            //    position forces strict array-order traversal — one
+            //    swipe = the next entry in the array, regardless of how
+            //    tall the bubble is, how big the screen is, or where
+            //    the scroller currently sits.
+            //  • Using real frames for "visible" bubbles meant their y
+            //    values shifted on every scroll, which moved them past
+            //    or behind the staggered off-screen proxies and broke
+            //    monotonicity.  iOS then re-resolved the focused
+            //    element via spatial fallback and the cursor drifted
+            //    after a screen of motion.
+            //  • The actual scroll-into-view is handled by
+            //    `scrollVoiceOverFocusToItem(at:)` (triggered from
+            //    `handleSystemAccessibilityFocusNotification` via the
+            //    proxy's `pinnedLocalIndex`).  We don't need real
+            //    frames here for that — only the index.
+            //
+            // No timing heuristics, no visibility checks, no
+            // size-dependent maths.
+            let stubH: CGFloat = 1.0
+            let availableHeight = max(stubH, clipFrameForProxies.height - stubH)
+            let denominator = max(1, entryCount - 1)
+            let staggerStep = max(0.25, availableHeight / CGFloat(denominator))
+
+            for entryArrayIndex in 0..<entryCount {
+                // ListView lays chat history out so that `localIndex 0` is
+                // the *oldest* loaded message and `localIndex N-1` the
+                // *newest* (because of `rotated = true`).  `filteredEntries`
+                // is stored newest-first, so reverse the mapping.
+                let localIndex = entryCount - 1 - entryArrayIndex
+                voTotalNodesVisited += 1
+                activeLocalIndices.insert(localIndex)
+
+                let itemNode = nodesByIndex[localIndex]
+                let payload: (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)?
+                let sourceView: UIView
+
+                // Compute the bubble's real screen frame if we have an
+                // item node — we need it for both the proxy frame
+                // (visible bubbles) and the leaf collapse below.
+                var realFrame: CGRect = .null
+                if let itemNode {
+                    realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                }
+                let isVisible = !realFrame.isNull
+                    && realFrame.intersects(clipFrameForProxies)
+                    && realFrame.height > 1.0 && realFrame.width > 1.0
+
+                if let itemNode {
+                    payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect)
+                    sourceView = itemNode.view
+                    if voIsRunning {
+                        // Promote the bubble itself to a single
+                        // accessibility leaf alongside our proxy.
+                        //
+                        // (Other experiments tried here and reverted
+                        // because they crashed or broke navigation:
+                        //  • `accessibilityElementsHidden = true` —
+                        //    drops VO focus on the next swipe.
+                        //  • Recursive demotion of subview leaves —
+                        //    triggered an objc_terminate abort,
+                        //    likely from setting
+                        //    isAccessibilityElement on a view in an
+                        //    unexpected state during layout.
+                        //  • `self.view.accessibilityElementsHidden`
+                        //    — same drop-focus symptom.)
+                        itemNode.view.accessibilityElementsHidden = false
+                        itemNode.isAccessibilityElement = true
+                        itemNode.accessibilityLabel = payload?.label
+                        itemNode.accessibilityValue = payload?.value
+                        itemNode.accessibilityHint = payload?.hint
+                        itemNode.accessibilityIdentifier = payload?.identifier
+                        itemNode.accessibilityTraits = payload?.traits ?? []
+                        itemNode.view.accessibilityCustomActions = payload?.customActions
+                        // Recursive demote of every accessibility leaf
+                        // inside the bubble subtree — keeps only the
+                        // promoted root (and our proxy in the array)
+                        // as focusable representations of the
+                        // message.  See `suppressCompetingLeaves` for
+                        // why we walk subnodes instead of subviews
+                        // and why this can run on every layout pass.
+                        ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
+                        self.voPromotedItemNodes.add(itemNode)
+                    }
+                } else {
+                    payload = nil
+                    sourceView = self.view
+                    voNodesFilteredByRect += 1
+                }
+
+                // Frame strategy:
+                //   • Visible bubble → use its real screen frame.
+                //     This is what lets the user *tap* on the message
+                //     (pointing at the bubble's centre) to focus its
+                //     proxy.  Without it the user has to swipe one
+                //     step at a time even when the message is right
+                //     under their finger.
+                //   • Off-screen / not materialised → staggered slot
+                //     inside the clip, with a y derived strictly from
+                //     the array index, so iOS's spatial sort yields
+                //     exactly array order during sequential swipes.
+                let elementFrame: CGRect
+                if isVisible {
+                    elementFrame = realFrame
+                } else {
+                    let staggerOffset = CGFloat(entryArrayIndex) * staggerStep
+                    elementFrame = CGRect(
+                        x: clipFrameForProxies.minX,
+                        y: clipFrameForProxies.minY + min(staggerOffset, availableHeight),
+                        width: max(1.0, clipFrameForProxies.width),
+                        height: stubH
+                    )
+                }
+
+                let element = self.reuseOrCreateDirectionalElement(localIndex: localIndex, childOrder: 0, sourceView: sourceView)
+                element.accessibilityFrame = elementFrame
+                element.accessibilityLabel = payload?.label ?? "…"
+                element.accessibilityValue = payload?.value
+                element.accessibilityHint = payload?.hint
+                element.accessibilityIdentifier = payload?.identifier
+                element.accessibilityTraits = payload?.traits ?? []
+                element.accessibilityCustomActions = payload?.customActions
+                directionalCandidates.append((localIndex: localIndex, order: 0, element: element))
+                if payload == nil {
+                    voNodesWithoutData += 1
+                }
             }
-            if let element = self.makeMessageAccessibilityElement(for: node) {
-                accessibilityElements.append(element)
-            } else {
-                addAccessibilityChildren(of: node, container: self, to: &accessibilityElements)
-            }
-        })
+        } else {
+            self.forEachItemNode({ node in
+                voTotalNodesVisited += 1
+                let intersection = node.frame.intersection(visibleRect)
+                guard !intersection.isNull, intersection.height > node.frame.height * 0.5 else {
+                    return
+                }
+                if let element = self.makeMessageAccessibilityElement(for: node) {
+                    accessibilityElements.append(element)
+                } else {
+                    addAccessibilityChildren(of: node, container: self, to: &accessibilityElements)
+                }
+            })
+        }
         if !trackDirectionalFocus && accessibilityElements.isEmpty {
             self.forEachItemNode({ node in
                 let intersection = node.frame.intersection(visibleRect)
@@ -1539,8 +2147,262 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             accessibilityElements.reverse()
         }
         self.updateAccessibilityDirectionalElements(accessibilityElements)
-        
+        self.lastAccessibilityElements = accessibilityElements
+
+        if voIsRunning {
+            let firstIndex = directionalCandidates.first?.localIndex
+            let lastIndex = directionalCandidates.last?.localIndex
+            let activeRange: String
+            if let lo = activeLocalIndices.min(), let hi = activeLocalIndices.max() {
+                activeRange = "\(lo)..\(hi)"
+            } else {
+                activeRange = "empty"
+            }
+            print("[VO-CHAT] customAccessibilityElements: exit visited=\(voTotalNodesVisited) filteredByRect=\(voNodesFilteredByRect) noData=\(voNodesWithoutData) directionalCandidates=\(directionalCandidates.count) activeIndices=\(activeLocalIndices.count) activeRange=\(activeRange) firstSorted=\(firstIndex.map(String.init) ?? "nil") lastSorted=\(lastIndex.map(String.init) ?? "nil") finalCount=\(accessibilityElements.count)")
+            // Diagnostic: log content-Y of every materialised item so we can
+            // see whether items spread across thousands of points or are
+            // packed contiguously.
+            if !voItemFrameLog.isEmpty {
+                let sortedFrames = voItemFrameLog.sorted { $0.li < $1.li }
+                let minY = sortedFrames.map { $0.y }.min() ?? 0
+                let maxY = sortedFrames.map { $0.y + $0.h }.max() ?? 0
+                let summary = sortedFrames.prefix(6).map { "li=\($0.li) y=\(Int($0.y)) h=\(Int($0.h))" }.joined(separator: " | ")
+                let tail = sortedFrames.suffix(3).map { "li=\($0.li) y=\(Int($0.y)) h=\(Int($0.h))" }.joined(separator: " | ")
+                print("[VO-CHAT] item-frames: span=\(Int(minY))..\(Int(maxY)) (Δ=\(Int(maxY - minY))) head=[\(summary)] tail=[\(tail)]")
+            }
+        }
+
         return accessibilityElements.isEmpty ? nil : accessibilityElements
+    }
+
+    private func handleVoiceOverFocusChanged(notification: Notification) {
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        guard let userInfo = notification.userInfo else { return }
+        let focusedAny = userInfo[UIAccessibility.focusedElementUserInfoKey]
+        let unfocusedAny = userInfo[UIAccessibility.unfocusedElementUserInfoKey]
+
+        // The system fires this notification globally; we only want to log
+        // when focus enters/moves inside *our* accessibility array.
+        let elements = self.lastAccessibilityElements
+        guard !elements.isEmpty else {
+            return
+        }
+
+        func position(of focusedElement: AnyObject?) -> Int? {
+            guard let focusedElement else { return nil }
+            for (index, element) in elements.enumerated() {
+                if let elementObject = element as AnyObject?, elementObject === focusedElement {
+                    return index
+                }
+            }
+            // VoiceOver routinely focuses the actual UIView of an
+            // accessibility leaf (e.g. `AccessibilityAreaNode.view`)
+            // instead of the proxy element we returned from
+            // `customAccessibilityElements`.  Map UIView focus back to
+            // the corresponding proxy by source view so the cursor
+            // log reflects real progression instead of spamming
+            // `focus-left-list` each swipe.
+            if let focusedView = focusedElement as? UIView {
+                for (index, element) in elements.enumerated() {
+                    if let tracked = element as? FocusTrackingAccessibilityElement,
+                       let sourceView = tracked.sourceView,
+                       sourceView === focusedView {
+                        return index
+                    }
+                }
+            }
+            return nil
+        }
+
+        let focusedObject = focusedAny as AnyObject?
+        let unfocusedObject = unfocusedAny as AnyObject?
+        let focusedPosition = position(of: focusedObject)
+        let unfocusedPosition = position(of: unfocusedObject)
+
+        // Track only meaningful transitions inside our list.  Focus that
+        // leaves our list is logged once with `position=outside`, then we
+        // stop spamming until focus returns.
+        let totalLoaded = elements.count
+        var totalChat: Int?
+        var absolutePosition: Int?
+        if let focusedPosition {
+            // Resolve the source view for absolute-scroll info regardless
+            // of whether the array stores `FocusTrackingAccessibilityElement`
+            // wrappers (off-VoiceOver path) or the bubble views themselves
+            // (full-materialisation path that landed identity-stable
+            // leaves directly into the array).
+            let element = elements[focusedPosition]
+            let sourceView: UIView?
+            if let tracked = element as? FocusTrackingAccessibilityElement {
+                sourceView = tracked.sourceView
+            } else if let view = element as? UIView {
+                sourceView = view
+            } else {
+                sourceView = nil
+            }
+            if let sourceView, let info = self.computeAbsoluteScrollInfo(forFocusedSourceView: sourceView) {
+                absolutePosition = info.position
+                totalChat = info.total
+            }
+        }
+
+        if let focusedPosition {
+            let identity = ObjectIdentifier(focusedObject!)
+            if self.lastFocusedElementIdentity == identity {
+                return
+            }
+            self.lastFocusedElementIdentity = identity
+
+            let element = elements[focusedPosition]
+            let rawLabel = (element as? UIAccessibilityElement)?.accessibilityLabel
+                ?? (element as? UIView)?.accessibilityLabel
+                ?? ""
+            let labelSnippet: String = {
+                let trimmed = rawLabel.replacingOccurrences(of: "\n", with: " ")
+                if trimmed.isEmpty {
+                    return "<no-label>"
+                }
+                return trimmed.count > 60 ? String(trimmed.prefix(60)) + "…" : trimmed
+            }()
+
+            let humanPosition = focusedPosition + 1
+            let absolute = absolutePosition.map(String.init) ?? "?"
+            let total = totalChat.map(String.init) ?? "?"
+            let prevPosition = unfocusedPosition.map { $0 + 1 }
+            print("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
+        } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
+            self.lastFocusedElementIdentity = nil
+            let focusedKind: String
+            let focusedLabel: String
+            if let focusedAny {
+                focusedKind = String(describing: type(of: focusedAny))
+                let label = (focusedAny as? UIAccessibilityElement)?.accessibilityLabel
+                    ?? (focusedAny as? UIView)?.accessibilityLabel
+                    ?? ""
+                let trimmed = label.replacingOccurrences(of: "\n", with: " ")
+                focusedLabel = trimmed.isEmpty ? "<no-label>" : (trimmed.count > 60 ? String(trimmed.prefix(60)) + "…" : trimmed)
+            } else {
+                focusedKind = "nil"
+                focusedLabel = "<nil>"
+            }
+            let focusedFrame: String
+            if let element = focusedAny as? UIAccessibilityElement {
+                let f = element.accessibilityFrame
+                focusedFrame = "[\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height))]"
+            } else if let view = focusedAny as? UIView {
+                let f = UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+                focusedFrame = "[\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height))]"
+            } else {
+                focusedFrame = "<no-frame>"
+            }
+            print("[VO-CHAT] cursor: focus-left-list from=\(unfocusedPosition + 1)/\(totalLoaded) -> kind=\(focusedKind) frame=\(focusedFrame) label='\(focusedLabel)'")
+        }
+    }
+
+    /// Custom rotor backend.  Resolves the next message target on each
+    /// `.next` / `.previous` step the user takes inside the "Сообщения"
+    /// rotor.
+    ///
+    /// Mapping conventions:
+    ///   • `localIndex 0` is the *oldest* message in the loaded buffer.
+    ///   • `localIndex entryCount-1` is the *newest*.
+    ///   • Rotor `.next` advances toward newer messages; `.previous`
+    ///     toward older.
+    ///
+    /// Why no spatial math: standard VoiceOver swipe filters
+    /// `accessibilityElements` whose frame falls outside the focus
+    /// engine's reachable region, which drops chat history's far
+    /// off-screen bubbles before traversal.  With a rotor, iOS hands
+    /// us the navigation step explicitly, we scroll the target into
+    /// view via `transaction(scrollToItem:)` (synchronous, materialises
+    /// the item), and return its `UIView` as the focus target — no
+    /// reachable-region check applies.
+    private func rotorTarget(direction: UIAccessibilityCustomRotor.Direction, currentItem: UIAccessibilityCustomRotorItemResult) -> UIAccessibilityCustomRotorItemResult? {
+        let entryCount: Int
+        if let entries = (self.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView.filteredEntries {
+            entryCount = entries.count
+        } else {
+            entryCount = 0
+        }
+        guard entryCount > 0 else { return nil }
+
+        // Resolve the current `localIndex` from whatever element iOS
+        // reports as currently focused.  Three flavours:
+        //  1. A `FocusTrackingAccessibilityElement` proxy carrying our
+        //     `pinnedLocalIndex` (set in `reuseOrCreateDirectionalElement`).
+        //  2. A `UIView` that is `itemNode.view` for some bubble — walk
+        //     the view tree to recover the enclosing item node.
+        //  3. Anything else (navbar, input bar, …) — start from the
+        //     edge of the loaded buffer.
+        var currentLocalIndex: Int? = nil
+        if let trackingElement = currentItem.targetElement as? FocusTrackingAccessibilityElement,
+           let pinned = trackingElement.pinnedLocalIndex {
+            currentLocalIndex = pinned
+        } else if let focusedView = currentItem.targetElement as? UIView {
+            self.forEachItemNode { node in
+                guard currentLocalIndex == nil,
+                      let itemNode = node as? ListViewItemNode,
+                      let index = itemNode.index else { return }
+                if itemNode.view === focusedView || focusedView.isDescendant(of: itemNode.view) {
+                    currentLocalIndex = index
+                }
+            }
+        }
+
+        let targetLocalIndex: Int
+        if let currentLocalIndex {
+            targetLocalIndex = direction == .next ? currentLocalIndex + 1 : currentLocalIndex - 1
+        } else {
+            // No anchor in the chat — default to the newest message for
+            // `.next` and the oldest for `.previous`, matching how
+            // `Mail.app` opens its message rotor.
+            targetLocalIndex = direction == .next ? entryCount - 1 : 0
+        }
+        guard targetLocalIndex >= 0, targetLocalIndex < entryCount else {
+            print("[VO-CHAT] rotor: out-of-range direction=\(direction == .next ? "next" : "previous") current=\(currentLocalIndex.map(String.init) ?? "nil") target=\(targetLocalIndex) entryCount=\(entryCount)")
+            return nil
+        }
+
+        // Bring the target bubble into the viewport.  This goes through
+        // ListView's normal scroll machinery, materialising the item
+        // node if it's currently outside the render buffer.
+        self.scrollVoiceOverFocusToItem(at: targetLocalIndex)
+
+        // After the synchronous transaction, the item node should be
+        // present in `self.itemNodes`.  Find it and return its view.
+        var targetView: UIView? = nil
+        self.forEachItemNode { node in
+            guard targetView == nil,
+                  let itemNode = node as? ListViewItemNode,
+                  itemNode.index == targetLocalIndex else { return }
+            targetView = itemNode.view
+        }
+        guard let target = targetView else {
+            print("[VO-CHAT] rotor: target-not-materialised target=\(targetLocalIndex)")
+            return nil
+        }
+        print("[VO-CHAT] rotor: \(direction == .next ? "next" : "previous") current=\(currentLocalIndex.map(String.init) ?? "nil") target=\(targetLocalIndex)")
+        return UIAccessibilityCustomRotorItemResult(targetElement: target, targetRange: nil)
+    }
+
+    private func computeAbsoluteScrollInfo(forFocusedSourceView sourceView: UIView) -> (position: Int, total: Int)? {
+        guard let provider = self.accessibilityAbsoluteScrollInfo else { return nil }
+        var matchedLocalIndex: Int?
+        self.forEachItemNode({ node in
+            guard matchedLocalIndex == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else { return }
+            // The proxy element's `sourceView` is set to the bubble's
+            // `AccessibilityAreaNode.view`, which is a *descendant* of
+            // `itemNode.view`, not the item node itself.  Plain identity
+            // comparison would miss every match.  Walk the view tree
+            // upward to recover the enclosing item node.
+            if itemNode.view === sourceView || sourceView.isDescendant(of: itemNode.view) {
+                matchedLocalIndex = itemIndex
+            }
+        })
+        guard let localIndex = matchedLocalIndex else { return nil }
+        guard let info = provider([localIndex]) else { return nil }
+        return (position: info.first, total: info.total)
     }
     
     public func updateTag(tag: HistoryViewInputTag?) {

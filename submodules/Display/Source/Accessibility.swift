@@ -9,6 +9,13 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
     public var focused: ((Int, Int) -> Void)?
     public var focusLost: ((Int, Int) -> Void)?
     public weak var sourceView: UIView?
+    /// Local item index this proxy is pooled under.  Set by
+    /// `ListView.reuseOrCreateDirectionalElement(localIndex:childOrder:sourceView:)`.
+    /// Used by `handleSystemAccessibilityFocusNotification` to scroll
+    /// directly to the item via `ListView.transaction(scrollToItem:)`,
+    /// bypassing geometric off-screen-frame computations that fail for
+    /// rotated chat history with very tall message bubbles.
+    public var pinnedLocalIndex: Int?
 
     override public func accessibilityElementDidBecomeFocused() {
         super.accessibilityElementDidBecomeFocused()

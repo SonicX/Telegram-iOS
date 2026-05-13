@@ -108,14 +108,30 @@ public final class AccessibilityAreaNode: ASDisplayNode {
     
     @discardableResult
     public func updateFrameClippedToAccessibilityContainers(_ frame: CGRect, in containerNode: ASDisplayNode) -> Bool {
-        guard let clippedFrame = self.clippedFrame(frame, in: containerNode) else {
-            self.frame = .zero
-            self.isAccessibilityElement = false
-            return false
+        if let clippedFrame = self.clippedFrame(frame, in: containerNode) {
+            self.frame = clippedFrame
+            self.isAccessibilityElement = true
+            return true
         }
-        self.frame = clippedFrame
-        self.isAccessibilityElement = true
-        return true
+        // Off-screen.  Historically we deactivated the area entirely
+        // (isAccessibilityElement=false, frame=.zero) so that UIKit would
+        // skip it during focus traversal.  That made sense for short rows
+        // (e.g. chat list cells, all of which fit in the viewport at
+        // once) but breaks chat history: messages there can be 1000pt
+        // tall, only one or two fit on screen, and the remaining 41
+        // bubbles get deactivated which traps VoiceOver in a 1-2 element
+        // cycle.  When VoiceOver is running we therefore keep the node
+        // active and place its frame at the *unclipped* layout
+        // position; iOS then asks the parent ListView to scroll the
+        // frame into view as the user swipes through the conversation.
+        if UIAccessibility.isVoiceOverRunning {
+            self.frame = frame
+            self.isAccessibilityElement = true
+            return true
+        }
+        self.frame = .zero
+        self.isAccessibilityElement = false
+        return false
     }
 
     private func clippedFrame(_ frame: CGRect, in containerNode: ASDisplayNode) -> CGRect? {
@@ -156,7 +172,19 @@ public final class AccessibilityAreaNode: ASDisplayNode {
         if frame.isNull {
             return .zero
         }
-        
+
+        // While VoiceOver is running we want every materialised area
+        // (even those whose containers clip them off-screen) to expose
+        // its real screen position, so the cursor can land on it and
+        // ListView's accessibility-focus-into-view machinery can scroll
+        // the row into the visible window.  Without this branch, the
+        // intersection loop below would collapse off-screen frames to
+        // .zero, hide the row from VoiceOver, and trap the cursor on
+        // the one or two messages that happen to be on screen.
+        if UIAccessibility.isVoiceOverRunning {
+            return frame
+        }
+
         var currentSupernode = self.supernode
         while let supernode = currentSupernode {
             if let clippingContainer = supernode as? AccessibilityClippingContainer, let clippingFrame = clippingContainer.accessibilityClippingFrameInScreenCoordinates() {

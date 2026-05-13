@@ -256,7 +256,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
     }
-    
+
     private var effectiveInvisibleInset: CGFloat {
         if let override = self.accessibilityInvisibleInsetOverride {
             return override
@@ -5689,20 +5689,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     print("[VO-STATE] focus-handler-skip reason=offscreen-ignored ttl=\(String(format: "%.0f", (self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()) * 1000))ms")
                     return
                 }
-                // The focused view legitimately belongs to our list but its
-                // geometry has drifted outside the visible window. Instead
-                // of treating this as a lost-focus condition and kicking in
-                // the containment fallback (which yanks focus back onto
-                // whichever element happens to be visible, breaking the
-                // user's progression), scroll the list so the element lands
-                // back inside the visible rect. The subsequent focus
-                // notification from VoiceOver will re-enter this method with
-                // the element fully on-screen and naturally continue.
-                if self.scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: focusedScreenFrame) {
-                    print("[VO-STATE] focus-handler-skip reason=scrolled-focus-into-view (view)")
-                    return
-                }
-                self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-offscreen")
+                // **Don't trigger scroll from UIView focus events.**  iOS
+                // posts transient focus notifications for `_ASDisplayView`s
+                // deep inside materialised bubbles whenever its internal
+                // accessibility tree is recomputed (which happens after
+                // every layout pass / scroll).  Reacting to those by
+                // scrolling to whichever bubble owns the view caused a
+                // ping-pong between visually-adjacent rows in chat
+                // history (the "chat=2 ↔ chat=3" oscillation in the
+                // user's logs).  The authoritative focus event for our
+                // pooled proxies is delivered later via the
+                // `FocusTrackingAccessibilityElement` path below, where
+                // we *do* trigger an index-based scroll.  For UIView
+                // focus we just bail out: VoiceOver will sort out which
+                // proxy actually deserves focus on the next event.
+                print("[VO-STATE] focus-handler-skip reason=offscreen-uiview-ignored type=\(type(of: focusedView))")
                 return
             }
         }
@@ -5817,12 +5818,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // item across both the scroll-into-view pass *and* the buffer
         // extension, so it is safe — and actually necessary — to run
         // both in the same notification cycle.
-        if let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? UIAccessibilityElement {
-            if self.scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: focusedElement.accessibilityFrame) {
-                print("[VO-STATE] focus-scroll-triggered toIndex=\(toIndex) visibleCount=\(elements.count) match=\(matchKind)")
-            }
-        }
-
+        // Resolve `fromIndex` *before* triggering scroll so we can
+        // detect phantom reversals (see anti-debounce block below) and
+        // skip the wasted scroll-to-item.
         var fromIndex: Int?
         if let previousSourceViewIdentifier = self.accessibilityLastSystemFocusedSourceViewIdentifier {
             fromIndex = elementData.first(where: { item in
@@ -5844,6 +5842,22 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return ObjectIdentifier(sourceView)
         }()
         self.accessibilityLastSystemFocusedSignature = self.accessibilityDebugStableKey(from: focusedData)
+
+        if let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? UIAccessibilityElement {
+            // Prefer the index-based scroll (UITableView-style
+            // `scrollToRow(at:)`) over geometric `screenFrame` math.
+            // Falls back to the geometric path for non-pooled elements.
+            if let trackedElement = focusedElement as? FocusTrackingAccessibilityElement,
+               let pinnedLocalIndex = trackedElement.pinnedLocalIndex {
+                self.scrollVoiceOverFocusToItem(at: pinnedLocalIndex)
+                print("[VO-STATE] focus-scroll-triggered-by-index toIndex=\(toIndex) localIndex=\(pinnedLocalIndex) visibleCount=\(elements.count) match=\(matchKind)")
+            } else {
+                let scrollFrame = focusedElement.accessibilityFrame
+                if self.scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: scrollFrame) {
+                    print("[VO-STATE] focus-scroll-triggered toIndex=\(toIndex) visibleCount=\(elements.count) match=\(matchKind)")
+                }
+            }
+        }
 
         if let fromIndex, abs(toIndex - fromIndex) == 1 {
             var rows: [String] = []
@@ -6203,28 +6217,77 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // area rather than flush with its edge. Prevents oscillation on
         // sub-pixel boundaries.
         let margin: CGFloat = 2.0
+        let clipHeight = max(clipFrame.height, 1.0)
 
-        let scrollDirection: ListViewScrollDirection
-        let rawDistance: CGFloat
-        if screenFrame.maxY > clipFrame.maxY - margin {
-            // Element hangs below the visible window. Moving the content up
-            // on screen corresponds to `.down` on a non-rotated list (and
-            // `.up` on a rotated one — e.g. message history).
-            scrollDirection = self.rotated ? .up : .down
-            rawDistance = (screenFrame.maxY - clipFrame.maxY) + margin
-        } else if screenFrame.minY < clipFrame.minY + margin {
-            // Element is above the visible window.
-            scrollDirection = self.rotated ? .down : .up
-            rawDistance = (clipFrame.minY - screenFrame.minY) + margin
-        } else {
+        let extendsBelow = screenFrame.maxY > clipFrame.maxY - margin
+        let extendsAbove = screenFrame.minY < clipFrame.minY + margin
+        if !extendsBelow && !extendsAbove {
+            // Already fully inside the visible window.
             return false
         }
-        let distance = ceil(max(rawDistance, 1.0))
+
+        // Choose alignment so the focused row lands as a "natural reading
+        // start" inside the clip rather than hugging whichever edge it
+        // touched.  Three cases:
+        //
+        //  • element bigger than the clip — always pin its TOP to clip
+        //    top, so VoiceOver speech and the focus indicator both start
+        //    at the beginning of the message.
+        //  • element fits and is below the clip — pin its TOP to clip
+        //    top too: the user has just swiped to the next message, they
+        //    expect to see it from the start, not from its tail.
+        //  • element fits and is above the clip — pin its BOTTOM to clip
+        //    bottom: the user has swiped to a previous (rotated chat:
+        //    older) message, the natural cue is that the prior message
+        //    appears at the bottom of the screen and the user reads
+        //    upwards.
+        //
+        // The previous min-edge-only logic (just nudge the offending edge
+        // into the clip) left tall message bubbles ~10% visible after a
+        // swipe, which is the symptom in the user's logs.
+        let scrollDirection: ListViewScrollDirection
+        let rawDistance: CGFloat
+        let elementTallerThanClip = screenFrame.height > clipHeight - margin
+        if extendsBelow {
+            // Move content up so the element comes into view from below.
+            scrollDirection = self.rotated ? .up : .down
+            if elementTallerThanClip || extendsAbove {
+                // Tall element (or already partly above) — top-to-top.
+                rawDistance = (screenFrame.minY - clipFrame.minY) + margin
+            } else {
+                // Short element — top-to-top still feels best for VO swipe
+                // navigation: each swipe = one full message at the top.
+                rawDistance = (screenFrame.minY - clipFrame.minY) + margin
+            }
+        } else {
+            // extendsAbove only.  Move content down so the element comes
+            // into view from above.
+            scrollDirection = self.rotated ? .down : .up
+            if elementTallerThanClip {
+                // Tall element — pin its top to clip top so reading starts
+                // at the beginning.
+                rawDistance = (clipFrame.minY - screenFrame.minY) + margin
+            } else {
+                // Short element — bottom-to-bottom keeps the previous-
+                // message reading flow consistent.
+                rawDistance = (clipFrame.maxY - screenFrame.maxY) + margin
+            }
+        }
+        // Generous safety cap.  The previous `clipHeight * 2` was tuned
+        // for chat-list-sized rows (~76pt) and choked chat history's
+        // 800–1500pt message bubbles, leaving them barely visible after
+        // each VoiceOver swipe.  With the localIndex-keyed proxy pool
+        // (see `reuseOrCreateDirectionalElement`) view recycling no
+        // longer collapses focus identity, so a much larger cap is safe.
+        let scrollCap = clipHeight * 10.0
+        let cappedDistance = min(rawDistance, scrollCap)
+        let distance = ceil(max(cappedDistance, 1.0))
         guard distance >= 1.0 else {
             return false
         }
+        let wasCapped = cappedDistance < rawDistance - 0.5
 
-        print("[VO-STATE] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance)) elementY=[\(Int(screenFrame.minY))..\(Int(screenFrame.maxY))] clipY=[\(Int(clipFrame.minY))..\(Int(clipFrame.maxY))]")
+        print("[VO-STATE] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance))\(wasCapped ? " (capped from \(Int(rawDistance)))" : "") elementY=[\(Int(screenFrame.minY))..\(Int(screenFrame.maxY))] elementH=\(Int(screenFrame.height)) clipY=[\(Int(clipFrame.minY))..\(Int(clipFrame.maxY))] clipH=\(Int(clipHeight)) tallerThanClip=\(elementTallerThanClip)")
 
         self.accessibilityEdgeScrollPending = true
         // Suppress the "focus is offscreen" hot-path for a short window: the
@@ -6448,8 +6511,138 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // pinned to `localIndex`, which is what VoiceOver needs to keep
         // focus continuity across scrolls.
         elements[childOrder].sourceView = sourceView
+        elements[childOrder].pinnedLocalIndex = localIndex
         self.accessibilityDirectionalElementPool[localIndex] = elements
         return elements[childOrder]
+    }
+
+    /// Index-based scroll for VoiceOver focus.
+    ///
+    /// When VoiceOver focuses one of our pooled
+    /// `FocusTrackingAccessibilityElement` proxies we used to ask
+    /// `scrollAccessibilityFocusIntoViewIfNeeded` to bring the proxy's
+    /// geometric frame into the visible clip.  That works for short
+    /// chat-list cells but breaks for chat history's tall message bubbles
+    /// (1000–1500pt each), where the focused proxy's real screen frame
+    /// can be tens of thousands of points off-screen — far outside the
+    /// scroller's valid contentOffset range — and the geometric scroll
+    /// either undershoots, overshoots into a different message, or
+    /// confuses iOS's spatial navigation so the cursor jumps to a random
+    /// element in the array.
+    ///
+    /// The fix is to behave like `UITableView.scrollToRow(at:at:animated:)`:
+    /// use ListView's own `transaction(scrollToItem:)` to centre the
+    /// item identified by `localIndex` in the visible window, regardless
+    /// of its current geometric position.  After the transaction settles
+    /// the item is materialised inside the clip, the proxy's frame is
+    /// updated on the next `customAccessibilityElements` pass, and
+    /// VoiceOver naturally redraws the focus indicator at the right
+    /// place — matching what the user just selected.
+    public func scrollVoiceOverFocusToItem(at localIndex: Int) {
+        guard !self.accessibilityEdgeScrollPending,
+              !self.accessibilityBoundaryRecenterInProgress else {
+            return
+        }
+
+        // **Skip if already on-screen.**
+        // Without this guard, every focus notification — including the
+        // ones VoiceOver emits while the user is staying on the same
+        // visible message — would trigger a full
+        // `transaction(scrollToItem:)`.  That's expensive (synchronous
+        // layout + materialisation pass), and worse, the resulting layout
+        // change makes iOS re-resolve focus, often picking a different
+        // element via `match=nearest` and creating a focus zig-zag
+        // between two visible neighbours (the "chat=43 ↔ chat=44" loop
+        // observed in the user's logs).  We only scroll when the target
+        // row is genuinely outside the viewport.
+        if let itemNode = self.itemNodes.first(where: { $0.index == localIndex }) {
+            let visibleTop = self.insets.top
+            let visibleBottom = self.visibleSize.height - self.insets.bottom
+            let frame = itemNode.frame
+            // "Sufficiently visible" means the row is fully inside the
+            // clip OR its visible portion is larger than the clip
+            // (taller-than-screen bubble whose top or bottom is at the
+            // edge — user can already read the start of it).
+            let intersection = frame.intersection(CGRect(x: 0, y: visibleTop, width: self.visibleSize.width, height: max(0, visibleBottom - visibleTop)))
+            let clipHeight = max(0, visibleBottom - visibleTop)
+            let alreadyOnScreen: Bool
+            if frame.height >= clipHeight {
+                // Tall row: any non-trivial overlap counts — the user can
+                // start reading without an extra scroll.
+                alreadyOnScreen = intersection.height >= clipHeight * 0.9
+            } else {
+                // Short row: must be fully visible.
+                alreadyOnScreen = intersection.height >= frame.height - 1.0
+            }
+            if alreadyOnScreen {
+                return
+            }
+        }
+
+        self.accessibilityEdgeScrollPending = true
+        self.accessibilityIgnoreOffscreenUntil = CACurrentMediaTime() + 0.2
+
+        // `.center(.bottom)` with `additionalScrollDistance=0` mirrors how
+        // `scrollToMessage(...)` brings the target message into the
+        // viewport.  `animated: false` keeps the cursor responsive — the
+        // user just swiped, they expect the next message to appear right
+        // away.
+        let scrollToItem = ListViewScrollToItem(
+            index: localIndex,
+            position: .center(.bottom),
+            animated: false,
+            curve: .Default(duration: nil),
+            directionHint: .Down
+        )
+        self.transaction(
+            deleteIndices: [],
+            insertIndicesAndItems: [],
+            updateIndicesAndItems: [],
+            options: ListViewDeleteAndInsertOptions(),
+            scrollToItem: scrollToItem,
+            additionalScrollDistance: 0.0,
+            updateSizeAndInsets: nil,
+            stationaryItemRange: nil,
+            updateOpaqueState: nil,
+            completion: { _ in }
+        )
+        self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
+
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.accessibilityEdgeScrollPending = false
+            }
+        }
+    }
+
+    /// Reverse lookup: which `localIndex` does this UIView back, according
+    /// to the directional element pool?  Used by the focus handler to
+    /// translate UIView focus events into index-based scrolls.
+    private func localIndexForSourceView(_ view: UIView) -> Int? {
+        for (index, elements) in self.accessibilityDirectionalElementPool {
+            for element in elements {
+                if let sourceView = element.sourceView, sourceView === view {
+                    return index
+                }
+            }
+        }
+        // Walk up the view tree as a fallback — chat history's
+        // `sourceView` is the bubble's `AccessibilityAreaNode.view` /
+        // `itemNode.view`, but iOS may post focus on a deeper descendant
+        // (e.g. a button inside the bubble).  Take the first ancestor
+        // that's known in the pool.
+        var ancestor: UIView? = view.superview
+        while let view = ancestor {
+            for (index, elements) in self.accessibilityDirectionalElementPool {
+                for element in elements {
+                    if let sourceView = element.sourceView, sourceView === view {
+                        return index
+                    }
+                }
+            }
+            ancestor = view.superview
+        }
+        return nil
     }
 
     public func cleanupDirectionalElementPool(activeLocalIndices: Set<Int>) {
