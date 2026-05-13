@@ -1638,17 +1638,33 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // nodes load their CALayer but never an associated view,
             // and `-[ASDisplayNode view]` aborts with
             // `'Call to -view undefined on layer-backed nodes'` if we
-            // touch it. Skip them entirely; their accessibility
-            // surface is already controlled via the node-level flag
-            // we just cleared above, and they cannot host a
-            // VoiceOver leaf without a backing view anyway.
+            // touch it. Skip them entirely.
             if node.isNodeLoaded && !node.isLayerBacked {
-                let backingView = node.view
-                backingView.isAccessibilityElement = false
-                backingView.accessibilityLabel = nil
-                backingView.accessibilityValue = nil
-                backingView.accessibilityHint = nil
-                backingView.accessibilityCustomActions = nil
+                // **Only** demote the leaf flag here. We intentionally
+                // do NOT null `accessibilityLabel/value/hint/customActions`
+                // on the backing view, even though that would also
+                // disarm UIKit's implicit-leaf heuristic — because
+                // `composeBubbleAccessibilityPayload` re-reads those
+                // very properties from the AccessibilityAreaNode
+                // subtree on *every* `customAccessibilityElements`
+                // call (see `walk(_:isRoot:)` at line ~1701). Nulling
+                // them turns every subsequent pass's payload into
+                // `nil`, which surfaces in the logs as
+                // `noData=75 finalCount=75` and gives every element
+                // the placeholder label `"…"` — VoiceOver then reads
+                // "ellipsis" for every message.
+                //
+                // Keeping the labels intact means UIKit MIGHT still
+                // pick the view up as an implicit accessibility leaf
+                // (since `_ASDisplayView`'s view-side
+                // `isAccessibilityElement` can be flipped by other
+                // signals), but in practice raw `_ASDisplayView`s
+                // default to `false` and respect the explicit set
+                // we make immediately above. If the leaf
+                // competition resurfaces we move on to variant B
+                // (override `accessibilityElements` on the bubble
+                // root) rather than vandalising the payload.
+                node.view.isAccessibilityElement = false
             }
         }
         for sub in node.subnodes ?? [] {
