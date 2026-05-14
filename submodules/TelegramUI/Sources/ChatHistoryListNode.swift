@@ -2093,10 +2093,30 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 let localIndex: Int
                 let itemNode: ListViewItemNode
                 let realFrame: CGRect
+                /// `realFrame` clipped to the visible window. For
+                /// visible items this is what we hand to
+                /// `accessibilityFrame` so VoiceOver's spatial scan
+                /// stays bounded inside the viewport — a tall bubble
+                /// whose body extends far below the screen no longer
+                /// drags the cursor 1000+pt off-screen.
+                let clippedFrame: CGRect
                 let payload: (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)
                 let isVisible: Bool
                 let isAboveVisible: Bool
             }
+            // A bubble counts as "visible" only if a substantial slice
+            // of it is actually inside the clip. The previous bare
+            // `realFrame.intersects(synthClip)` test admitted tall
+            // media bubbles (1500pt+) that merely *grazed* the
+            // viewport edge — they then received their full,
+            // mostly-off-screen real frame as `accessibilityFrame`,
+            // and VoiceOver's spatial scan happily jumped the cursor
+            // onto them across the whole array (the chat=79 / chat=84
+            // "jump to position 1" loop in the logs). 44pt ≈ one
+            // tap-target's worth of on-screen content — enough to be
+            // a genuine focus target, small enough not to reject a
+            // short text bubble at the viewport edge.
+            let kMinVisibleHeight: CGFloat = 44.0
             var collected: [CollectedItem] = []
             self.forEachItemNode { node in
                 guard let itemNode = node as? ListViewItemNode, let localIndex = itemNode.index else { return }
@@ -2113,10 +2133,15 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
 
                 let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                let intersection = realFrame.isNull ? CGRect.null : realFrame.intersection(synthClip)
                 let isVisible = !realFrame.isNull
-                    && realFrame.intersects(synthClip)
-                    && realFrame.height > 1.0
-                    && realFrame.width > 1.0
+                    && !intersection.isNull
+                    && intersection.height >= kMinVisibleHeight
+                    && intersection.width > 1.0
+                // `clippedFrame` is the on-screen slice; falls back to
+                // the raw real frame when there's no intersection
+                // (so off-screen items still carry a sane value).
+                let clippedFrame = intersection.isNull ? realFrame : intersection
                 // Above-visible: bubble's bottom is above the clip top.
                 // Used to decide which synthetic stagger band to use.
                 let isAboveVisible = !realFrame.isNull && realFrame.maxY <= synthClip.minY
@@ -2138,6 +2163,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     localIndex: localIndex,
                     itemNode: itemNode,
                     realFrame: realFrame,
+                    clippedFrame: clippedFrame,
                     payload: payload,
                     isVisible: isVisible,
                     isAboveVisible: isAboveVisible
@@ -2183,11 +2209,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let kSynthNeighbours = 3
 
             let visibleItems = collected.filter { $0.isVisible }
+            // Compute the visible band extent from the **clipped**
+            // frames, not the raw real frames. A tall bubble's real
+            // frame can stretch hundreds of pt past the viewport; using
+            // it here would push the synthetic neighbour stagger bands
+            // off-screen. The clipped frame is the on-screen slice, so
+            // the stagger bands hug the actual visible content.
             let visibleTopY: CGFloat
             let visibleBottomY: CGFloat
-            if let firstReal = visibleItems.first?.realFrame {
-                visibleTopY = visibleItems.reduce(firstReal.minY) { min($0, $1.realFrame.minY) }
-                visibleBottomY = visibleItems.reduce(firstReal.maxY) { max($0, $1.realFrame.maxY) }
+            if let firstClipped = visibleItems.first?.clippedFrame {
+                visibleTopY = visibleItems.reduce(firstClipped.minY) { min($0, $1.clippedFrame.minY) }
+                visibleBottomY = visibleItems.reduce(firstClipped.maxY) { max($0, $1.clippedFrame.maxY) }
             } else {
                 let midY = synthClip.midY
                 visibleTopY = midY
@@ -2226,7 +2258,14 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 )
             }
             for item in visibleItems {
-                item.itemNode.view.accessibilityFrame = item.realFrame
+                // Hand VoiceOver the **clipped** on-screen slice, not
+                // the raw real frame. For a normal bubble fully inside
+                // the viewport these are identical; for a tall bubble
+                // that overflows the viewport, the clipped frame keeps
+                // the cursor's spatial anchor inside the screen so the
+                // next swipe finds the adjacent neighbour slot instead
+                // of jumping across the array.
+                item.itemNode.view.accessibilityFrame = item.clippedFrame
             }
             let belowNeighboursArr = Array(belowNeighbours)
             for (i, item) in belowNeighboursArr.enumerated() {
