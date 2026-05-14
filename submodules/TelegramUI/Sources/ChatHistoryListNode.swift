@@ -2107,31 +2107,44 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 ))
             }
 
-            // ── Synthetic accessibilityFrame: PACKED stagger ─────────
+            // ── Synthetic accessibilityFrame: BOUNDED packed stagger ─
             //
-            // Visible bubble   → real screen frame (so VO touch hit-test
-            //                    covers the entire bubble for tap).
-            // Off-screen above → **packed** stagger immediately above
-            //                    the visible bubble's top edge, with a
-            //                    tiny step (≈0.5pt) per item.
-            // Off-screen below → **packed** stagger immediately below
-            //                    the visible bubble's bottom edge.
+            // Visible bubble   → real screen frame.
+            // Off-screen above → packed stagger immediately above the
+            //                    visible bubble's top edge, **limited
+            //                    to `kSynthNeighbours` closest items**.
+            // Off-screen below → packed stagger immediately below,
+            //                    same limit.
+            // Far off-screen   → default (real off-screen) frame —
+            //                    VoiceOver filters them out as
+            //                    unreachable, they're effectively
+            //                    invisible to swipe traversal until
+            //                    they become adjacent.
             //
-            // Why packed (and not spread across the whole top/bottom
-            // band): with a wide spread VoiceOver's spatial scan from
-            // the visible bubble picks the OUTERMOST stagger slots (at
-            // clip's top/bottom edge) as the closest neighbours by y,
-            // which jumps focus by N items at once (logged as a 5-item
-            // skip chat=77→70, or oscillation between localIndex=60 at
-            // top of clip and localIndex=44 at bottom). Packing the
-            // synthetic slots right next to the visible bubble's
-            // edges keeps the spatially-closest slot always equal to
-            // the array-closest neighbour, so swipe = +1 step.
+            // Bounding the synthetic stagger to a small N (3 each
+            // side) is what guarantees swipe = exactly +1 step in
+            // localIndex order, regardless of how cramped the
+            // above/below band is. With unbounded stagger, when
+            // the visible bubble sits near the clip edge (e.g. the
+            // newest message at the bottom of viewport, with little
+            // room below), 10+ synthetic slots get clamped to the
+            // clip edge and collapse to the same y — VoiceOver's
+            // spatial scan can't tell them apart, picks one
+            // arbitrarily, and the cursor jumps by N items at once
+            // (observed in user logs as li=58 → li=43 skip-15).
             //
-            // The far ends of each stagger group sit a bit further
-            // from the visible bubble (~ count * step pt) but still
-            // well within the clip — never overlapping the visible
-            // bubble's real frame, so tap continues to work cleanly.
+            // With only 3 neighbour slots per side, the packed
+            // sub-band is always ~1.5pt tall and fits even at the
+            // very top/bottom of the clip. The far items are
+            // unreachable via swipe in one transaction but become
+            // reachable on the next scroll (when one of the
+            // neighbour slots is focused, the list scrolls so
+            // that item comes into view, and the next refresh
+            // promotes the next-closest off-screen item into a
+            // neighbour slot — the user advances one step per swipe
+            // continuously).
+            let kSynthNeighbours = 3
+
             let visibleItems = collected.filter { $0.isVisible }
             let visibleTopY: CGFloat
             let visibleBottomY: CGFloat
@@ -2144,23 +2157,31 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 visibleBottomY = midY
             }
 
-            let aboveItems = collected.filter { !$0.isVisible && $0.isAboveVisible }
+            // All off-screen items, sorted by localIndex asc.
+            let aboveAll = collected.filter { !$0.isVisible && $0.isAboveVisible }
                 .sorted { $0.localIndex < $1.localIndex }
-            let belowItems = collected.filter { !$0.isVisible && !$0.isAboveVisible }
+            let belowAll = collected.filter { !$0.isVisible && !$0.isAboveVisible }
                 .sorted { $0.localIndex < $1.localIndex }
+            // Neighbours: take the closest-to-visible items from each
+            // side. For `aboveAll` (sorted asc), the **highest**
+            // localIndex sits closest to visible — so the neighbour
+            // slice is the *suffix*. For `belowAll`, the **lowest**
+            // localIndex is closest — take the *prefix*.
+            let aboveNeighbours = aboveAll.suffix(kSynthNeighbours)
+            let belowNeighbours = belowAll.prefix(kSynthNeighbours)
 
             let synthHeight: CGFloat = 1.0
             let synthStep: CGFloat = 0.5
             let synthWidth = max(1.0, synthClip.width)
             let synthX = synthClip.minX
 
-            // Above-visible items: sorted ascending by localIndex.
-            // The **highest** localIndex (closest to visible) goes
-            // immediately above visible (just 1pt gap); lower
-            // localIndices stack further up with `synthStep` apart.
-            // Clamped to never cross above `synthClip.minY`.
-            for (i, item) in aboveItems.enumerated() {
-                let reversedIndex = aboveItems.count - 1 - i
+            // Above neighbours: closest to visible at the bottom of
+            // their sub-band (just above `visibleTopY`); further
+            // neighbours stack up by `synthStep`. Clamped to
+            // `synthClip.minY`.
+            let aboveNeighboursArr = Array(aboveNeighbours)
+            for (i, item) in aboveNeighboursArr.enumerated() {
+                let reversedIndex = aboveNeighboursArr.count - 1 - i
                 let yDesired = visibleTopY - 1.0 - synthHeight - CGFloat(reversedIndex) * synthStep
                 let y = max(synthClip.minY, yDesired)
                 item.itemNode.view.accessibilityFrame = CGRect(
@@ -2170,16 +2191,28 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             for item in visibleItems {
                 item.itemNode.view.accessibilityFrame = item.realFrame
             }
-            // Below-visible items: sorted ascending by localIndex. The
-            // **lowest** localIndex (closest to visible) goes
-            // immediately below visible; higher localIndices stack
-            // further down. Clamped to `synthClip.maxY`.
-            for (i, item) in belowItems.enumerated() {
+            let belowNeighboursArr = Array(belowNeighbours)
+            for (i, item) in belowNeighboursArr.enumerated() {
                 let yDesired = visibleBottomY + 1.0 + CGFloat(i) * synthStep
                 let y = min(synthClip.maxY - synthHeight, yDesired)
                 item.itemNode.view.accessibilityFrame = CGRect(
                     x: synthX, y: y, width: synthWidth, height: synthHeight
                 )
+            }
+            // Far off-screen items: do NOT override their
+            // accessibilityFrame. Default behaviour returns the real
+            // off-screen frame, which VoiceOver filters out as
+            // unreachable — so they don't compete with the neighbour
+            // slots during spatial swipe. They still get promoted with
+            // a payload (above) so when they become neighbours on the
+            // next refresh, their content is ready.
+            let aboveFarCount = max(0, aboveAll.count - kSynthNeighbours)
+            let belowFarCount = max(0, belowAll.count - kSynthNeighbours)
+            for item in aboveAll.prefix(aboveFarCount) {
+                item.itemNode.view.accessibilityFrame = item.realFrame
+            }
+            for item in belowAll.suffix(belowFarCount) {
+                item.itemNode.view.accessibilityFrame = item.realFrame
             }
 
             for item in collected {
