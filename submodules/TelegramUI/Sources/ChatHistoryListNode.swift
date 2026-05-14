@@ -1994,42 +1994,73 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // ── VARIANT Y: direct UIView accessibility leaves ────────
             //
             // The previous design built a `FocusTrackingAccessibility
-            // Element` proxy per `filteredEntries` entry, with
-            // staggered y-coordinates for off-screen items to coerce
-            // monotonic array-order navigation. In practice that
-            // produced two competing accessibility elements per
-            // visible bubble (the proxy AND the promoted bubble view
-            // itself at the same real frame), causing VoiceOver's
-            // spatial scan to ping-pong between them and backtrack
-            // after 1-2 forward swipes — see the bug investigation
-            // captured in commit messages 244e..76f0.
+            // Element` proxy per `filteredEntries` entry. It produced
+            // two competing accessibility elements per visible bubble
+            // (the proxy AND the promoted bubble view itself), causing
+            // VoiceOver's spatial scan to ping-pong between them and
+            // backtrack after 1-2 forward swipes.
             //
             // We now expose the bubble views themselves as VoiceOver
-            // leaves — one bubble = one element. Off-screen
-            // materialised bubbles keep their real (off-screen)
-            // frames; iOS scrolls them into view automatically when
-            // focused via the standard UIScrollView accessibility
-            // path. Bubbles outside the materialisation buffer
-            // (`accessibilityInvisibleInsetOverride = 10_000`) are
-            // simply not in the array — the user reaches them by
-            // scrolling the list, same as UITableView.
+            // leaves — one bubble = one element. Visible bubbles use
+            // their **real** screen frames (so single-finger tap on
+            // a message works). Off-screen materialised bubbles get a
+            // synthetic `accessibilityFrame` inside the visible clip
+            // (staggered slot, 1pt tall) so iOS doesn't filter them
+            // out as unreachable during spatial swipe traversal.
+            //
+            // When VoiceOver focuses an off-screen bubble (synthetic
+            // frame inside clip, real frame outside), the handler in
+            // `ListView.handleSystemAccessibilityFocusNotification`
+            // detects the real-vs-clip mismatch and calls
+            // `scrollVoiceOverFocusToItem(at:)` to bring the row
+            // into the viewport. On the next refresh that bubble
+            // moves into the `visible` bucket and gets its real
+            // frame back.
+            //
+            // Tap UX is preserved: VoiceOver uses `accessibilityFrame`
+            // for finger-on-screen hit-testing, and the visible
+            // bubbles' accessibility frames cover their entire real
+            // on-screen extents. Off-screen synthetic frames are
+            // 1pt tall slots that the user is extremely unlikely to
+            // brush with their finger (they sit at the very top or
+            // bottom edge of the clip, outside where bubble bodies
+            // are physically drawn).
             //
             // Trade-offs accepted:
             //  • No "next message" / "previous message" announcement
-            //    on swipe — VoiceOver just speaks the new bubble's
-            //    label. (`accessibilityDirectionalAnnouncement` is
-            //    wired through `FocusTrackingAccessibilityElement.
-            //    focused`/`focusLost` callbacks in
-            //    `updateAccessibilityDirectionalElements`, which
-            //    iterate proxies; for UIView elements that loop is
-            //    a no-op.)
+            //    on swipe — that hook is wired through
+            //    `FocusTrackingAccessibilityElement.focused/focusLost`
+            //    callbacks, which UIView leaves don't trigger. VO
+            //    simply speaks the new bubble's label, which IS the
+            //    announcement of the next message.
             //  • The accessibility array changes as messages
             //    materialise/dematerialise during scroll — this is
             //    the standard `UITableView` model and iOS handles
             //    it natively.
-            //  • The `FocusTrackingAccessibilityElement` pool is no
-            //    longer used here; we drain it once below so dead
-            //    entries don't linger.
+            //
+            // Collect materialised item nodes once; we need the set
+            // to bucket them into above-visible / visible / below-
+            // visible groups in a second pass.
+            let synthClip = self.accessibilityClippingFrameInScreenCoordinates()
+                ?? UIAccessibility.convertToScreenCoordinates(
+                    CGRect(
+                        x: 0.0,
+                        y: self.rotated ? self.insets.bottom : self.insets.top,
+                        width: self.visibleSize.width,
+                        height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+                    ),
+                    in: self.view
+                )
+
+            struct CollectedItem {
+                let localIndex: Int
+                let itemNode: ListViewItemNode
+                let realFrame: CGRect
+                let payload: (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)
+                let isVisible: Bool
+                let isAboveVisible: Bool
+            }
+            var collected: [CollectedItem] = []
             self.forEachItemNode { node in
                 guard let itemNode = node as? ListViewItemNode, let localIndex = itemNode.index else { return }
                 voTotalNodesVisited += 1
@@ -2044,10 +2075,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     return
                 }
 
+                let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                let isVisible = !realFrame.isNull
+                    && realFrame.intersects(synthClip)
+                    && realFrame.height > 1.0
+                    && realFrame.width > 1.0
+                // Above-visible: bubble's bottom is above the clip top.
+                // Used to decide which synthetic stagger band to use.
+                let isAboveVisible = !realFrame.isNull && realFrame.maxY <= synthClip.minY
+
                 if voIsRunning {
-                    // Promote the bubble to a single accessibility
-                    // leaf with the combined payload, and demote
-                    // every competing leaf inside its subtree.
                     itemNode.view.accessibilityElementsHidden = false
                     itemNode.isAccessibilityElement = true
                     itemNode.accessibilityLabel = payload.label
@@ -2060,10 +2097,91 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     self.voPromotedItemNodes.add(itemNode)
                 }
 
-                // The "element" stored in `directionalCandidates` is
-                // now the bubble's own UIView — sorted/reversed by
-                // the existing pipeline at the end of this method.
-                directionalCandidates.append((localIndex: localIndex, order: 0, element: itemNode.view as Any))
+                collected.append(CollectedItem(
+                    localIndex: localIndex,
+                    itemNode: itemNode,
+                    realFrame: realFrame,
+                    payload: payload,
+                    isVisible: isVisible,
+                    isAboveVisible: isAboveVisible
+                ))
+            }
+
+            // ── Synthetic accessibilityFrame assignment ──────────────
+            //
+            // Visible bubble  → real screen frame (so VO touch hit-test
+            //                   covers the entire bubble for tap).
+            // Off-screen above → staggered slot inside the top band of
+            //                    the clip, monotonic by localIndex.
+            // Off-screen below → staggered slot inside the bottom band
+            //                    of the clip, monotonic by localIndex.
+            //
+            // Bands are sized so that no synthetic slot overlaps the
+            // y-range of any visible bubble's real frame. We compute
+            // band edges from the actual extremes of visible bubble
+            // frames; if no bubble is visible we fall back to thin
+            // bands at the very top / bottom of the clip.
+            let visibleItems = collected.filter { $0.isVisible }
+            let visibleTopY: CGFloat
+            let visibleBottomY: CGFloat
+            if let firstReal = visibleItems.first?.realFrame {
+                visibleTopY = visibleItems.reduce(firstReal.minY) { min($0, $1.realFrame.minY) }
+                visibleBottomY = visibleItems.reduce(firstReal.maxY) { max($0, $1.realFrame.maxY) }
+            } else {
+                let midY = synthClip.midY
+                visibleTopY = midY
+                visibleBottomY = midY
+            }
+
+            let aboveBandTop = synthClip.minY
+            let aboveBandBottom = max(synthClip.minY + 1.0, visibleTopY - 1.0)
+            let belowBandTop = min(synthClip.maxY - 1.0, visibleBottomY + 1.0)
+            let belowBandBottom = synthClip.maxY
+            let aboveBandHeight = max(1.0, aboveBandBottom - aboveBandTop)
+            let belowBandHeight = max(1.0, belowBandBottom - belowBandTop)
+
+            let aboveItems = collected.filter { !$0.isVisible && $0.isAboveVisible }
+                .sorted { $0.localIndex < $1.localIndex }
+            let belowItems = collected.filter { !$0.isVisible && !$0.isAboveVisible }
+                .sorted { $0.localIndex < $1.localIndex }
+
+            let synthHeight: CGFloat = 1.0
+            let synthWidth = max(1.0, synthClip.width)
+            let synthX = synthClip.minX
+
+            // Above-visible items: lower localIndex sits higher in the
+            // band (closer to clip top), higher localIndex sits lower
+            // (closer to visible top). Matches the visual layout of a
+            // rotated chat where lower localIndex = older = visually
+            // higher.
+            for (i, item) in aboveItems.enumerated() {
+                let fraction = aboveItems.count > 1
+                    ? CGFloat(i) / CGFloat(aboveItems.count - 1)
+                    : 0.0
+                let y = aboveBandTop + fraction * (aboveBandHeight - synthHeight)
+                item.itemNode.view.accessibilityFrame = CGRect(
+                    x: synthX, y: y, width: synthWidth, height: synthHeight
+                )
+            }
+            for item in visibleItems {
+                item.itemNode.view.accessibilityFrame = item.realFrame
+            }
+            for (i, item) in belowItems.enumerated() {
+                let fraction = belowItems.count > 1
+                    ? CGFloat(i) / CGFloat(belowItems.count - 1)
+                    : 0.0
+                let y = belowBandTop + fraction * (belowBandHeight - synthHeight)
+                item.itemNode.view.accessibilityFrame = CGRect(
+                    x: synthX, y: y, width: synthWidth, height: synthHeight
+                )
+            }
+
+            for item in collected {
+                directionalCandidates.append((
+                    localIndex: item.localIndex,
+                    order: 0,
+                    element: item.itemNode.view as Any
+                ))
             }
         } else {
             self.forEachItemNode({ node in
