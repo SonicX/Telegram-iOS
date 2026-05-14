@@ -1982,7 +1982,11 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             print("[VO-CHAT] customAccessibilityElements: enter rotated=\(self.rotated) fullMode=\(isFullMaterializationActive) trackDir=\(trackDirectionalFocus) contentOffsetY=\(Int(contentOffset.y)) visibleSize=\(Int(self.visibleSize.width))x\(Int(self.visibleSize.height)) windowY=[\(Int(visibleTop))..\(Int(visibleBottom))] navOrder=\(self.accessibilityNavigationOrder == .reversed ? "reversed" : "automatic")")
         }
         var voTotalNodesVisited = 0
-        var voNodesFilteredByRect = 0
+        // Variant Y iterates only over materialised item nodes, so the
+        // "filtered by rect" bucket from the old proxy-based path is
+        // always zero; keep the variable for log-format compatibility
+        // but make it `let` so the compiler doesn't flag it.
+        let voNodesFilteredByRect = 0
         var voNodesWithoutData = 0
         var voItemFrameLog: [(li: Int, y: CGFloat, h: CGFloat)] = []
 
