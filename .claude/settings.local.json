@@ -7,7 +7,12 @@
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(ls:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(bazel build *)",
+      "Bash(xcodebuild -version)",
+      "Bash(xcodebuild -project Telegram/Swiftgram.xcodeproj -list)",
+      "Bash(awk '/Schemes:/,0')",
+      "Bash(xcodebuild -project Telegram/Swiftgram.xcodeproj -scheme TelegramUI -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath /tmp/sg-deriveddata build)"
     ],
     "deny": []
   }
