@@ -2275,28 +2275,57 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     x: synthX, y: y, width: synthWidth, height: synthHeight
                 )
             }
-            // Far off-screen items: do NOT override their
-            // accessibilityFrame. Default behaviour returns the real
-            // off-screen frame, which VoiceOver filters out as
-            // unreachable — so they don't compete with the neighbour
-            // slots during spatial swipe. They still get promoted with
-            // a payload (above) so when they become neighbours on the
-            // next refresh, their content is ready.
-            let aboveFarCount = max(0, aboveAll.count - kSynthNeighbours)
-            let belowFarCount = max(0, belowAll.count - kSynthNeighbours)
-            for item in aboveAll.prefix(aboveFarCount) {
-                item.itemNode.view.accessibilityFrame = item.realFrame
-            }
-            for item in belowAll.suffix(belowFarCount) {
-                item.itemNode.view.accessibilityFrame = item.realFrame
-            }
-
+            // Far off-screen items: **fully demote them and keep them
+            // out of the array**.
+            //
+            // The earlier approach left far items promoted
+            // (`isAccessibilityElement = true`) with their default
+            // (real off-screen) `accessibilityFrame`, on the
+            // assumption that VoiceOver would filter out elements
+            // whose frame lies outside the screen. It does not — on a
+            // transient focus loss VoiceOver re-scans the *whole*
+            // accessibility tree and reliably re-anchors onto a far
+            // item near array position 3 (the chat=65 / chat=76 /
+            // chat=83 … "always jump to position=3" cascade in the
+            // logs).
+            //
+            // The robust fix is a true bounded sliding window: only
+            // the visible bubbles and the `kSynthNeighbours` items on
+            // each side are exposed to VoiceOver at all. Far items are
+            // demoted to non-leaves (`isAccessibilityElement = false`)
+            // AND omitted from `directionalCandidates`, so VoiceOver
+            // physically cannot land on them — there is nothing in the
+            // tree to land on. As the user swipes onto a neighbour
+            // slot, `scrollVoiceOverFocusToItem` scrolls it into view
+            // and the next refresh promotes the next-closest far item
+            // into a neighbour slot. The window slides one step at a
+            // time; the array never contains a element the user
+            // can't reach in a single swipe.
+            let aboveNeighbourSet = Set(aboveNeighboursArr.map { $0.localIndex })
+            let belowNeighbourSet = Set(belowNeighboursArr.map { $0.localIndex })
+            let visibleSet = Set(visibleItems.map { $0.localIndex })
             for item in collected {
-                directionalCandidates.append((
-                    localIndex: item.localIndex,
-                    order: 0,
-                    element: item.itemNode.view as Any
-                ))
+                let isExposed = visibleSet.contains(item.localIndex)
+                    || aboveNeighbourSet.contains(item.localIndex)
+                    || belowNeighbourSet.contains(item.localIndex)
+                if isExposed {
+                    directionalCandidates.append((
+                        localIndex: item.localIndex,
+                        order: 0,
+                        element: item.itemNode.view as Any
+                    ))
+                } else {
+                    // Far item: demote so VoiceOver's spatial / re-scan
+                    // logic can't re-anchor onto it. Its subtree was
+                    // already suppressed in pass 1; clearing the
+                    // root-level leaf flag makes the whole bubble
+                    // invisible to VoiceOver until it slides back into
+                    // the neighbour window.
+                    item.itemNode.isAccessibilityElement = false
+                    if item.itemNode.isNodeLoaded {
+                        item.itemNode.view.isAccessibilityElement = false
+                    }
+                }
             }
         } else {
             self.forEachItemNode({ node in
