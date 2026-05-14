@@ -652,6 +652,21 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private var lastFocusedElementIdentity: ObjectIdentifier?
     private var elementFocusedObserver: NSObjectProtocol?
 
+    // ── Edge-scroll state (visible-only VoiceOver navigation) ──────
+    //
+    // The accessibility array is visible-only, so when the user swipes
+    // past the first/last visible bubble VoiceOver focus leaves the
+    // list. `handleVoiceOverFocusChanged` detects that, scrolls the
+    // list one screenful in the swipe direction and re-anchors focus.
+    //
+    // `voLastInListPosition` / `voPrevInListPosition` keep the last two
+    // in-list focus positions so we can infer the swipe direction.
+    // `voEdgeScrollInProgress` is a re-entrancy guard held across the
+    // scroll → re-query → re-focus cycle.
+    private var voLastInListPosition: Int?
+    private var voPrevInListPosition: Int?
+    private var voEdgeScrollInProgress: Bool = false
+
     // Tracks message bubbles we *promoted* to a single accessibility leaf
     // (via `isAccessibilityElement = true`) while VoiceOver is active —
     // exactly the same trick `ChatListItemNode` uses unconditionally
@@ -2028,56 +2043,41 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         var voItemFrameLog: [(li: Int, y: CGFloat, h: CGFloat)] = []
 
         if trackDirectionalFocus {
-            // ── VARIANT Y: direct UIView accessibility leaves ────────
+            // ── VARIANT Y (visible-only): direct UIView leaves ───────
             //
-            // The previous design built a `FocusTrackingAccessibility
-            // Element` proxy per `filteredEntries` entry. It produced
-            // two competing accessibility elements per visible bubble
-            // (the proxy AND the promoted bubble view itself), causing
-            // VoiceOver's spatial scan to ping-pong between them and
-            // backtrack after 1-2 forward swipes.
+            // The accessibility array contains **only the bubbles that
+            // are actually visible on screen right now**, each carrying
+            // its real (clip-intersected) screen frame. There are no
+            // synthetic / staggered / proxy elements of any kind.
             //
-            // We now expose the bubble views themselves as VoiceOver
-            // leaves — one bubble = one element. Visible bubbles use
-            // their **real** screen frames (so single-finger tap on
-            // a message works). Off-screen materialised bubbles get a
-            // synthetic `accessibilityFrame` inside the visible clip
-            // (staggered slot, 1pt tall) so iOS doesn't filter them
-            // out as unreachable during spatial swipe traversal.
+            // Why visible-only:
             //
-            // When VoiceOver focuses an off-screen bubble (synthetic
-            // frame inside clip, real frame outside), the handler in
-            // `ListView.handleSystemAccessibilityFocusNotification`
-            // detects the real-vs-clip mismatch and calls
-            // `scrollVoiceOverFocusToItem(at:)` to bring the row
-            // into the viewport. On the next refresh that bubble
-            // moves into the `visible` bucket and gets its real
-            // frame back.
+            // Earlier revisions tried to also expose off-screen bubbles
+            // via synthetic `accessibilityFrame`s (1pt staggered slots
+            // near the viewport edge) so VoiceOver could swipe onto
+            // them. Every variation of that idea failed in a different
+            // way — VoiceOver's spatial scan kept gravitating onto the
+            // synthetic slots, jumping the cursor across the array; and
+            // even when it worked, the highlight rectangle sat on a 1pt
+            // slot while VoiceOver announced a bubble that wasn't on
+            // screen, so what the user heard and what they saw didn't
+            // match.
             //
-            // Tap UX is preserved: VoiceOver uses `accessibilityFrame`
-            // for finger-on-screen hit-testing, and the visible
-            // bubbles' accessibility frames cover their entire real
-            // on-screen extents. Off-screen synthetic frames are
-            // 1pt tall slots that the user is extremely unlikely to
-            // brush with their finger (they sit at the very top or
-            // bottom edge of the clip, outside where bubble bodies
-            // are physically drawn).
+            // The robust model is the one UITableView uses natively:
+            //  • Only on-screen rows are accessibility elements.
+            //  • VoiceOver's highlight rectangle is therefore *always*
+            //    on a real, visible bubble — speech and screen agree.
+            //  • When the user swipes past the first/last visible
+            //    bubble, focus leaves the list; `handleVoiceOverFocus
+            //    Changed` detects that edge departure and scrolls the
+            //    list one screenful in the swipe direction, then
+            //    re-anchors VoiceOver focus onto the freshly-exposed
+            //    edge bubble. The window slides; the user keeps
+            //    swiping.
             //
-            // Trade-offs accepted:
-            //  • No "next message" / "previous message" announcement
-            //    on swipe — that hook is wired through
-            //    `FocusTrackingAccessibilityElement.focused/focusLost`
-            //    callbacks, which UIView leaves don't trigger. VO
-            //    simply speaks the new bubble's label, which IS the
-            //    announcement of the next message.
-            //  • The accessibility array changes as messages
-            //    materialise/dematerialise during scroll — this is
-            //    the standard `UITableView` model and iOS handles
-            //    it natively.
-            //
-            // Collect materialised item nodes once; we need the set
-            // to bucket them into above-visible / visible / below-
-            // visible groups in a second pass.
+            // Off-screen materialised bubbles are fully demoted
+            // (`isAccessibilityElement = false`) so VoiceOver cannot
+            // re-anchor onto them during a transient focus loss.
             let synthClip = self.accessibilityClippingFrameInScreenCoordinates()
                 ?? UIAccessibility.convertToScreenCoordinates(
                     CGRect(
@@ -2089,35 +2089,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     in: self.view
                 )
 
-            struct CollectedItem {
-                let localIndex: Int
-                let itemNode: ListViewItemNode
-                let realFrame: CGRect
-                /// `realFrame` clipped to the visible window. For
-                /// visible items this is what we hand to
-                /// `accessibilityFrame` so VoiceOver's spatial scan
-                /// stays bounded inside the viewport — a tall bubble
-                /// whose body extends far below the screen no longer
-                /// drags the cursor 1000+pt off-screen.
-                let clippedFrame: CGRect
-                let payload: (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)
-                let isVisible: Bool
-                let isAboveVisible: Bool
-            }
             // A bubble counts as "visible" only if a substantial slice
-            // of it is actually inside the clip. The previous bare
-            // `realFrame.intersects(synthClip)` test admitted tall
-            // media bubbles (1500pt+) that merely *grazed* the
-            // viewport edge — they then received their full,
-            // mostly-off-screen real frame as `accessibilityFrame`,
-            // and VoiceOver's spatial scan happily jumped the cursor
-            // onto them across the whole array (the chat=79 / chat=84
-            // "jump to position 1" loop in the logs). 44pt ≈ one
-            // tap-target's worth of on-screen content — enough to be
-            // a genuine focus target, small enough not to reject a
-            // short text bubble at the viewport edge.
+            // (≥ `kMinVisibleHeight`) of it is inside the clip. A tall
+            // media bubble merely *grazing* the viewport edge is not a
+            // useful focus target and would drag VoiceOver's spatial
+            // anchor far off-screen, so it is treated as off-screen.
             let kMinVisibleHeight: CGFloat = 44.0
-            var collected: [CollectedItem] = []
             self.forEachItemNode { node in
                 guard let itemNode = node as? ListViewItemNode, let localIndex = itemNode.index else { return }
                 voTotalNodesVisited += 1
@@ -2126,25 +2103,40 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     voItemFrameLog.append((li: localIndex, y: itemNode.frame.minY, h: itemNode.frame.height))
                 }
 
-                guard let payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect),
-                      !payload.label.isEmpty else {
-                    voNodesWithoutData += 1
-                    return
-                }
-
                 let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
                 let intersection = realFrame.isNull ? CGRect.null : realFrame.intersection(synthClip)
                 let isVisible = !realFrame.isNull
                     && !intersection.isNull
                     && intersection.height >= kMinVisibleHeight
                     && intersection.width > 1.0
-                // `clippedFrame` is the on-screen slice; falls back to
-                // the raw real frame when there's no intersection
-                // (so off-screen items still carry a sane value).
-                let clippedFrame = intersection.isNull ? realFrame : intersection
-                // Above-visible: bubble's bottom is above the clip top.
-                // Used to decide which synthetic stagger band to use.
-                let isAboveVisible = !realFrame.isNull && realFrame.maxY <= synthClip.minY
+
+                guard isVisible else {
+                    // Off-screen bubble: demote so VoiceOver's spatial /
+                    // re-scan logic cannot land on it. (Its subtree was
+                    // suppressed on a previous pass when it was visible;
+                    // a fresh instance comes with default flags.)
+                    if voIsRunning {
+                        itemNode.isAccessibilityElement = false
+                        if itemNode.isNodeLoaded {
+                            itemNode.view.isAccessibilityElement = false
+                        }
+                    }
+                    return
+                }
+
+                guard let payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect),
+                      !payload.label.isEmpty else {
+                    voNodesWithoutData += 1
+                    // Visible but no usable payload (date headers, etc.)
+                    // — demote so it isn't a stray unlabelled leaf.
+                    if voIsRunning {
+                        itemNode.isAccessibilityElement = false
+                        if itemNode.isNodeLoaded {
+                            itemNode.view.isAccessibilityElement = false
+                        }
+                    }
+                    return
+                }
 
                 if voIsRunning {
                     itemNode.view.accessibilityElementsHidden = false
@@ -2159,173 +2151,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     self.voPromotedItemNodes.add(itemNode)
                 }
 
-                collected.append(CollectedItem(
+                // Hand VoiceOver the **clipped** on-screen slice. For a
+                // bubble fully inside the viewport this equals the real
+                // frame; for a tall bubble overflowing the viewport the
+                // clipped frame keeps the highlight rectangle (and the
+                // spatial anchor) on screen.
+                itemNode.view.accessibilityFrame = intersection
+                directionalCandidates.append((
                     localIndex: localIndex,
-                    itemNode: itemNode,
-                    realFrame: realFrame,
-                    clippedFrame: clippedFrame,
-                    payload: payload,
-                    isVisible: isVisible,
-                    isAboveVisible: isAboveVisible
+                    order: 0,
+                    element: itemNode.view as Any
                 ))
-            }
-
-            // ── Synthetic accessibilityFrame: BOUNDED packed stagger ─
-            //
-            // Visible bubble   → real screen frame.
-            // Off-screen above → packed stagger immediately above the
-            //                    visible bubble's top edge, **limited
-            //                    to `kSynthNeighbours` closest items**.
-            // Off-screen below → packed stagger immediately below,
-            //                    same limit.
-            // Far off-screen   → default (real off-screen) frame —
-            //                    VoiceOver filters them out as
-            //                    unreachable, they're effectively
-            //                    invisible to swipe traversal until
-            //                    they become adjacent.
-            //
-            // Bounding the synthetic stagger to a small N (3 each
-            // side) is what guarantees swipe = exactly +1 step in
-            // localIndex order, regardless of how cramped the
-            // above/below band is. With unbounded stagger, when
-            // the visible bubble sits near the clip edge (e.g. the
-            // newest message at the bottom of viewport, with little
-            // room below), 10+ synthetic slots get clamped to the
-            // clip edge and collapse to the same y — VoiceOver's
-            // spatial scan can't tell them apart, picks one
-            // arbitrarily, and the cursor jumps by N items at once
-            // (observed in user logs as li=58 → li=43 skip-15).
-            //
-            // With only 3 neighbour slots per side, the packed
-            // sub-band is always ~1.5pt tall and fits even at the
-            // very top/bottom of the clip. The far items are
-            // unreachable via swipe in one transaction but become
-            // reachable on the next scroll (when one of the
-            // neighbour slots is focused, the list scrolls so
-            // that item comes into view, and the next refresh
-            // promotes the next-closest off-screen item into a
-            // neighbour slot — the user advances one step per swipe
-            // continuously).
-            let kSynthNeighbours = 3
-
-            let visibleItems = collected.filter { $0.isVisible }
-            // Compute the visible band extent from the **clipped**
-            // frames, not the raw real frames. A tall bubble's real
-            // frame can stretch hundreds of pt past the viewport; using
-            // it here would push the synthetic neighbour stagger bands
-            // off-screen. The clipped frame is the on-screen slice, so
-            // the stagger bands hug the actual visible content.
-            let visibleTopY: CGFloat
-            let visibleBottomY: CGFloat
-            if let firstClipped = visibleItems.first?.clippedFrame {
-                visibleTopY = visibleItems.reduce(firstClipped.minY) { min($0, $1.clippedFrame.minY) }
-                visibleBottomY = visibleItems.reduce(firstClipped.maxY) { max($0, $1.clippedFrame.maxY) }
-            } else {
-                let midY = synthClip.midY
-                visibleTopY = midY
-                visibleBottomY = midY
-            }
-
-            // All off-screen items, sorted by localIndex asc.
-            let aboveAll = collected.filter { !$0.isVisible && $0.isAboveVisible }
-                .sorted { $0.localIndex < $1.localIndex }
-            let belowAll = collected.filter { !$0.isVisible && !$0.isAboveVisible }
-                .sorted { $0.localIndex < $1.localIndex }
-            // Neighbours: take the closest-to-visible items from each
-            // side. For `aboveAll` (sorted asc), the **highest**
-            // localIndex sits closest to visible — so the neighbour
-            // slice is the *suffix*. For `belowAll`, the **lowest**
-            // localIndex is closest — take the *prefix*.
-            let aboveNeighbours = aboveAll.suffix(kSynthNeighbours)
-            let belowNeighbours = belowAll.prefix(kSynthNeighbours)
-
-            let synthHeight: CGFloat = 1.0
-            let synthStep: CGFloat = 0.5
-            let synthWidth = max(1.0, synthClip.width)
-            let synthX = synthClip.minX
-
-            // Above neighbours: closest to visible at the bottom of
-            // their sub-band (just above `visibleTopY`); further
-            // neighbours stack up by `synthStep`. Clamped to
-            // `synthClip.minY`.
-            let aboveNeighboursArr = Array(aboveNeighbours)
-            for (i, item) in aboveNeighboursArr.enumerated() {
-                let reversedIndex = aboveNeighboursArr.count - 1 - i
-                let yDesired = visibleTopY - 1.0 - synthHeight - CGFloat(reversedIndex) * synthStep
-                let y = max(synthClip.minY, yDesired)
-                item.itemNode.view.accessibilityFrame = CGRect(
-                    x: synthX, y: y, width: synthWidth, height: synthHeight
-                )
-            }
-            for item in visibleItems {
-                // Hand VoiceOver the **clipped** on-screen slice, not
-                // the raw real frame. For a normal bubble fully inside
-                // the viewport these are identical; for a tall bubble
-                // that overflows the viewport, the clipped frame keeps
-                // the cursor's spatial anchor inside the screen so the
-                // next swipe finds the adjacent neighbour slot instead
-                // of jumping across the array.
-                item.itemNode.view.accessibilityFrame = item.clippedFrame
-            }
-            let belowNeighboursArr = Array(belowNeighbours)
-            for (i, item) in belowNeighboursArr.enumerated() {
-                let yDesired = visibleBottomY + 1.0 + CGFloat(i) * synthStep
-                let y = min(synthClip.maxY - synthHeight, yDesired)
-                item.itemNode.view.accessibilityFrame = CGRect(
-                    x: synthX, y: y, width: synthWidth, height: synthHeight
-                )
-            }
-            // Far off-screen items: **fully demote them and keep them
-            // out of the array**.
-            //
-            // The earlier approach left far items promoted
-            // (`isAccessibilityElement = true`) with their default
-            // (real off-screen) `accessibilityFrame`, on the
-            // assumption that VoiceOver would filter out elements
-            // whose frame lies outside the screen. It does not — on a
-            // transient focus loss VoiceOver re-scans the *whole*
-            // accessibility tree and reliably re-anchors onto a far
-            // item near array position 3 (the chat=65 / chat=76 /
-            // chat=83 … "always jump to position=3" cascade in the
-            // logs).
-            //
-            // The robust fix is a true bounded sliding window: only
-            // the visible bubbles and the `kSynthNeighbours` items on
-            // each side are exposed to VoiceOver at all. Far items are
-            // demoted to non-leaves (`isAccessibilityElement = false`)
-            // AND omitted from `directionalCandidates`, so VoiceOver
-            // physically cannot land on them — there is nothing in the
-            // tree to land on. As the user swipes onto a neighbour
-            // slot, `scrollVoiceOverFocusToItem` scrolls it into view
-            // and the next refresh promotes the next-closest far item
-            // into a neighbour slot. The window slides one step at a
-            // time; the array never contains a element the user
-            // can't reach in a single swipe.
-            let aboveNeighbourSet = Set(aboveNeighboursArr.map { $0.localIndex })
-            let belowNeighbourSet = Set(belowNeighboursArr.map { $0.localIndex })
-            let visibleSet = Set(visibleItems.map { $0.localIndex })
-            for item in collected {
-                let isExposed = visibleSet.contains(item.localIndex)
-                    || aboveNeighbourSet.contains(item.localIndex)
-                    || belowNeighbourSet.contains(item.localIndex)
-                if isExposed {
-                    directionalCandidates.append((
-                        localIndex: item.localIndex,
-                        order: 0,
-                        element: item.itemNode.view as Any
-                    ))
-                } else {
-                    // Far item: demote so VoiceOver's spatial / re-scan
-                    // logic can't re-anchor onto it. Its subtree was
-                    // already suppressed in pass 1; clearing the
-                    // root-level leaf flag makes the whole bubble
-                    // invisible to VoiceOver until it slides back into
-                    // the neighbour window.
-                    item.itemNode.isAccessibilityElement = false
-                    if item.itemNode.isNodeLoaded {
-                        item.itemNode.view.isAccessibilityElement = false
-                    }
-                }
             }
         } else {
             self.forEachItemNode({ node in
@@ -2495,6 +2331,14 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             }
             self.lastFocusedElementIdentity = identity
 
+            // Track the last two in-list focus positions so that, when
+            // focus subsequently leaves the list at an edge, we can
+            // infer which direction the user was swiping.
+            if focusedPosition != self.voLastInListPosition {
+                self.voPrevInListPosition = self.voLastInListPosition
+                self.voLastInListPosition = focusedPosition
+            }
+
             let element = elements[focusedPosition]
             let rawLabel = (element as? UIAccessibilityElement)?.accessibilityLabel
                 ?? (element as? UIView)?.accessibilityLabel
@@ -2538,6 +2382,117 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 focusedFrame = "<no-frame>"
             }
             print("[VO-CHAT] cursor: focus-left-list from=\(unfocusedPosition + 1)/\(totalLoaded) -> kind=\(focusedKind) frame=\(focusedFrame) label='\(focusedLabel)'")
+
+            // ── Edge-scroll: slide the visible-only window ───────────
+            //
+            // The accessibility array is visible-only, so focus
+            // leaving the list at `unfocusedPosition == 0` or
+            // `unfocusedPosition == totalLoaded - 1` means the user
+            // swiped past the first / last visible bubble. Scroll the
+            // list one screenful in the swipe direction and re-anchor
+            // VoiceOver focus onto the freshly-exposed edge bubble.
+            self.maybeEdgeScroll(unfocusedPosition: unfocusedPosition, totalLoaded: totalLoaded)
+        }
+    }
+
+    /// Detect that VoiceOver focus left the visible-only accessibility
+    /// array at an edge and, if so, scroll the next screenful of
+    /// messages into view, then re-anchor focus onto the bubble that
+    /// continues the user's swipe direction.
+    private func maybeEdgeScroll(unfocusedPosition: Int, totalLoaded: Int) {
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        guard self.accessibilityDirectionalAnnouncement != nil else { return }
+        guard !self.voEdgeScrollInProgress else { return }
+        guard totalLoaded > 0 else { return }
+
+        let atFront = unfocusedPosition <= 0
+        let atBack = unfocusedPosition >= totalLoaded - 1
+        guard atFront || atBack else {
+            // Focus left from the middle of the array — not an edge
+            // departure (VoiceOver jumped somewhere unrelated). Don't
+            // scroll; the existing containment-recovery handles it.
+            return
+        }
+
+        // Infer swipe direction. The array is sorted by `localIndex`
+        // ascending and then reversed, so VoiceOver swipe-forward
+        // walks position 0 → 1 → … → totalLoaded-1, i.e. towards
+        // *lower* localIndex (older messages). Departure off the back
+        // (`atBack`) therefore means the user wants older messages;
+        // off the front (`atFront`) means newer.
+        //
+        // When both ends coincide (a single visible bubble) the prev/
+        // last position history disambiguates.
+        let wantsOlder: Bool
+        if atBack && !atFront {
+            wantsOlder = true
+        } else if atFront && !atBack {
+            wantsOlder = false
+        } else if let prev = self.voPrevInListPosition, let last = self.voLastInListPosition, prev != last {
+            wantsOlder = last > prev
+        } else {
+            // No usable history — bias toward "older" (the common
+            // reading direction through history).
+            wantsOlder = true
+        }
+
+        // Resolve the edge bubble's `localIndex` from the array.
+        let edgePosition = wantsOlder ? totalLoaded - 1 : 0
+        guard edgePosition >= 0, edgePosition < self.lastAccessibilityElements.count else { return }
+        let edgeElement = self.lastAccessibilityElements[edgePosition]
+        guard let edgeView = edgeElement as? UIView else { return }
+        var edgeLocalIndex: Int?
+        self.forEachItemNode { node in
+            guard edgeLocalIndex == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, let index = itemNode.index else { return }
+            if itemNode.view === edgeView {
+                edgeLocalIndex = index
+            }
+        }
+        guard let edgeLocalIndex else { return }
+
+        // The next bubble past the edge. Lower localIndex = older.
+        let targetLocalIndex = wantsOlder ? edgeLocalIndex - 1 : edgeLocalIndex + 1
+        guard targetLocalIndex >= 0 else { return }
+
+        self.voEdgeScrollInProgress = true
+        print("[VO-CHAT] edge-scroll: unfocused=\(unfocusedPosition)/\(totalLoaded) wantsOlder=\(wantsOlder) edgeLI=\(edgeLocalIndex) targetLI=\(targetLocalIndex)")
+
+        // Scroll the target into view. `scrollVoiceOverFocusToItem`
+        // already centres the row and is a no-op if it is somehow
+        // already on screen.
+        self.scrollVoiceOverFocusToItem(at: targetLocalIndex)
+
+        // After the synchronous scroll + the next `customAccessibility
+        // Elements` refresh, re-anchor VoiceOver focus onto the target
+        // bubble so the user's swipe continues seamlessly. Two run-loop
+        // hops give the layout + accessibility refresh time to settle.
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                defer { self.voEdgeScrollInProgress = false }
+                guard UIAccessibility.isVoiceOverRunning else { return }
+                var targetView: UIView?
+                self.forEachItemNode { node in
+                    guard targetView == nil else { return }
+                    guard let itemNode = node as? ListViewItemNode, itemNode.index == targetLocalIndex else { return }
+                    if itemNode.isAccessibilityElement {
+                        targetView = itemNode.view
+                    }
+                }
+                if let targetView {
+                    print("[VO-CHAT] edge-scroll: re-anchor focus targetLI=\(targetLocalIndex)")
+                    UIAccessibility.post(notification: .layoutChanged, argument: targetView)
+                } else {
+                    // The target didn't materialise as a visible leaf
+                    // (e.g. it is taller than the viewport and its
+                    // visible slice fell below `kMinVisibleHeight`).
+                    // Fall back to a plain layout-changed so VoiceOver
+                    // re-queries and lands on the nearest element.
+                    print("[VO-CHAT] edge-scroll: target not visible, plain layoutChanged")
+                    UIAccessibility.post(notification: .layoutChanged, argument: nil)
+                }
+            }
         }
     }
 
