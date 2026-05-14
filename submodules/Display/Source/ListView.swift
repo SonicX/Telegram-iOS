@@ -5689,20 +5689,39 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     print("[VO-STATE] focus-handler-skip reason=offscreen-ignored ttl=\(String(format: "%.0f", (self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()) * 1000))ms")
                     return
                 }
-                // **Don't trigger scroll from UIView focus events.**  iOS
-                // posts transient focus notifications for `_ASDisplayView`s
-                // deep inside materialised bubbles whenever its internal
-                // accessibility tree is recomputed (which happens after
-                // every layout pass / scroll).  Reacting to those by
-                // scrolling to whichever bubble owns the view caused a
-                // ping-pong between visually-adjacent rows in chat
-                // history (the "chat=2 ↔ chat=3" oscillation in the
-                // user's logs).  The authoritative focus event for our
-                // pooled proxies is delivered later via the
-                // `FocusTrackingAccessibilityElement` path below, where
-                // we *do* trigger an index-based scroll.  For UIView
-                // focus we just bail out: VoiceOver will sort out which
-                // proxy actually deserves focus on the next event.
+                // Variant Y: when the focused UIView is one of our
+                // own `ListViewItemNode` views and it's off-screen,
+                // scroll the list to bring it into view.
+                //
+                // Historical context: this branch used to be a hard
+                // `return` because the proxy-based accessibility model
+                // (`FocusTrackingAccessibilityElement` per entry) had a
+                // duplicate accessibility element for every visible
+                // bubble (proxy AND promoted bubble view at the same
+                // real frame). Reacting to UIView focus events with a
+                // scroll caused a ping-pong between the proxy and the
+                // bubble. With variant Y the proxies are gone — the
+                // bubble's own UIView IS the canonical accessibility
+                // leaf for the row, so scrolling to it on focus
+                // doesn't have a sibling to fight with.
+                //
+                // We restrict the scroll to focused views that we
+                // recognise as one of our materialised item nodes
+                // (`self.itemNodes.first(where: { ... })`). Any other
+                // off-screen UIView focus (e.g. a chat list item under
+                // the proxy-based path, or some unrelated descendant
+                // of ListView) still falls through to the no-op
+                // return. `scrollVoiceOverFocusToItem` already
+                // debounces via `accessibilityIgnoreOffscreenUntil`
+                // and skips when the row is sufficiently on-screen,
+                // so repeated transient focus events don't pile up
+                // scroll transactions.
+                if let itemNode = self.itemNodes.first(where: { $0.view === focusedView }),
+                   let localIndex = itemNode.index {
+                    print("[VO-STATE] focus-scroll-triggered-by-uiview localIndex=\(localIndex) type=\(type(of: focusedView))")
+                    self.scrollVoiceOverFocusToItem(at: localIndex)
+                    return
+                }
                 print("[VO-STATE] focus-handler-skip reason=offscreen-uiview-ignored type=\(type(of: focusedView))")
                 return
             }
