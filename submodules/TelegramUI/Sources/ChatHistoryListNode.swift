@@ -1986,185 +1986,80 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         var voNodesWithoutData = 0
         var voItemFrameLog: [(li: Int, y: CGFloat, h: CGFloat)] = []
 
-        // Drive accessibility traversal off the **message data array**, not
-        // off whichever item nodes happen to be materialised right now.
-        //
-        // Why: ListView only renders a sliding window of item nodes.  In
-        // chat history, even with `accessibilityInvisibleInsetOverride =
-        // 1_000_000` (full materialisation), there are transient layout
-        // moments (right after a transition, during a programmatic scroll,
-        // pagination boundary) when an entry has no laid-out node yet — its
-        // frame is still `.zero` or its bounds haven't been computed.  The
-        // previous code skipped those entries via `guard !elementFrame.isNull,
-        // elementFrame.height > 1.0`, which dropped them from the
-        // accessibility array.  VoiceOver swipes that *should* land on those
-        // entries instead found nothing in the array at that index and
-        // either silently swallowed the swipe or escaped the list.
-        //
-        // By iterating `historyView.filteredEntries` we guarantee one proxy
-        // per message regardless of materialisation state.  Frame and
-        // payload are filled in from the item node when present; when
-        // absent we fall back to the visible clip rectangle so VoiceOver
-        // can still focus the proxy.  The very next layout pass — which
-        // runs immediately after the proxy is focused, because
-        // `scrollAccessibilityFocusIntoViewIfNeeded` triggers ListView to
-        // synchronise its render buffer — promotes the proxy from
-        // placeholder to fully-populated.
         if trackDirectionalFocus {
-            var nodesByIndex: [Int: ListViewItemNode] = [:]
+            // ── VARIANT Y: direct UIView accessibility leaves ────────
+            //
+            // The previous design built a `FocusTrackingAccessibility
+            // Element` proxy per `filteredEntries` entry, with
+            // staggered y-coordinates for off-screen items to coerce
+            // monotonic array-order navigation. In practice that
+            // produced two competing accessibility elements per
+            // visible bubble (the proxy AND the promoted bubble view
+            // itself at the same real frame), causing VoiceOver's
+            // spatial scan to ping-pong between them and backtrack
+            // after 1-2 forward swipes — see the bug investigation
+            // captured in commit messages 244e..76f0.
+            //
+            // We now expose the bubble views themselves as VoiceOver
+            // leaves — one bubble = one element. Off-screen
+            // materialised bubbles keep their real (off-screen)
+            // frames; iOS scrolls them into view automatically when
+            // focused via the standard UIScrollView accessibility
+            // path. Bubbles outside the materialisation buffer
+            // (`accessibilityInvisibleInsetOverride = 10_000`) are
+            // simply not in the array — the user reaches them by
+            // scrolling the list, same as UITableView.
+            //
+            // Trade-offs accepted:
+            //  • No "next message" / "previous message" announcement
+            //    on swipe — VoiceOver just speaks the new bubble's
+            //    label. (`accessibilityDirectionalAnnouncement` is
+            //    wired through `FocusTrackingAccessibilityElement.
+            //    focused`/`focusLost` callbacks in
+            //    `updateAccessibilityDirectionalElements`, which
+            //    iterate proxies; for UIView elements that loop is
+            //    a no-op.)
+            //  • The accessibility array changes as messages
+            //    materialise/dematerialise during scroll — this is
+            //    the standard `UITableView` model and iOS handles
+            //    it natively.
+            //  • The `FocusTrackingAccessibilityElement` pool is no
+            //    longer used here; we drain it once below so dead
+            //    entries don't linger.
             self.forEachItemNode { node in
-                guard let itemNode = node as? ListViewItemNode, let index = itemNode.index else { return }
-                nodesByIndex[index] = itemNode
-                if voIsRunning {
-                    voItemFrameLog.append((li: index, y: itemNode.frame.minY, h: itemNode.frame.height))
-                }
-            }
-
-            let entries = (self.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView.filteredEntries
-            // Fall back to materialised-node count when transaction state
-            // hasn't published a view yet (very brief window during chat
-            // open / location switch).  In that case `nodesByIndex` is the
-            // ground truth.
-            let entryCount = entries?.count ?? nodesByIndex.count
-
-            let clipFrameForProxies = self.accessibilityClippingFrameInScreenCoordinates() ?? CGRect(origin: .zero, size: self.visibleSize)
-
-            // ── Index-driven proxy layout ───────────────────────────
-            //
-            // Every entry — visible or not — gets a unique slot inside
-            // the visible clip, positioned strictly by its position in
-            // `filteredEntries`.  The real bubble frame is *never*
-            // consulted: not for the visible items, not for the
-            // off-screen ones, not for anything.  This is deliberate:
-            //
-            //  • iOS's swipe-next traversal sorts `accessibilityElements`
-            //    by `accessibilityFrame.y`.  Giving every proxy a
-            //    monotonic, deterministic y derived from its array
-            //    position forces strict array-order traversal — one
-            //    swipe = the next entry in the array, regardless of how
-            //    tall the bubble is, how big the screen is, or where
-            //    the scroller currently sits.
-            //  • Using real frames for "visible" bubbles meant their y
-            //    values shifted on every scroll, which moved them past
-            //    or behind the staggered off-screen proxies and broke
-            //    monotonicity.  iOS then re-resolved the focused
-            //    element via spatial fallback and the cursor drifted
-            //    after a screen of motion.
-            //  • The actual scroll-into-view is handled by
-            //    `scrollVoiceOverFocusToItem(at:)` (triggered from
-            //    `handleSystemAccessibilityFocusNotification` via the
-            //    proxy's `pinnedLocalIndex`).  We don't need real
-            //    frames here for that — only the index.
-            //
-            // No timing heuristics, no visibility checks, no
-            // size-dependent maths.
-            let stubH: CGFloat = 1.0
-            let availableHeight = max(stubH, clipFrameForProxies.height - stubH)
-            let denominator = max(1, entryCount - 1)
-            let staggerStep = max(0.25, availableHeight / CGFloat(denominator))
-
-            for entryArrayIndex in 0..<entryCount {
-                // ListView lays chat history out so that `localIndex 0` is
-                // the *oldest* loaded message and `localIndex N-1` the
-                // *newest* (because of `rotated = true`).  `filteredEntries`
-                // is stored newest-first, so reverse the mapping.
-                let localIndex = entryCount - 1 - entryArrayIndex
+                guard let itemNode = node as? ListViewItemNode, let localIndex = itemNode.index else { return }
                 voTotalNodesVisited += 1
                 activeLocalIndices.insert(localIndex)
-
-                let itemNode = nodesByIndex[localIndex]
-                let payload: (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)?
-                let sourceView: UIView
-
-                // Compute the bubble's real screen frame if we have an
-                // item node — we need it for both the proxy frame
-                // (visible bubbles) and the leaf collapse below.
-                var realFrame: CGRect = .null
-                if let itemNode {
-                    realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
-                }
-                let isVisible = !realFrame.isNull
-                    && realFrame.intersects(clipFrameForProxies)
-                    && realFrame.height > 1.0 && realFrame.width > 1.0
-
-                if let itemNode {
-                    payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect)
-                    sourceView = itemNode.view
-                    if voIsRunning {
-                        // Promote the bubble itself to a single
-                        // accessibility leaf alongside our proxy.
-                        //
-                        // (Other experiments tried here and reverted
-                        // because they crashed or broke navigation:
-                        //  • `accessibilityElementsHidden = true` —
-                        //    drops VO focus on the next swipe.
-                        //  • Recursive demotion of subview leaves —
-                        //    triggered an objc_terminate abort,
-                        //    likely from setting
-                        //    isAccessibilityElement on a view in an
-                        //    unexpected state during layout.
-                        //  • `self.view.accessibilityElementsHidden`
-                        //    — same drop-focus symptom.)
-                        itemNode.view.accessibilityElementsHidden = false
-                        itemNode.isAccessibilityElement = true
-                        itemNode.accessibilityLabel = payload?.label
-                        itemNode.accessibilityValue = payload?.value
-                        itemNode.accessibilityHint = payload?.hint
-                        itemNode.accessibilityIdentifier = payload?.identifier
-                        itemNode.accessibilityTraits = payload?.traits ?? []
-                        itemNode.view.accessibilityCustomActions = payload?.customActions
-                        // Recursive demote of every accessibility leaf
-                        // inside the bubble subtree — keeps only the
-                        // promoted root (and our proxy in the array)
-                        // as focusable representations of the
-                        // message.  See `suppressCompetingLeaves` for
-                        // why we walk subnodes instead of subviews
-                        // and why this can run on every layout pass.
-                        ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
-                        self.voPromotedItemNodes.add(itemNode)
-                    }
-                } else {
-                    payload = nil
-                    sourceView = self.view
-                    voNodesFilteredByRect += 1
+                if voIsRunning {
+                    voItemFrameLog.append((li: localIndex, y: itemNode.frame.minY, h: itemNode.frame.height))
                 }
 
-                // Frame strategy:
-                //   • Visible bubble → use its real screen frame.
-                //     This is what lets the user *tap* on the message
-                //     (pointing at the bubble's centre) to focus its
-                //     proxy.  Without it the user has to swipe one
-                //     step at a time even when the message is right
-                //     under their finger.
-                //   • Off-screen / not materialised → staggered slot
-                //     inside the clip, with a y derived strictly from
-                //     the array index, so iOS's spatial sort yields
-                //     exactly array order during sequential swipes.
-                let elementFrame: CGRect
-                if isVisible {
-                    elementFrame = realFrame
-                } else {
-                    let staggerOffset = CGFloat(entryArrayIndex) * staggerStep
-                    elementFrame = CGRect(
-                        x: clipFrameForProxies.minX,
-                        y: clipFrameForProxies.minY + min(staggerOffset, availableHeight),
-                        width: max(1.0, clipFrameForProxies.width),
-                        height: stubH
-                    )
-                }
-
-                let element = self.reuseOrCreateDirectionalElement(localIndex: localIndex, childOrder: 0, sourceView: sourceView)
-                element.accessibilityFrame = elementFrame
-                element.accessibilityLabel = payload?.label ?? "…"
-                element.accessibilityValue = payload?.value
-                element.accessibilityHint = payload?.hint
-                element.accessibilityIdentifier = payload?.identifier
-                element.accessibilityTraits = payload?.traits ?? []
-                element.accessibilityCustomActions = payload?.customActions
-                directionalCandidates.append((localIndex: localIndex, order: 0, element: element))
-                if payload == nil {
+                guard let payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect),
+                      !payload.label.isEmpty else {
                     voNodesWithoutData += 1
+                    return
                 }
+
+                if voIsRunning {
+                    // Promote the bubble to a single accessibility
+                    // leaf with the combined payload, and demote
+                    // every competing leaf inside its subtree.
+                    itemNode.view.accessibilityElementsHidden = false
+                    itemNode.isAccessibilityElement = true
+                    itemNode.accessibilityLabel = payload.label
+                    itemNode.accessibilityValue = payload.value
+                    itemNode.accessibilityHint = payload.hint
+                    itemNode.accessibilityIdentifier = payload.identifier
+                    itemNode.accessibilityTraits = payload.traits
+                    itemNode.view.accessibilityCustomActions = payload.customActions
+                    ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
+                    self.voPromotedItemNodes.add(itemNode)
+                }
+
+                // The "element" stored in `directionalCandidates` is
+                // now the bubble's own UIView — sorted/reversed by
+                // the existing pipeline at the end of this method.
+                directionalCandidates.append((localIndex: localIndex, order: 0, element: itemNode.view as Any))
             }
         } else {
             self.forEachItemNode({ node in
@@ -2201,7 +2096,11 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     return lhs.order < rhs.order
                 }
             }).map(\.element)
-            self.cleanupDirectionalElementPool(activeLocalIndices: activeLocalIndices)
+            // Variant Y no longer uses the `FocusTrackingAccessibility
+            // Element` pool — drain it completely on every call so
+            // stale proxies don't linger. The pool stays available
+            // for ChatListNode (separate instance).
+            self.cleanupDirectionalElementPool(activeLocalIndices: [])
         } else {
             accessibilityElements = accessibilityElements.enumerated().sorted(by: { lhs, rhs in
                 let lhsFrame = (lhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
