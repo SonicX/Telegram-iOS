@@ -639,6 +639,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     // heuristics, we just give it a complete, stable list of elements.
     private var voiceOverStatusObserver: NSObjectProtocol?
 
+    /// Throttle for the accessibility-layout-changed notifications we
+    /// post on scroll. See `maybePostAccessibilityLayoutChangedOnScroll`.
+    private var lastA11yLayoutChangedPostTime: CFTimeInterval = 0
+
     // Snapshot of the most recently produced accessibility array.  It is used
     // by the `[VO-CHAT] cursor` log to translate the focused element pointer
     // delivered by `UIAccessibility.elementFocusedNotification` into a
@@ -1311,6 +1315,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.visibleContentOffsetChanged = { [weak self] offset in
             if let strongSelf = self {
                 strongSelf.contentPositionChanged(offset)
+                strongSelf.maybePostAccessibilityLayoutChangedOnScroll()
                 
                 if strongSelf.tag == nil {
                     var atBottom = false
@@ -1689,6 +1694,38 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         for sub in node.subnodes ?? [] {
             suppressCompetingLeaves(in: sub, isRoot: false)
         }
+    }
+
+    /// Post `UIAccessibility.layoutChanged` on scroll to keep the
+    /// accessibility-frame cache fresh.
+    ///
+    /// `customAccessibilityElements` stamps a synthetic
+    /// `accessibilityFrame` onto every materialised bubble view. Those
+    /// frames are computed against the *current* on-screen geometry —
+    /// but if the list scrolls afterwards (programmatic
+    /// `scrollVoiceOverFocusToItem`, momentum scroll, or a user's
+    /// 3-finger VoiceOver scroll), the underlying bubbles move on
+    /// screen while the cached `accessibilityFrame` values stay frozen
+    /// at the old positions. VoiceOver's touch-explore hit-tests
+    /// against those stale frames and finds nothing at the tap point —
+    /// reproduced in user logs as "after 3-finger swipe, tap on a
+    /// visible bubble stops focusing it".
+    ///
+    /// Posting `.layoutChanged` tells UIKit to invalidate its
+    /// accessibility tree, which causes the next interaction (tap or
+    /// swipe) to re-query `accessibilityElements` and rebuild fresh
+    /// frames.
+    ///
+    /// Throttled to 100 ms because `visibleContentOffsetChanged`
+    /// fires on every display-link tick during a flick scroll.
+    private func maybePostAccessibilityLayoutChangedOnScroll() {
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        let now = CACurrentMediaTime()
+        if now - self.lastA11yLayoutChangedPostTime < 0.1 {
+            return
+        }
+        self.lastA11yLayoutChangedPostTime = now
+        UIAccessibility.post(notification: .layoutChanged, argument: nil)
     }
 
     /// Locate the bubble's main `AccessibilityAreaNode` by walking the
