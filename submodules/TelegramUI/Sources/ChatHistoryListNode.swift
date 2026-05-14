@@ -2107,20 +2107,31 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 ))
             }
 
-            // ── Synthetic accessibilityFrame assignment ──────────────
+            // ── Synthetic accessibilityFrame: PACKED stagger ─────────
             //
-            // Visible bubble  → real screen frame (so VO touch hit-test
-            //                   covers the entire bubble for tap).
-            // Off-screen above → staggered slot inside the top band of
-            //                    the clip, monotonic by localIndex.
-            // Off-screen below → staggered slot inside the bottom band
-            //                    of the clip, monotonic by localIndex.
+            // Visible bubble   → real screen frame (so VO touch hit-test
+            //                    covers the entire bubble for tap).
+            // Off-screen above → **packed** stagger immediately above
+            //                    the visible bubble's top edge, with a
+            //                    tiny step (≈0.5pt) per item.
+            // Off-screen below → **packed** stagger immediately below
+            //                    the visible bubble's bottom edge.
             //
-            // Bands are sized so that no synthetic slot overlaps the
-            // y-range of any visible bubble's real frame. We compute
-            // band edges from the actual extremes of visible bubble
-            // frames; if no bubble is visible we fall back to thin
-            // bands at the very top / bottom of the clip.
+            // Why packed (and not spread across the whole top/bottom
+            // band): with a wide spread VoiceOver's spatial scan from
+            // the visible bubble picks the OUTERMOST stagger slots (at
+            // clip's top/bottom edge) as the closest neighbours by y,
+            // which jumps focus by N items at once (logged as a 5-item
+            // skip chat=77→70, or oscillation between localIndex=60 at
+            // top of clip and localIndex=44 at bottom). Packing the
+            // synthetic slots right next to the visible bubble's
+            // edges keeps the spatially-closest slot always equal to
+            // the array-closest neighbour, so swipe = +1 step.
+            //
+            // The far ends of each stagger group sit a bit further
+            // from the visible bubble (~ count * step pt) but still
+            // well within the clip — never overlapping the visible
+            // bubble's real frame, so tap continues to work cleanly.
             let visibleItems = collected.filter { $0.isVisible }
             let visibleTopY: CGFloat
             let visibleBottomY: CGFloat
@@ -2133,32 +2144,25 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 visibleBottomY = midY
             }
 
-            let aboveBandTop = synthClip.minY
-            let aboveBandBottom = max(synthClip.minY + 1.0, visibleTopY - 1.0)
-            let belowBandTop = min(synthClip.maxY - 1.0, visibleBottomY + 1.0)
-            let belowBandBottom = synthClip.maxY
-            let aboveBandHeight = max(1.0, aboveBandBottom - aboveBandTop)
-            let belowBandHeight = max(1.0, belowBandBottom - belowBandTop)
-
             let aboveItems = collected.filter { !$0.isVisible && $0.isAboveVisible }
                 .sorted { $0.localIndex < $1.localIndex }
             let belowItems = collected.filter { !$0.isVisible && !$0.isAboveVisible }
                 .sorted { $0.localIndex < $1.localIndex }
 
             let synthHeight: CGFloat = 1.0
+            let synthStep: CGFloat = 0.5
             let synthWidth = max(1.0, synthClip.width)
             let synthX = synthClip.minX
 
-            // Above-visible items: lower localIndex sits higher in the
-            // band (closer to clip top), higher localIndex sits lower
-            // (closer to visible top). Matches the visual layout of a
-            // rotated chat where lower localIndex = older = visually
-            // higher.
+            // Above-visible items: sorted ascending by localIndex.
+            // The **highest** localIndex (closest to visible) goes
+            // immediately above visible (just 1pt gap); lower
+            // localIndices stack further up with `synthStep` apart.
+            // Clamped to never cross above `synthClip.minY`.
             for (i, item) in aboveItems.enumerated() {
-                let fraction = aboveItems.count > 1
-                    ? CGFloat(i) / CGFloat(aboveItems.count - 1)
-                    : 0.0
-                let y = aboveBandTop + fraction * (aboveBandHeight - synthHeight)
+                let reversedIndex = aboveItems.count - 1 - i
+                let yDesired = visibleTopY - 1.0 - synthHeight - CGFloat(reversedIndex) * synthStep
+                let y = max(synthClip.minY, yDesired)
                 item.itemNode.view.accessibilityFrame = CGRect(
                     x: synthX, y: y, width: synthWidth, height: synthHeight
                 )
@@ -2166,11 +2170,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             for item in visibleItems {
                 item.itemNode.view.accessibilityFrame = item.realFrame
             }
+            // Below-visible items: sorted ascending by localIndex. The
+            // **lowest** localIndex (closest to visible) goes
+            // immediately below visible; higher localIndices stack
+            // further down. Clamped to `synthClip.maxY`.
             for (i, item) in belowItems.enumerated() {
-                let fraction = belowItems.count > 1
-                    ? CGFloat(i) / CGFloat(belowItems.count - 1)
-                    : 0.0
-                let y = belowBandTop + fraction * (belowBandHeight - synthHeight)
+                let yDesired = visibleBottomY + 1.0 + CGFloat(i) * synthStep
+                let y = min(synthClip.maxY - synthHeight, yDesired)
                 item.itemNode.view.accessibilityFrame = CGRect(
                     x: synthX, y: y, width: synthWidth, height: synthHeight
                 )
