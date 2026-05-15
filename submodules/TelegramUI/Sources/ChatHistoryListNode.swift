@@ -2206,7 +2206,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // promotes the next-closest off-screen item into a
             // neighbour slot — the user advances one step per swipe
             // continuously).
-            let kSynthNeighbours = 3
+            // Single synthetic neighbour per side: VoiceOver picks the
+            // closest spatial neighbour, and with N=1 that's
+            // unambiguously the array-adjacent off-screen bubble. With
+            // N=3 (the previous setting) VoiceOver sometimes picked
+            // the 2nd or 3rd slot, causing observable "jump 2-3
+            // messages" on a single swipe at the array edge.
+            let kSynthNeighbours = 1
 
             let visibleItems = collected.filter { $0.isVisible }
             // Compute the visible band extent from the **clipped**
@@ -2316,14 +2322,34 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     ))
                 } else {
                     // Far item: demote so VoiceOver's spatial / re-scan
-                    // logic can't re-anchor onto it. Its subtree was
-                    // already suppressed in pass 1; clearing the
-                    // root-level leaf flag makes the whole bubble
-                    // invisible to VoiceOver until it slides back into
-                    // the neighbour window.
+                    // logic can't re-anchor onto it.
+                    //
+                    // `isAccessibilityElement = false` alone is NOT
+                    // enough — VoiceOver's recovery / spatial scan
+                    // walks the subview tree directly (the
+                    // `accessibilityElements` override on the
+                    // container is consulted for swipe-next, but
+                    // recovery after focus-loss falls back to subview
+                    // traversal). The result was an observable jump
+                    // from a visible bubble (e.g. li=47) to li=0 at
+                    // the far edge of the materialised buffer when
+                    // VoiceOver lost focus.
+                    //
+                    // Setting `view.accessibilityElementsHidden = true`
+                    // hides the *entire subtree* (root + every
+                    // descendant) from accessibility scans of any
+                    // kind, including the spatial recovery path. The
+                    // bubble's UIView still exists for layout/render,
+                    // it just doesn't surface as an accessibility
+                    // target while it's outside the sliding window.
+                    // When the bubble re-enters the window on the
+                    // next refresh, pass 1 sets
+                    // `accessibilityElementsHidden = false` so it is
+                    // visible to VoiceOver again.
                     item.itemNode.isAccessibilityElement = false
                     if item.itemNode.isNodeLoaded {
                         item.itemNode.view.isAccessibilityElement = false
+                        item.itemNode.view.accessibilityElementsHidden = true
                     }
                 }
             }
