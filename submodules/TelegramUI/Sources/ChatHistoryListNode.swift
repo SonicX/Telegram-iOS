@@ -652,6 +652,26 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private var lastFocusedElementIdentity: ObjectIdentifier?
     private var elementFocusedObserver: NSObjectProtocol?
 
+    // Tracking for VoiceOver bounded-window edge advance + fly-away recovery.
+    // Both paths live inline inside `handleVoiceOverFocusChanged`.
+    //
+    // Why: with the N=1 synthetic neighbour design in
+    // `customAccessibilityElements`, the synthetic frame for the off-screen
+    // sibling collapses onto the visible bubble at the clip edge. VoiceOver
+    // can't reach it, fires `focus-left-list`, then re-anchors on `array[0]`
+    // — which in reversed nav order is the newest message in the window —
+    // and the cursor visibly «улетает» 6+ items away. We address this from
+    // two sides:
+    //   • A) Preemptively scroll when focus arrives at the visible edge in
+    //     the direction the user is moving, so the next bubble has a real
+    //     on-screen frame by the time VoiceOver tries to navigate to it.
+    //   • B) Strap a recovery net: if focus does still leave the list and
+    //     come back on a far-away `localIndex`, redirect it back to the
+    //     last known one via `.layoutChanged`.
+    private var voLastFocusedItemLocalIndex: Int?
+    private var voFocusLostTimestamp: CFTimeInterval = 0
+    private var voLastEdgeScrollTimestamp: CFTimeInterval = 0
+
     // Tracks message bubbles we *promoted* to a single accessibility leaf
     // (via `isAccessibilityElement = true`) while VoiceOver is active —
     // exactly the same trick `ChatListItemNode` uses unconditionally
@@ -2493,6 +2513,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         let totalLoaded = elements.count
         var totalChat: Int?
         var absolutePosition: Int?
+        var focusedLocalIndex: Int?
         if let focusedPosition {
             // Resolve the source view for absolute-scroll info regardless
             // of whether the array stores `FocusTrackingAccessibilityElement`
@@ -2512,6 +2533,9 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 absolutePosition = info.position
                 totalChat = info.total
             }
+            if let sourceView {
+                focusedLocalIndex = self.voLocalIndex(forFocusedSourceView: sourceView)
+            }
         }
 
         if let focusedPosition {
@@ -2519,6 +2543,42 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             if self.lastFocusedElementIdentity == identity {
                 return
             }
+
+            // ── B) Catch fly-away.
+            //
+            // Symptom (see logs that triggered this code):
+            //   • Cursor at li=47 (position=7/8, top-edge of an 8-item
+            //     reversed-nav window).
+            //   • User swipes.  VoiceOver can't navigate to the synthetic
+            //     above-neighbour (degenerate frame at the clip edge),
+            //     fires `focus-left-list` → re-anchors on `array[0]` =
+            //     li=53 = chat=133 (six items in the opposite direction).
+            //
+            // Heuristic: a fresh focus that lands on a localIndex far away
+            // from the last known one, within a short window after focus
+            // left the list, is a recovery — redirect VoiceOver back to
+            // the previously focused bubble.  The user's swipe is then
+            // re-issued from the right place instead of the cursor
+            // disappearing to the far end of the buffer.
+            //
+            // The redirect itself triggers another focus event for the
+            // restored bubble; the same-localIndex check on the next entry
+            // (diff == 0) keeps it from looping.  `voFocusLostTimestamp`
+            // is cleared as a belt-and-braces guard so a single
+            // `focus-left-list` can only redirect once.
+            if let focusedLocalIndex,
+               let lastLocalIndex = self.voLastFocusedItemLocalIndex,
+               self.voFocusLostTimestamp > 0,
+               CACurrentMediaTime() - self.voFocusLostTimestamp < 0.5,
+               abs(focusedLocalIndex - lastLocalIndex) > 2,
+               let lastFocusedView = self.voBubbleView(forLocalIndex: lastLocalIndex) {
+                print("[VO-CHAT] fly-away-redirect from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
+                self.voFocusLostTimestamp = 0
+                self.lastFocusedElementIdentity = nil
+                UIAccessibility.post(notification: .layoutChanged, argument: lastFocusedView)
+                return
+            }
+
             self.lastFocusedElementIdentity = identity
 
             let element = elements[focusedPosition]
@@ -2538,8 +2598,64 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let total = totalChat.map(String.init) ?? "?"
             let prevPosition = unfocusedPosition.map { $0 + 1 }
             print("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
+
+            // ── A) Preemptive edge-scroll.
+            //
+            // When the user has just moved onto the topmost (or bottommost)
+            // visible bubble in the same direction as their previous
+            // movement, schedule a scroll that brings the next adjacent
+            // bubble fully on-screen *before* the user swipes again. By
+            // the time VoiceOver tries to navigate to it the bubble has a
+            // real on-screen `accessibilityFrame` instead of the degenerate
+            // synthetic-neighbour slot, so the navigation completes cleanly
+            // and the `focus-left-list` → fly-away cascade does not fire
+            // in the first place.
+            //
+            // Guards:
+            //  • We need a previous focus to infer direction.
+            //  • Direction must point *off* the current edge (negative
+            //    while at top-edge ⇒ user moving toward older / smaller
+            //    indices and just hit the top; positive while at
+            //    bottom-edge ⇒ symmetric).
+            //  • `voLastEdgeScrollTimestamp` debounces follow-up focus
+            //    events on the same edge so we don't queue scrolls back
+            //    to back.
+            //  • `scrollVoiceOverFocusToItem` itself short-circuits if
+            //    the target is already sufficiently on-screen, so calling
+            //    it when not needed is a no-op.
+            var edgeScrollTarget: Int?
+            if let focusedLocalIndex,
+               let previousLocalIndex = self.voLastFocusedItemLocalIndex,
+               focusedLocalIndex != previousLocalIndex,
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.1,
+               let visibleRange = self.voVisibleLocalIndexRange() {
+                let direction = focusedLocalIndex - previousLocalIndex
+                let atTopEdge = focusedLocalIndex == visibleRange.top
+                let atBottomEdge = focusedLocalIndex == visibleRange.bottom
+                if direction < 0 && atTopEdge && focusedLocalIndex > 0 {
+                    edgeScrollTarget = focusedLocalIndex - 1
+                } else if direction > 0 && atBottomEdge {
+                    edgeScrollTarget = focusedLocalIndex + 1
+                }
+            }
+            // Update last-focused tracking BEFORE triggering the scroll —
+            // `transaction(scrollToItem:)` is synchronous and may emit
+            // a re-entrant focus event from inside this very handler.
+            // Updating first means any re-entrant call observes the new
+            // anchor and won't see direction=0 vs. stale state.
+            self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
+            if let target = edgeScrollTarget, let currentLocalIndex = focusedLocalIndex {
+                self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                print("[VO-CHAT] edge-scroll-preempt li=\(currentLocalIndex) -> bring li=\(target) on-screen")
+                self.scrollVoiceOverFocusToItem(at: target)
+            }
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
+            // Mark when focus left the list so the B-path above can
+            // distinguish a recovery refocus from a deliberate user
+            // re-engagement. Keep `voLastFocusedItemLocalIndex` intact —
+            // that's the anchor we redirect back to.
+            self.voFocusLostTimestamp = CACurrentMediaTime()
             let focusedKind: String
             let focusedLabel: String
             if let focusedAny {
@@ -2671,6 +2787,74 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         guard let localIndex = matchedLocalIndex else { return nil }
         guard let info = provider([localIndex]) else { return nil }
         return (position: info.first, total: info.total)
+    }
+
+    private func voLocalIndex(forFocusedSourceView sourceView: UIView) -> Int? {
+        var matched: Int?
+        self.forEachItemNode({ node in
+            guard matched == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else { return }
+            if itemNode.view === sourceView || sourceView.isDescendant(of: itemNode.view) {
+                matched = itemIndex
+            }
+        })
+        return matched
+    }
+
+    private func voBubbleView(forLocalIndex localIndex: Int) -> UIView? {
+        var found: UIView?
+        self.forEachItemNode({ node in
+            guard found == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, itemNode.index == localIndex else { return }
+            if itemNode.isNodeLoaded {
+                found = itemNode.view
+            }
+        })
+        return found
+    }
+
+    /// Visible-edge localIndex range in this list.  Used by the edge-scroll
+    /// trigger in `handleVoiceOverFocusChanged` to detect whether the user
+    /// has just landed on the topmost or bottommost visible bubble.
+    ///
+    /// Mirrors the visibility test used by `customAccessibilityElements`
+    /// (44pt minimum on-screen height) so the two stay in sync — an item
+    /// counts as "edge" only if `customAccessibilityElements` would have
+    /// placed it as a `visibleItems` entry (not a synthetic neighbour).
+    private func voVisibleLocalIndexRange() -> (top: Int, bottom: Int)? {
+        let clipFrame: CGRect
+        if let frame = self.accessibilityClippingFrameInScreenCoordinates() {
+            clipFrame = frame
+        } else {
+            clipFrame = UIAccessibility.convertToScreenCoordinates(
+                CGRect(
+                    x: 0.0,
+                    y: self.rotated ? self.insets.bottom : self.insets.top,
+                    width: self.visibleSize.width,
+                    height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+                ),
+                in: self.view
+            )
+        }
+        let kMinVisibleHeight: CGFloat = 44.0
+        var minIdx: Int?
+        var maxIdx: Int?
+        self.forEachItemNode({ node in
+            guard let itemNode = node as? ListViewItemNode, let idx = itemNode.index else { return }
+            guard itemNode.isNodeLoaded else { return }
+            let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            guard !realFrame.isNull else { return }
+            let intersection = realFrame.intersection(clipFrame)
+            guard !intersection.isNull,
+                  intersection.height >= kMinVisibleHeight,
+                  intersection.width > 1.0 else { return }
+            if let lo = minIdx { minIdx = min(lo, idx) } else { minIdx = idx }
+            if let hi = maxIdx { maxIdx = max(hi, idx) } else { maxIdx = idx }
+        })
+        if let lo = minIdx, let hi = maxIdx {
+            return (top: lo, bottom: hi)
+        }
+        return nil
     }
     
     public func updateTag(tag: HistoryViewInputTag?) {
