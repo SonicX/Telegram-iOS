@@ -5557,6 +5557,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
 
+    /// Subclass hook for vetoing the off-screen-uiview scroll path in
+    /// `handleSystemAccessibilityFocusNotification`. Default: allow.
+    ///
+    /// `ChatHistoryListNodeImpl` overrides this to reject scroll requests
+    /// whose target `localIndex` is far from the user's last live-focused
+    /// bubble. This blocks the "_ASDisplayView matched to a far item →
+    /// scroll-to-far-item" cascade that otherwise yanks the chat to the
+    /// far end of the buffer when VoiceOver loses anchor at the edge of
+    /// the bounded sliding window.
+    open func accessibilityShouldAllowScrollToItem(at localIndex: Int) -> Bool {
+        return true
+    }
+
     public func updateAccessibilityDirectionalElements(_ elements: [Any]) {
         guard self.accessibilityDirectionalAnnouncement != nil else {
             self.accessibilityPreviousFocusedDirectionalState = nil
@@ -5721,20 +5734,25 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     // Bogus-fallback guard. After a swipe at the edge of the
                     // variant-Y sliding window, VoiceOver can land focus on
                     // a parent `_ASDisplayView` that happens to be one of
-                    // the item nodes we have explicitly demoted with
-                    // `accessibilityElementsHidden = true` (a far item, e.g.
-                    // localIndex=0 while the user is browsing around li=47).
-                    // The item is *not* an intentional VoiceOver target —
-                    // reacting with a `scrollVoiceOverFocusToItem` would
-                    // yank the list to the far end of the buffer and
-                    // present the chat at a completely unrelated position
-                    // (observed cascade: edge-focus → _ASDisplayView →
-                    // scroll-to-li=0, contentOffsetY jumps +1000pt). Ignore
-                    // the focus event and let VoiceOver settle on its own.
+                    // the item nodes — even one that is far from where the
+                    // user has been navigating (observed: localIndex=0 while
+                    // the user is around li=47). Reacting with a
+                    // `scrollVoiceOverFocusToItem` for that bogus focus
+                    // yanks the list to the far end of the buffer.
+                    //
+                    // Two guards:
+                    //  1. If the item is *demoted* (we explicitly hid it),
+                    //     it can't be an intentional VoiceOver target.
+                    //  2. Subclass-level distance veto (chat history uses it
+                    //     to compare against the last live-focus localIndex).
                     let viewHidden = itemNode.view.accessibilityElementsHidden
                     let nodeHidden = !itemNode.isAccessibilityElement
                     if viewHidden || nodeHidden {
                         print("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden) nodeHidden=\(nodeHidden)")
+                        return
+                    }
+                    if !self.accessibilityShouldAllowScrollToItem(at: localIndex) {
+                        print("[VO-STATE] focus-scroll-skip reason=subclass-veto localIndex=\(localIndex)")
                         return
                     }
                     print("[VO-STATE] focus-scroll-triggered-by-uiview localIndex=\(localIndex) type=\(type(of: focusedView))")

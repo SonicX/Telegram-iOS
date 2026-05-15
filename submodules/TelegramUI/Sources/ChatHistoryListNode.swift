@@ -2759,6 +2759,29 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         return (position: info.first, total: info.total)
     }
 
+    /// Veto bogus scroll-to-uiview triggered from
+    /// `ListView.handleSystemAccessibilityFocusNotification`.
+    ///
+    /// After VoiceOver loses anchor at the edge of the bounded window, it
+    /// can briefly re-focus on a parent `_ASDisplayView` that happens to
+    /// be one of our materialised item nodes — but a far one (e.g. li=0
+    /// while the user is around li=47). `ListView`'s off-screen-uiview
+    /// branch would then react with a real `scrollVoiceOverFocusToItem`,
+    /// dragging the chat to the far end of the buffer. We let ListView
+    /// know that any such target whose `localIndex` is far from the
+    /// user's last live-focused bubble is not a legitimate VoiceOver
+    /// target.
+    override public func accessibilityShouldAllowScrollToItem(at localIndex: Int) -> Bool {
+        guard let lastKnown = self.voLastFocusedItemLocalIndex else {
+            return true
+        }
+        let maxJump = 5
+        if abs(localIndex - lastKnown) > maxJump {
+            return false
+        }
+        return true
+    }
+
     private func voLocalIndex(forFocusedSourceView sourceView: UIView) -> Int? {
         var matched: Int?
         self.forEachItemNode({ node in
