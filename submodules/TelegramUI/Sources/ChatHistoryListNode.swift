@@ -2599,56 +2599,26 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let prevPosition = unfocusedPosition.map { $0 + 1 }
             print("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
 
-            // ── A) Preemptive edge-scroll.
-            //
-            // When the user has just moved onto the topmost (or bottommost)
-            // visible bubble in the same direction as their previous
-            // movement, schedule a scroll that brings the next adjacent
-            // bubble fully on-screen *before* the user swipes again. By
-            // the time VoiceOver tries to navigate to it the bubble has a
-            // real on-screen `accessibilityFrame` instead of the degenerate
-            // synthetic-neighbour slot, so the navigation completes cleanly
-            // and the `focus-left-list` → fly-away cascade does not fire
-            // in the first place.
-            //
-            // Guards:
-            //  • We need a previous focus to infer direction.
-            //  • Direction must point *off* the current edge (negative
-            //    while at top-edge ⇒ user moving toward older / smaller
-            //    indices and just hit the top; positive while at
-            //    bottom-edge ⇒ symmetric).
-            //  • `voLastEdgeScrollTimestamp` debounces follow-up focus
-            //    events on the same edge so we don't queue scrolls back
-            //    to back.
-            //  • `scrollVoiceOverFocusToItem` itself short-circuits if
-            //    the target is already sufficiently on-screen, so calling
-            //    it when not needed is a no-op.
-            var edgeScrollTarget: Int?
-            if let focusedLocalIndex,
-               let previousLocalIndex = self.voLastFocusedItemLocalIndex,
-               focusedLocalIndex != previousLocalIndex,
-               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.1,
-               let visibleRange = self.voVisibleLocalIndexRange() {
-                let direction = focusedLocalIndex - previousLocalIndex
-                let atTopEdge = focusedLocalIndex == visibleRange.top
-                let atBottomEdge = focusedLocalIndex == visibleRange.bottom
-                if direction < 0 && atTopEdge && focusedLocalIndex > 0 {
-                    edgeScrollTarget = focusedLocalIndex - 1
-                } else if direction > 0 && atBottomEdge {
-                    edgeScrollTarget = focusedLocalIndex + 1
-                }
-            }
-            // Update last-focused tracking BEFORE triggering the scroll —
-            // `transaction(scrollToItem:)` is synchronous and may emit
-            // a re-entrant focus event from inside this very handler.
-            // Updating first means any re-entrant call observes the new
-            // anchor and won't see direction=0 vs. stale state.
+            // Note: an earlier iteration of this handler triggered a
+            // *preemptive* `scrollVoiceOverFocusToItem` whenever the user
+            // landed on the edge bubble of the visible window, in the hope
+            // of materialising the next neighbour off-screen before
+            // VoiceOver attempted to navigate to it. In practice the call
+            // short-circuited as a no-op (the geometric `alreadyOnScreen`
+            // check in `scrollVoiceOverFocusToItem` returns true for the
+            // synthetic-neighbour slot even though VoiceOver can't reach
+            // it via swipe), but the side effect of running the lookup
+            // gave UIKit a runloop tick during which VoiceOver could land
+            // focus on a parent `_ASDisplayView` belonging to a far-
+            // demoted item (e.g. localIndex=0). That fallback focus then
+            // made `ListView.handleSystemAccessibilityFocusNotification`
+            // think the user had genuinely focused li=0 and ran a real
+            // scroll-to-li=0 — the chat slammed to the top of the buffer.
+            // The hidden-item guard in ListView now suppresses that
+            // bogus scroll-to-uiview path; the redirect below is enough
+            // to keep the cursor anchored even when VoiceOver re-picks
+            // `array[0]` after losing focus.
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
-            if let target = edgeScrollTarget, let currentLocalIndex = focusedLocalIndex {
-                self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                print("[VO-CHAT] edge-scroll-preempt li=\(currentLocalIndex) -> bring li=\(target) on-screen")
-                self.scrollVoiceOverFocusToItem(at: target)
-            }
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
             // Mark when focus left the list so the B-path above can

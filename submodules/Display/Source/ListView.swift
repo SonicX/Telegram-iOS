@@ -5718,6 +5718,25 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 // scroll transactions.
                 if let itemNode = self.itemNodes.first(where: { $0.view === focusedView }),
                    let localIndex = itemNode.index {
+                    // Bogus-fallback guard. After a swipe at the edge of the
+                    // variant-Y sliding window, VoiceOver can land focus on
+                    // a parent `_ASDisplayView` that happens to be one of
+                    // the item nodes we have explicitly demoted with
+                    // `accessibilityElementsHidden = true` (a far item, e.g.
+                    // localIndex=0 while the user is browsing around li=47).
+                    // The item is *not* an intentional VoiceOver target —
+                    // reacting with a `scrollVoiceOverFocusToItem` would
+                    // yank the list to the far end of the buffer and
+                    // present the chat at a completely unrelated position
+                    // (observed cascade: edge-focus → _ASDisplayView →
+                    // scroll-to-li=0, contentOffsetY jumps +1000pt). Ignore
+                    // the focus event and let VoiceOver settle on its own.
+                    let viewHidden = itemNode.view.accessibilityElementsHidden
+                    let nodeHidden = !itemNode.isAccessibilityElement
+                    if viewHidden || nodeHidden {
+                        print("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden) nodeHidden=\(nodeHidden)")
+                        return
+                    }
                     print("[VO-STATE] focus-scroll-triggered-by-uiview localIndex=\(localIndex) type=\(type(of: focusedView))")
                     self.scrollVoiceOverFocusToItem(at: localIndex)
                     return
