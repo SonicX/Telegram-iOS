@@ -2724,22 +2724,25 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                let focusedLocalIndex,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
-                // 1-item lead, synchronised with the cursor advance. A
-                // larger lead (3) overpowered iOS's auto-scroll counter
-                // and ensured progress in the right direction, but it
-                // also moved the list visually by 3 items while the
-                // cursor advanced by only 1 — users perceived the 2
-                // newly-exposed-but-unspoken items as *skipped*.
+                // 3-item lead. A 1-item lead synchronises the visual
+                // scroll with the audio advance (no perceived "skip"),
+                // but it puts the restored cursor right back on the new
+                // visible-range edge — the very next user swipe again
+                // targets a below-neighbour with a degenerate synthetic
+                // frame, VoiceOver can't navigate to it cleanly, and
+                // focus flies away to the bottom of the array. The
+                // cascade-guard prevents *auto* re-triggering, but it
+                // can't fix VO's inability to walk past a freshly-
+                // exposed edge.
                 //
-                // With everything else in the stack now in place
-                // (rotation-aware neighbour selection, force-scroll
-                // bypass-veto, deferred restore-focus to the intended
-                // next bubble), a 1-item lead is enough: even when iOS
-                // counter-scrolls, the restore-focus post still anchors
-                // the cursor onto the intended bubble — the list barely
-                // moves visually, but the cursor still advances by 1.
-                // visual = audio = 1:1, no perceived skip.
-                let kEdgeLead = 1
+                // A 3-item lead gives the user 2-3 clean swipes inside
+                // the new window before they reach the next edge. The
+                // visual scroll moves more than the audio advance (so
+                // 1-2 new bubbles appear unspoken until the user swipes
+                // to them), but every message is still announced once
+                // when the cursor lands on it — nothing is actually
+                // skipped, just visually pre-exposed.
+                let kEdgeLead = 3
                 var extendTarget: Int?
                 var intendedNext: Int?
                 if focusedLocalIndex <= visibleRange.top, focusedLocalIndex > 0 {
