@@ -2658,25 +2658,54 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let prevPosition = unfocusedPosition.map { $0 + 1 }
             print("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
 
-            // Note: an earlier iteration of this handler triggered a
-            // *preemptive* `scrollVoiceOverFocusToItem` whenever the user
-            // landed on the edge bubble of the visible window, in the hope
-            // of materialising the next neighbour off-screen before
-            // VoiceOver attempted to navigate to it. In practice the call
-            // short-circuited as a no-op (the geometric `alreadyOnScreen`
-            // check in `scrollVoiceOverFocusToItem` returns true for the
-            // synthetic-neighbour slot even though VoiceOver can't reach
-            // it via swipe), but the side effect of running the lookup
-            // gave UIKit a runloop tick during which VoiceOver could land
-            // focus on a parent `_ASDisplayView` belonging to a far-
-            // demoted item (e.g. localIndex=0). That fallback focus then
-            // made `ListView.handleSystemAccessibilityFocusNotification`
-            // think the user had genuinely focused li=0 and ran a real
-            // scroll-to-li=0 — the chat slammed to the top of the buffer.
-            // The hidden-item guard in ListView now suppresses that
-            // bogus scroll-to-uiview path; the redirect below is enough
-            // to keep the cursor anchored even when VoiceOver re-picks
-            // `array[0]` after losing focus.
+            // Edge-extend scroll. When the user's focus lands on the
+            // edge of the visible-localIndex range (or beyond, on a
+            // synthetic-neighbour slot whose real frame is off-screen),
+            // preemptively scroll the list so the next adjacent bubble
+            // becomes a real visible item. Without this, the user
+            // navigates to the synthetic-neighbour slot, has no further
+            // element to swipe to, focus is lost, and VoiceOver re-anchors
+            // on whatever the first usable element in `accessibilityElements`
+            // is — visible as a "fly-away" jump 6-10 positions back.
+            //
+            // The cascade that bit an earlier iteration of this code
+            // (preemptive scroll → `_ASDisplayView` fallback → ListView's
+            // scroll-to-uiview for li=0 → +1000pt jump) is now blocked
+            // by three guards that run higher in the stack:
+            //   1. Rotation-aware prefix/suffix in
+            //      `customAccessibilityElements` so the bounded window
+            //      contains the *closest* neighbours, not the farthest.
+            //   2. `accessibilityElementsHidden`-aware skip in
+            //      `ListView.handleSystemAccessibilityFocusNotification`.
+            //   3. `accessibilityShouldAllowScrollToItem(at:)` veto for
+            //      targets far from the last known live focus.
+            // With those in place, `scrollVoiceOverFocusToItem` here can
+            // only scroll to an adjacent target near the live focus.
+            //
+            // Triggering criterion: focused localIndex is at-or-beyond
+            // the visible edge in the direction we want to extend. The
+            // `<=` / `>=` covers both visible-edge bubbles (top/bottom
+            // of `visibleRange`) and synthetic-neighbour focus
+            // (`focusedLocalIndex` outside the range entirely).
+            //
+            // Debounce 0.2s keeps repeated focus events at the same edge
+            // from queueing multiple scroll transactions on top of one
+            // another.
+            if let focusedLocalIndex,
+               let visibleRange = self.voVisibleLocalIndexRange(),
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
+                var extendTarget: Int?
+                if focusedLocalIndex <= visibleRange.top, focusedLocalIndex > 0 {
+                    extendTarget = focusedLocalIndex - 1
+                } else if focusedLocalIndex >= visibleRange.bottom {
+                    extendTarget = focusedLocalIndex + 1
+                }
+                if let target = extendTarget {
+                    self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                    print("[VO-CHAT] edge-extend-scroll focusedLi=\(focusedLocalIndex) visible=\(visibleRange.top)..\(visibleRange.bottom) -> li=\(target)")
+                    self.scrollVoiceOverFocusToItem(at: target)
+                }
+            }
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
