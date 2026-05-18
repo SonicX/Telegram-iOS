@@ -2973,12 +2973,31 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 // is fine; `.screenChanged` overrides that.
                 guard let self,
                       let anchor = anchorLocalIndex,
-                      let anchorView = self.voBubbleView(forLocalIndex: anchor) else {
+                      let anchorNode = self.voItemNode(forLocalIndex: anchor) else {
                     return
                 }
+                // With kSynthNeighbours=0 the anchor (the new edge) is
+                // *outside* the current visible-only array — its
+                // accessibility view has been demoted to
+                // `accessibilityElementsHidden=true` /
+                // `isAccessibilityElement=false`. iOS silently ignores
+                // `.screenChanged` posts whose argument is hidden, so
+                // the cursor ends up on whatever visible bubble iOS
+                // picks as a fallback (li=46 instead of li=44 in the
+                // observed logs — exactly the "залипание" symptom).
+                //
+                // Re-promote the anchor view *just before the post*.
+                // The next `customAccessibilityElements` call triggered
+                // by the same scroll will re-classify everything from
+                // scratch (the anchor will then be inside the new
+                // visible range and stay promoted naturally), so this
+                // touch-up only needs to bridge the gap until then.
+                anchorNode.isAccessibilityElement = true
+                anchorNode.view.accessibilityElementsHidden = false
+                anchorNode.view.isAccessibilityElement = true
                 print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
                 self.voPendingRestoreAnchorLi = anchor
-                UIAccessibility.post(notification: .screenChanged, argument: anchorView)
+                UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
             }
         )
     }
@@ -3035,6 +3054,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             guard let itemNode = node as? ListViewItemNode, itemNode.index == localIndex else { return }
             if itemNode.isNodeLoaded {
                 found = itemNode.view
+            }
+        })
+        return found
+    }
+
+    private func voItemNode(forLocalIndex localIndex: Int) -> ListViewItemNode? {
+        var found: ListViewItemNode?
+        self.forEachItemNode({ node in
+            guard found == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, itemNode.index == localIndex else { return }
+            if itemNode.isNodeLoaded {
+                found = itemNode
             }
         })
         return found
