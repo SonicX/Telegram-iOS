@@ -2697,17 +2697,22 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             if let focusedLocalIndex,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
-                // Aggressive lead. A 1-row shift turned out to be too
-                // gentle: iOS's parallel auto-scroll-on-focus-loss races
-                // our transaction and routinely drags the list in the
-                // *opposite* direction (toward whatever fly-away target
-                // VoiceOver fascinated on during the brief focus gap),
-                // landing the user well past where they intended. Asking
-                // for a 3-item lead means our scroll moves the content
-                // meaningfully — even when iOS counters, the net
-                // contentOffset stays much closer to the user's
-                // intended direction.
-                let kEdgeLead = 3
+                // 1-item lead, synchronised with the cursor advance. A
+                // larger lead (3) overpowered iOS's auto-scroll counter
+                // and ensured progress in the right direction, but it
+                // also moved the list visually by 3 items while the
+                // cursor advanced by only 1 — users perceived the 2
+                // newly-exposed-but-unspoken items as *skipped*.
+                //
+                // With everything else in the stack now in place
+                // (rotation-aware neighbour selection, force-scroll
+                // bypass-veto, deferred restore-focus to the intended
+                // next bubble), a 1-item lead is enough: even when iOS
+                // counter-scrolls, the restore-focus post still anchors
+                // the cursor onto the intended bubble — the list barely
+                // moves visually, but the cursor still advances by 1.
+                // visual = audio = 1:1, no perceived skip.
+                let kEdgeLead = 1
                 var extendTarget: Int?
                 var intendedNext: Int?
                 if focusedLocalIndex <= visibleRange.top, focusedLocalIndex > 0 {
