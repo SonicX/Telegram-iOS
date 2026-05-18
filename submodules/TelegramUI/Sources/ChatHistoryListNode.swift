@@ -2724,25 +2724,26 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                let focusedLocalIndex,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
-                // 3-item lead. A 1-item lead synchronises the visual
-                // scroll with the audio advance (no perceived "skip"),
-                // but it puts the restored cursor right back on the new
-                // visible-range edge — the very next user swipe again
-                // targets a below-neighbour with a degenerate synthetic
-                // frame, VoiceOver can't navigate to it cleanly, and
-                // focus flies away to the bottom of the array. The
-                // cascade-guard prevents *auto* re-triggering, but it
-                // can't fix VO's inability to walk past a freshly-
-                // exposed edge.
+                // 2-item lead. Compromise between visual-audio sync and
+                // VoiceOver's inability to navigate past freshly-exposed
+                // edges.
                 //
-                // A 3-item lead gives the user 2-3 clean swipes inside
-                // the new window before they reach the next edge. The
-                // visual scroll moves more than the audio advance (so
-                // 1-2 new bubbles appear unspoken until the user swipes
-                // to them), but every message is still announced once
-                // when the cursor lands on it — nothing is actually
-                // skipped, just visually pre-exposed.
-                let kEdgeLead = 3
+                // With lead=1 the visual shift matches the audio advance
+                // (1:1) but the restored cursor sits exactly on the new
+                // edge — the very next swipe targets the below-neighbour
+                // synthetic slot, which VoiceOver can't reach cleanly,
+                // causing fly-away. With lead=3 the user gets 2 clean
+                // swipes between edge-extends but the list visually
+                // shifts ~3 items per swipe while audio advances just 1,
+                // and users perceive the 2 newly-visible-but-unspoken
+                // bubbles as a "skip" of ~2 positions.
+                //
+                // lead=2: list shifts ~2 items, audio advances 1, visual
+                // gap of 1 — the smallest perceptible skip while still
+                // moving the restored cursor 1 row inside the new
+                // visible range (cascade-guard keeps us out of an auto-
+                // loop while focus is on that anchor).
+                let kEdgeLead = 2
                 var extendTarget: Int?
                 var intendedNext: Int?
                 if focusedLocalIndex <= visibleRange.top, focusedLocalIndex > 0 {
