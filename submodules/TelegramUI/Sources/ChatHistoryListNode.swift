@@ -2966,6 +2966,27 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // pre-emptive lead and lets iOS auto-scroll drive the list to
         // wherever VoiceOver wanders. Always allow.
         print("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
+        // **Pre-post**: claim focus on the anchor *before* the transaction
+        // starts. Without this, iOS's parallel focus-recovery picks a
+        // visible bubble (e.g. li=46) during the scroll, VoiceOver
+        // announces it briefly, and our retry only fixes the *final*
+        // state — the user still hears the wrong intermediate label.
+        //
+        // Re-promoting the anchor view first makes it a valid focus
+        // target. Posting `.screenChanged` with it pins VoiceOver onto
+        // the anchor up-front. The subsequent scroll moves the list
+        // under the already-focused cursor, so there's no opportunity
+        // for iOS to drift focus to a transient pick.
+        if let anchor = anchorLocalIndex,
+           let anchorNode = self.voItemNode(forLocalIndex: anchor) {
+            anchorNode.isAccessibilityElement = true
+            anchorNode.view.accessibilityElementsHidden = false
+            anchorNode.view.isAccessibilityElement = true
+            self.voPendingRestoreAnchorLi = anchor
+            self.voPendingRestoreRetried = false
+            print("[VO-CHAT] force-scroll-pre-post li=\(anchor)")
+            UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+        }
         // `.visible` scrolls just enough to bring the target into the
         // viewport without disrupting items that are already on-screen.
         // We need a *minimal* shift here so the user's current live
