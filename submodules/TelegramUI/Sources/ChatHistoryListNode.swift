@@ -2325,7 +2325,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             }
 
             let synthHeight: CGFloat = 1.0
-            let synthStep: CGFloat = 0.5
+            // 5pt stagger between synthetic-neighbour slots, not 0.5pt.
+            // With kSynthNeighbours=5, the previous 0.5pt step packed
+            // all five slots into 2.5pt of vertical space — VoiceOver's
+            // spatial scan couldn't tell them apart and routinely
+            // picked the wrong slot (e.g. the far end of the below-
+            // neighbour stack instead of the closest one), causing the
+            // cursor to fly down several positions on the user's first
+            // swipe after an edge-extend restore. 5pt gives each slot
+            // ~5pt of unambiguous spatial separation while still fitting
+            // comfortably inside the clip even when clamped at edges.
+            let synthStep: CGFloat = 5.0
             let synthWidth = max(1.0, synthClip.width)
             let synthX = synthClip.minX
 
