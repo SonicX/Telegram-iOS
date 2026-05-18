@@ -2877,10 +2877,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     /// a stray request to a far-away `localIndex` doesn't drag the list
     /// to the wrong end of the buffer.
     private func voForceScrollToItem(at localIndex: Int, restoreFocusOn anchorLocalIndex: Int? = nil) {
-        guard self.accessibilityShouldAllowScrollToItem(at: localIndex) else {
-            print("[VO-CHAT] force-scroll-veto li=\(localIndex)")
-            return
-        }
+        // **Bypass** the subclass-veto. That veto is for ListView's
+        // off-screen-uiview-handler, which reacts to VoiceOver fallback-
+        // fascination on stale targets. This method is *our* intentional
+        // edge-extend scroll — vetoing it just kneecaps our own
+        // pre-emptive lead and lets iOS auto-scroll drive the list to
+        // wherever VoiceOver wanders. Always allow.
         print("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
         // `.visible` scrolls just enough to bring the target into the
         // viewport without disrupting items that are already on-screen.
