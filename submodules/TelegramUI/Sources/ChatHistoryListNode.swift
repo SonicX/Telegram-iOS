@@ -2256,18 +2256,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // promotes the next-closest off-screen item into a
             // neighbour slot — the user advances one step per swipe
             // continuously).
-            // 1 synthetic neighbour per side. Larger N gives more swipes
-            // per window before reaching an edge, but it also gives
-            // VoiceOver more "fallback" slots to land on when it loses
-            // focus during a swipe transition — and even with a wider
-            // stagger between slots, VO occasionally picks the *farthest*
-            // below-neighbour as fallback (observed: cursor at li=44 →
-            // VO falls back to li=39, the bottom of a 5-slot stack).
-            // With N=1 there's exactly one fallback target, no ambiguity.
-            // Trade-off: edge-extend fires more often (every ~6 swipes
-            // instead of every ~10), but each scroll is small and the
-            // fly-away amplitude (when it happens) is bounded to ±1.
-            let kSynthNeighbours = 1
+            // **No synthetic neighbours.** Every value of N≥1 we tried
+            // produced occasional fly-aways because VoiceOver's fallback-
+            // fascination on focus loss picked a synthetic-neighbour slot
+            // at random (sometimes the *farthest* one), regardless of
+            // stagger spacing.
+            //
+            // With N=0 the accessibility array contains *only* fully-
+            // visible bubbles. When the user swipes past the visible
+            // edge, VoiceOver has no next element to navigate to — focus
+            // either stays on the edge bubble (silent swipe) or leaves to
+            // a sibling container. Our A-check (cursor-at-edge detection
+            // in `handleVoiceOverFocusChanged`) is now the *sole*
+            // mechanism extending the buffer: when cursor lands on the
+            // visible-range edge, we force-scroll to expose more items
+            // and restore focus onto the intended next bubble, which is
+            // now genuinely visible (no degenerate synthetic frame for
+            // VoiceOver to stumble on).
+            let kSynthNeighbours = 0
 
             let visibleItems = collected.filter { $0.isVisible }
             // Compute the visible band extent from the **clipped**
