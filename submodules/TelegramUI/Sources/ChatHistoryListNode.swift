@@ -2258,12 +2258,38 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let belowAll = collected.filter { !$0.isVisible && !$0.isAboveVisible }
                 .sorted { $0.localIndex < $1.localIndex }
             // Neighbours: take the closest-to-visible items from each
-            // side. For `aboveAll` (sorted asc), the **highest**
-            // localIndex sits closest to visible — so the neighbour
-            // slice is the *suffix*. For `belowAll`, the **lowest**
-            // localIndex is closest — take the *prefix*.
-            let aboveNeighbours = aboveAll.suffix(kSynthNeighbours)
-            let belowNeighbours = belowAll.prefix(kSynthNeighbours)
+            // side. In a **non-rotated** ListView (e.g. chat list) the
+            // localIndex order matches the visual top-to-bottom order, so
+            // `aboveAll` (sorted asc) ends with the items closest to the
+            // visible top → take the *suffix*; `belowAll` starts with the
+            // items closest to the visible bottom → take the *prefix*.
+            //
+            // In a **rotated** ListView (chat history) the layer is
+            // 180°-flipped, so the localIndex order is *visually inverted*:
+            // the highest localIndex sits at the top of the viewport, and
+            // items visually above the viewport have **larger** localIndex
+            // than the topmost visible bubble. `aboveAll` is therefore the
+            // tail end of the localIndex range, and the item closest to
+            // the visible top is the *smallest* localIndex in `aboveAll`
+            // → take the *prefix*. Symmetrically for `belowAll`.
+            //
+            // Without this rotation-aware swap the bounded sliding window
+            // picked the farthest off-screen items as "neighbours" in
+            // rotated mode (observed: `firstSorted=0 lastSorted=87` for a
+            // visible window around li=47..52). When VoiceOver then tried
+            // to navigate from the visible edge to those far neighbours,
+            // their synthetic frames were degenerate, focus fell off, and
+            // UIKit's accessibility auto-scroll yanked the chat to the
+            // far end of the buffer (contentOffsetY +1000pt jump).
+            let aboveNeighbours: ArraySlice<CollectedItem>
+            let belowNeighbours: ArraySlice<CollectedItem>
+            if self.rotated {
+                aboveNeighbours = aboveAll.prefix(kSynthNeighbours)
+                belowNeighbours = belowAll.suffix(kSynthNeighbours)
+            } else {
+                aboveNeighbours = aboveAll.suffix(kSynthNeighbours)
+                belowNeighbours = belowAll.prefix(kSynthNeighbours)
+            }
 
             let synthHeight: CGFloat = 1.0
             let synthStep: CGFloat = 0.5
