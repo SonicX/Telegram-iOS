@@ -2721,70 +2721,14 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // Debounce 0.2s keeps repeated focus events at the same edge
             // from queueing multiple scroll transactions on top of one
             // another.
-            // Cascade guard: identity-based, not time-based. While the
-            // cursor is *exactly* on the anchor we restored to after
-            // the last edge-extend scroll, suppress further A-check —
-            // the focus event we just got is our own restore arriving,
-            // not a fresh user gesture, and re-triggering edge-extend
-            // would chain into a runaway auto-scroll. As soon as the
-            // cursor moves to any other localIndex (= real user swipe),
-            // clear the anchor and re-arm the A-check.
-            var onPendingRestoreAnchor = false
-            if let pending = self.voPendingRestoreAnchorLi {
-                if pending == focusedLocalIndex {
-                    onPendingRestoreAnchor = true
-                    print("[VO-CHAT] edge-extend-suppress reason=on-restore-anchor li=\(pending)")
-                } else {
-                    self.voPendingRestoreAnchorLi = nil
-                }
-            }
-            if !onPendingRestoreAnchor,
-               let focusedLocalIndex,
-               let visibleRange = self.voVisibleLocalIndexRange(),
-               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
-                // 2-item lead. Compromise between visual-audio sync and
-                // VoiceOver's inability to navigate past freshly-exposed
-                // edges.
-                //
-                // With lead=1 the visual shift matches the audio advance
-                // (1:1) but the restored cursor sits exactly on the new
-                // edge — the very next swipe targets the below-neighbour
-                // synthetic slot, which VoiceOver can't reach cleanly,
-                // causing fly-away. With lead=3 the user gets 2 clean
-                // swipes between edge-extends but the list visually
-                // shifts ~3 items per swipe while audio advances just 1,
-                // and users perceive the 2 newly-visible-but-unspoken
-                // bubbles as a "skip" of ~2 positions.
-                //
-                // lead=2: list shifts ~2 items, audio advances 1, visual
-                // gap of 1 — the smallest perceptible skip while still
-                // moving the restored cursor 1 row inside the new
-                // visible range (cascade-guard keeps us out of an auto-
-                // loop while focus is on that anchor).
-                let kEdgeLead = 2
-                var extendTarget: Int?
-                var intendedNext: Int?
-                if focusedLocalIndex <= visibleRange.top, focusedLocalIndex > 0 {
-                    extendTarget = max(0, focusedLocalIndex - kEdgeLead)
-                    intendedNext = max(0, focusedLocalIndex - 1)
-                } else if focusedLocalIndex >= visibleRange.bottom {
-                    extendTarget = focusedLocalIndex + kEdgeLead
-                    intendedNext = focusedLocalIndex + 1
-                }
-                if let target = extendTarget, let next = intendedNext {
-                    self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                    print("[VO-CHAT] edge-extend-scroll focusedLi=\(focusedLocalIndex) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
-                    // Restore focus onto the user's *intended next* bubble
-                    // (one step in their swipe direction), not the bubble
-                    // they were on. Restoring to the same bubble made the
-                    // swipe feel wasted ("I swiped but cursor stayed").
-                    // After our 3-row scroll, intendedNext sits comfortably
-                    // inside the new visible range, and posting `.layout
-                    // Changed` with its view puts the cursor exactly where
-                    // the user expected the swipe to take them.
-                    self.voForceScrollToItem(at: target, restoreFocusOn: next)
-                }
-            }
+            // No proactive edge-extend here. With kSynthNeighbours=0 the
+            // array contains only visible bubbles; nothing happens when
+            // the cursor merely *arrives* at the edge. The actual scroll
+            // happens **reactively** in the focus-left branch below:
+            // when VoiceOver gives up and lets focus leave the list,
+            // *that* is the unambiguous signal that the user tried to
+            // swipe past the edge — and only then do we scroll. Keeps
+            // us from triggering scrolls the user didn't actually want.
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
@@ -2793,6 +2737,40 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // re-engagement. Keep `voLastFocusedItemLocalIndex` intact —
             // that's the anchor we redirect back to.
             self.voFocusLostTimestamp = CACurrentMediaTime()
+
+            // **Reactive edge-extend.** With kSynthNeighbours=0 the array
+            // ends at the visible edges. When VoiceOver swipes past the
+            // last array element it can't navigate further — focus first
+            // goes nil and then drifts to a sibling (navbar). That's the
+            // unambiguous user signal "I want to continue past the
+            // edge". Trigger the scroll here, after observing the focus
+            // loss, instead of preemptively when the cursor merely lands
+            // on an edge bubble.
+            //
+            // `voForceScrollToItem` posts `.layoutChanged` with the
+            // intended next bubble in its completion block, so VoiceOver
+            // is pulled back into the list onto the freshly-exposed
+            // message rather than left stranded on the navbar.
+            if let lastLi = self.voLastFocusedItemLocalIndex,
+               let visibleRange = self.voVisibleLocalIndexRange(),
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
+                let kReactiveLead = 2
+                var extendTarget: Int?
+                var intendedNext: Int?
+                if lastLi <= visibleRange.top, lastLi > 0 {
+                    extendTarget = max(0, lastLi - kReactiveLead)
+                    intendedNext = max(0, lastLi - 1)
+                } else if lastLi >= visibleRange.bottom {
+                    extendTarget = lastLi + kReactiveLead
+                    intendedNext = lastLi + 1
+                }
+                if let target = extendTarget, let next = intendedNext {
+                    self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                    print("[VO-CHAT] reactive-edge-extend left-from-li=\(lastLi) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
+                    self.voForceScrollToItem(at: target, restoreFocusOn: next)
+                }
+            }
+
             let focusedKind: String
             let focusedLabel: String
             if let focusedAny {
