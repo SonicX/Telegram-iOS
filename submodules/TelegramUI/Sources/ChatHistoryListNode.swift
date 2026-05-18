@@ -2136,6 +2136,19 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // tap-target's worth of on-screen content — enough to be
             // a genuine focus target, small enough not to reject a
             // short text bubble at the viewport edge.
+            //
+            // **However**, an absolute 44pt threshold excludes short
+            // service cells (pinned-message indicator, unread divider,
+            // date headers — typically 28..40pt tall) even when they
+            // are *fully* on-screen, because their entire intersection
+            // is < 44pt. The user observed VoiceOver "skipping past"
+            // these placeholders. We therefore lower the bar for cells
+            // whose natural height is below the 44pt floor: a cell is
+            // visible if ≥ 90% of its own height is on-screen.
+            //
+            // The tall-bubble protection is preserved: for a 1500pt
+            // bubble, `min(44, 1500*0.9)` is still 44, so the original
+            // 44pt requirement applies.
             let kMinVisibleHeight: CGFloat = 44.0
             var collected: [CollectedItem] = []
             self.forEachItemNode { node in
@@ -2154,9 +2167,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
                 let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
                 let intersection = realFrame.isNull ? CGRect.null : realFrame.intersection(synthClip)
+                // Per-item required-visible-height: 44pt for tall cells,
+                // 90% of natural height for short cells (placeholders).
+                let requiredVisibleHeight: CGFloat
+                if realFrame.isNull {
+                    requiredVisibleHeight = kMinVisibleHeight
+                } else {
+                    requiredVisibleHeight = min(kMinVisibleHeight, realFrame.height * 0.9)
+                }
                 let isVisible = !realFrame.isNull
                     && !intersection.isNull
-                    && intersection.height >= kMinVisibleHeight
+                    && intersection.height >= requiredVisibleHeight
                     && intersection.width > 1.0
                 // `clippedFrame` is the on-screen slice; falls back to
                 // the raw real frame when there's no intersection
@@ -2876,8 +2897,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
             guard !realFrame.isNull else { return }
             let intersection = realFrame.intersection(clipFrame)
+            // Mirror `customAccessibilityElements`: 44pt for tall cells,
+            // 90% of natural height for short service cells (pinned /
+            // unread / date headers) so they aren't silently skipped
+            // from the visibility-range calculation either.
+            let requiredVisibleHeight = min(kMinVisibleHeight, realFrame.height * 0.9)
             guard !intersection.isNull,
-                  intersection.height >= kMinVisibleHeight,
+                  intersection.height >= requiredVisibleHeight,
                   intersection.width > 1.0 else { return }
             if let lo = minIdx { minIdx = min(lo, idx) } else { minIdx = idx }
             if let hi = maxIdx { maxIdx = max(hi, idx) } else { maxIdx = idx }
