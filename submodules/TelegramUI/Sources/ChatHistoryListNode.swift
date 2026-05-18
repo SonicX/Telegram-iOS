@@ -2709,15 +2709,26 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 // intended direction.
                 let kEdgeLead = 3
                 var extendTarget: Int?
+                var intendedNext: Int?
                 if focusedLocalIndex <= visibleRange.top, focusedLocalIndex > 0 {
                     extendTarget = max(0, focusedLocalIndex - kEdgeLead)
+                    intendedNext = max(0, focusedLocalIndex - 1)
                 } else if focusedLocalIndex >= visibleRange.bottom {
                     extendTarget = focusedLocalIndex + kEdgeLead
+                    intendedNext = focusedLocalIndex + 1
                 }
-                if let target = extendTarget {
+                if let target = extendTarget, let next = intendedNext {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                    print("[VO-CHAT] edge-extend-scroll focusedLi=\(focusedLocalIndex) visible=\(visibleRange.top)..\(visibleRange.bottom) -> li=\(target)")
-                    self.voForceScrollToItem(at: target, restoreFocusOn: focusedLocalIndex)
+                    print("[VO-CHAT] edge-extend-scroll focusedLi=\(focusedLocalIndex) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
+                    // Restore focus onto the user's *intended next* bubble
+                    // (one step in their swipe direction), not the bubble
+                    // they were on. Restoring to the same bubble made the
+                    // swipe feel wasted ("I swiped but cursor stayed").
+                    // After our 3-row scroll, intendedNext sits comfortably
+                    // inside the new visible range, and posting `.layout
+                    // Changed` with its view puts the cursor exactly where
+                    // the user expected the swipe to take them.
+                    self.voForceScrollToItem(at: target, restoreFocusOn: next)
                 }
             }
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
