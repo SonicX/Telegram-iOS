@@ -2706,7 +2706,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 if let target = extendTarget {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
                     print("[VO-CHAT] edge-extend-scroll focusedLi=\(focusedLocalIndex) visible=\(visibleRange.top)..\(visibleRange.bottom) -> li=\(target)")
-                    self.voForceScrollToItem(at: target)
+                    self.voForceScrollToItem(at: target, restoreFocusOn: focusedLocalIndex)
                 }
             }
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
@@ -2865,12 +2865,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     /// `accessibilityShouldAllowScrollToItem(at:)` still gates the call so
     /// a stray request to a far-away `localIndex` doesn't drag the list
     /// to the wrong end of the buffer.
-    private func voForceScrollToItem(at localIndex: Int) {
+    private func voForceScrollToItem(at localIndex: Int, restoreFocusOn anchorLocalIndex: Int? = nil) {
         guard self.accessibilityShouldAllowScrollToItem(at: localIndex) else {
             print("[VO-CHAT] force-scroll-veto li=\(localIndex)")
             return
         }
-        print("[VO-CHAT] force-scroll-transaction li=\(localIndex)")
+        print("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
         // `.visible` scrolls just enough to bring the target into the
         // viewport without disrupting items that are already on-screen.
         // We need a *minimal* shift here so the user's current live
@@ -2895,7 +2895,25 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             updateSizeAndInsets: nil,
             stationaryItemRange: nil,
             updateOpaqueState: nil,
-            completion: { _ in }
+            completion: { [weak self] _ in
+                // After the scroll settles, explicitly anchor VoiceOver
+                // focus back onto the bubble the user was on. Without
+                // this iOS's auto-scroll-on-focus-loss runs in parallel
+                // with our scroll, and the cursor often ends up one
+                // bubble *off* from where the user was (li=46 instead
+                // of the expected li=45 when the user was at li=45).
+                // The `.layoutChanged` post pulls focus back onto the
+                // anchor view, giving the user a clean "you're still
+                // where you were, the list just slid to expose the
+                // next item" experience.
+                guard let self,
+                      let anchor = anchorLocalIndex,
+                      let anchorView = self.voBubbleView(forLocalIndex: anchor) else {
+                    return
+                }
+                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
+                UIAccessibility.post(notification: .layoutChanged, argument: anchorView)
+            }
         )
     }
 
