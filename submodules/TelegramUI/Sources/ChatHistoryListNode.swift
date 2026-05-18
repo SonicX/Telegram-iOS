@@ -2618,23 +2618,46 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                self.voFocusLostTimestamp > 0,
                CACurrentMediaTime() - self.voFocusLostTimestamp < 0.5,
                abs(focusedLocalIndex - lastLocalIndex) > 2 {
-                // **Experiment:** suppress the `.layoutChanged` post we used
-                // to do here. Posting it with the previously-focused bubble
-                // as argument turned out to be coincident with a large jump
-                // in `contentOffsetY` (~+1000pt) and a wholesale re-layout
-                // of materialised items (li=0 changed height 289→326, span
-                // Δ 7922→9784). Hypothesis: iOS treats the post as a
-                // structural-layout signal and triggers a layout pass that
-                // shifts the scroll anchor. Skip the post for this run and
-                // see whether the offset jump persists; if it does, the
-                // cause is elsewhere (the redirect is innocent), if it
-                // disappears we've found it. Either way we still consume
-                // the bogus focus event (return) so the cursor logger
-                // doesn't sing about the fly-away.
-                _ = lastLocalIndex
-                print("[VO-CHAT] fly-away-suppress (no-redirect) from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
+                // Fly-away → redirect to the user's *intended* next target.
+                //
+                // After `edge-extend-scroll` brings the next adjacent
+                // bubble into view, VoiceOver still tends to lose anchor
+                // because iOS's UIKit-level accessibility auto-scroll
+                // chases the off-screen real bounds of whichever bubble
+                // was momentarily focused (the subclass-veto blocks
+                // ListView's own scroll, but iOS's `_accessibilityScroll`
+                // is below us in the stack and fires regardless). The
+                // result is that the cursor ends up far from where the
+                // user was going.
+                //
+                // Direction heuristic: in chat history the user almost
+                // always swipes toward older messages (decreasing
+                // localIndex in this rotated layout), so target =
+                // `lastLocalIndex - 1`. If that index is in the post-
+                // scroll array and materialised, the `.layoutChanged`
+                // post pulls VoiceOver onto it; otherwise we fall back
+                // to redirecting to the last live focus to at least keep
+                // the cursor in a meaningful place.
+                let intendedTarget = lastLocalIndex - 1
+                let redirectView: UIView?
+                let redirectTargetLi: Int
+                if intendedTarget >= 0,
+                   let view = self.voBubbleView(forLocalIndex: intendedTarget) {
+                    redirectView = view
+                    redirectTargetLi = intendedTarget
+                } else if let view = self.voBubbleView(forLocalIndex: lastLocalIndex) {
+                    redirectView = view
+                    redirectTargetLi = lastLocalIndex
+                } else {
+                    redirectView = nil
+                    redirectTargetLi = -1
+                }
+                print("[VO-CHAT] fly-away-redirect from-li=\(focusedLocalIndex) -> intended-li=\(redirectTargetLi) (lastLive=\(lastLocalIndex))")
                 self.voFocusLostTimestamp = 0
                 self.lastFocusedElementIdentity = nil
+                if let redirectView {
+                    UIAccessibility.post(notification: .layoutChanged, argument: redirectView)
+                }
                 return
             }
 
