@@ -671,16 +671,15 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private var voLastFocusedItemLocalIndex: Int?
     private var voFocusLostTimestamp: CFTimeInterval = 0
     private var voLastEdgeScrollTimestamp: CFTimeInterval = 0
-    // When we restore focus onto the intended-next bubble after an
-    // edge-extend scroll, that bubble is — by construction — the new
-    // visible-range edge. The focus event that arrives for our own
-    // restored cursor would re-trigger the A-check immediately, causing
-    // a runaway auto-scroll cascade (cursor races through messages
-    // without any user input). Stamping this timestamp in the restore
-    // completion and skipping the A-check while it's recent breaks the
-    // loop; a real user swipe after the window expires re-arms the
-    // edge-extend.
-    private var voLastRestoreFocusTimestamp: CFTimeInterval = 0
+    // Anchor we're expecting iOS to deliver focus to after our most
+    // recent restore-focus post. While the cursor sits on this exact
+    // localIndex, A-check is suppressed — the focus event we get is
+    // *our own restore arriving*, not a fresh user swipe, so triggering
+    // another edge-extend would just chain into a runaway auto-scroll
+    // (cursor races through messages with no input). As soon as the
+    // user actually moves to a different bubble, the anchor clears and
+    // A-check re-arms.
+    private var voPendingRestoreAnchorLi: Int?
 
     // Tracks message bubbles we *promoted* to a single accessibility leaf
     // (via `isAccessibilityElement = true`) while VoiceOver is active —
@@ -2704,18 +2703,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // Debounce 0.2s keeps repeated focus events at the same edge
             // from queueing multiple scroll transactions on top of one
             // another.
-            // Cascade guard. Skip the A-check briefly after our own
-            // restore-focus post — the focus event we get for our anchor
-            // is, by construction, at the new visible-range edge, and
-            // would otherwise immediately re-trigger another edge-extend
-            // (cursor runs through messages on its own with no user
-            // input). A real user swipe after the window expires re-arms.
-            let postRestoreWindow: CFTimeInterval = 0.6
-            let inPostRestoreWindow = CACurrentMediaTime() - self.voLastRestoreFocusTimestamp < postRestoreWindow
-            if inPostRestoreWindow {
-                print("[VO-CHAT] edge-extend-suppress reason=post-restore-window li=\(focusedLocalIndex ?? -1)")
+            // Cascade guard: identity-based, not time-based. While the
+            // cursor is *exactly* on the anchor we restored to after
+            // the last edge-extend scroll, suppress further A-check —
+            // the focus event we just got is our own restore arriving,
+            // not a fresh user gesture, and re-triggering edge-extend
+            // would chain into a runaway auto-scroll. As soon as the
+            // cursor moves to any other localIndex (= real user swipe),
+            // clear the anchor and re-arm the A-check.
+            var onPendingRestoreAnchor = false
+            if let pending = self.voPendingRestoreAnchorLi {
+                if pending == focusedLocalIndex {
+                    onPendingRestoreAnchor = true
+                    print("[VO-CHAT] edge-extend-suppress reason=on-restore-anchor li=\(pending)")
+                } else {
+                    self.voPendingRestoreAnchorLi = nil
+                }
             }
-            if !inPostRestoreWindow,
+            if !onPendingRestoreAnchor,
                let focusedLocalIndex,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
@@ -2973,7 +2978,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                         return
                     }
                     print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
-                    self.voLastRestoreFocusTimestamp = CACurrentMediaTime()
+                    self.voPendingRestoreAnchorLi = anchor
                     UIAccessibility.post(notification: .layoutChanged, argument: anchorView)
                 }
             }
