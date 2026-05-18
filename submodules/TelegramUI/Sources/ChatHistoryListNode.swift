@@ -2954,33 +2954,31 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             completion: { [weak self] _ in
                 // After the scroll settles, explicitly anchor VoiceOver
                 // focus back onto the bubble the user was on. Without
-                // this iOS's auto-scroll-on-focus-loss runs in parallel
-                // with our scroll, and the cursor often ends up one
-                // bubble *off* from where the user was (li=46 instead
-                // of the expected li=45 when the user was at li=45).
-                // The `.layoutChanged` post pulls focus back onto the
-                // anchor view, giving the user a clean "you're still
-                // where you were, the list just slid to expose the
-                // next item" experience.
+                // this iOS settles focus on whatever bubble it picked
+                // during the scroll's parallel focus-loss reshuffle,
+                // typically *not* the bubble we intend.
                 //
-                // Defer one runloop tick. Posting synchronously in the
-                // completion block races with iOS's parallel
-                // accessibility-state updates triggered by the same
-                // scroll transaction — the post often arrives while
-                // VoiceOver is still busy losing/recovering focus from
-                // the previous frame, and gets dropped. One async hop
-                // lets the surrounding focus events settle before we
-                // try to redirect.
-                guard let self, let anchor = anchorLocalIndex else { return }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self,
-                          let anchorView = self.voBubbleView(forLocalIndex: anchor) else {
-                        return
-                    }
-                    print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
-                    self.voPendingRestoreAnchorLi = anchor
-                    UIAccessibility.post(notification: .layoutChanged, argument: anchorView)
+                // Synchronous post (no `DispatchQueue.main.async`):
+                // empirically, deferring the post by even one runloop
+                // tick lets iOS settle focus on a "wrong" visible bubble
+                // first (observed: cursor on li=46 when we wanted li=44).
+                // Posting straight from the completion block gets us in
+                // before iOS's recovery picks its own target.
+                //
+                // `.screenChanged` (not `.layoutChanged`): the former is
+                // the stronger signal — iOS treats it as "the entire
+                // accessible content of the screen has changed, re-focus
+                // on this element." `.layoutChanged` is advisory and
+                // sometimes ignored when iOS thinks its own focus pick
+                // is fine; `.screenChanged` overrides that.
+                guard let self,
+                      let anchor = anchorLocalIndex,
+                      let anchorView = self.voBubbleView(forLocalIndex: anchor) else {
+                    return
                 }
+                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
+                self.voPendingRestoreAnchorLi = anchor
+                UIAccessibility.post(notification: .screenChanged, argument: anchorView)
             }
         )
     }
