@@ -2906,13 +2906,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 // anchor view, giving the user a clean "you're still
                 // where you were, the list just slid to expose the
                 // next item" experience.
-                guard let self,
-                      let anchor = anchorLocalIndex,
-                      let anchorView = self.voBubbleView(forLocalIndex: anchor) else {
-                    return
+                //
+                // Defer one runloop tick. Posting synchronously in the
+                // completion block races with iOS's parallel
+                // accessibility-state updates triggered by the same
+                // scroll transaction — the post often arrives while
+                // VoiceOver is still busy losing/recovering focus from
+                // the previous frame, and gets dropped. One async hop
+                // lets the surrounding focus events settle before we
+                // try to redirect.
+                guard let self, let anchor = anchorLocalIndex else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          let anchorView = self.voBubbleView(forLocalIndex: anchor) else {
+                        return
+                    }
+                    print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
+                    UIAccessibility.post(notification: .layoutChanged, argument: anchorView)
                 }
-                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
-                UIAccessibility.post(notification: .layoutChanged, argument: anchorView)
             }
         )
     }
@@ -2933,7 +2944,23 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         guard let lastKnown = self.voLastFocusedItemLocalIndex else {
             return true
         }
-        let maxJump = 5
+        // Tight threshold (≤2). The off-screen-uiview path is for
+        // legitimately-adjacent neighbours that just became focusable
+        // after a scroll; any scroll request to a target several items
+        // away from the user's live focus is almost always VoiceOver's
+        // fallback-fascination on a far _ASDisplayView, not real
+        // navigation intent. Vetoing those keeps the list from being
+        // dragged to a position that's neither where the user was nor
+        // where they were going.
+        //
+        // Path that uses this veto: ListView.handleSystemAccessibility
+        // FocusNotification's off-screen-uiview branch. Rotor and
+        // edge-extend-scroll go through their own paths (rotor calls
+        // base `scrollVoiceOverFocusToItem` directly; edge-extend goes
+        // through `voForceScrollToItem` which gates via the same
+        // method but only ever targets `lastKnown ± 1`, well under the
+        // threshold).
+        let maxJump = 2
         if abs(localIndex - lastKnown) > maxJump {
             return false
         }
