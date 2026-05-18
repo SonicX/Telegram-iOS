@@ -2256,16 +2256,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // promotes the next-closest off-screen item into a
             // neighbour slot — the user advances one step per swipe
             // continuously).
-            // Synthetic neighbours per side. More = more swipes the user
-            // can take inside the bounded window before hitting the edge
-            // (and the cascade-prone fly-away that follows). A previous
-            // iteration kept this at N=1 because VoiceOver was picking
-            // the wrong neighbour (the "jump 2-3 messages" bug), but
-            // that was rooted in the rotation-inverted prefix/suffix
-            // selection that has since been fixed. With the closest
-            // neighbours correctly identified, larger N stays consistent.
-            // 5 gives ~10 swipes per window before the edge.
-            let kSynthNeighbours = 5
+            // 1 synthetic neighbour per side. Larger N gives more swipes
+            // per window before reaching an edge, but it also gives
+            // VoiceOver more "fallback" slots to land on when it loses
+            // focus during a swipe transition — and even with a wider
+            // stagger between slots, VO occasionally picks the *farthest*
+            // below-neighbour as fallback (observed: cursor at li=44 →
+            // VO falls back to li=39, the bottom of a 5-slot stack).
+            // With N=1 there's exactly one fallback target, no ambiguity.
+            // Trade-off: edge-extend fires more often (every ~6 swipes
+            // instead of every ~10), but each scroll is small and the
+            // fly-away amplitude (when it happens) is bounded to ±1.
+            let kSynthNeighbours = 1
 
             let visibleItems = collected.filter { $0.isVisible }
             // Compute the visible band extent from the **clipped**
@@ -3015,23 +3017,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         guard let lastKnown = self.voLastFocusedItemLocalIndex else {
             return true
         }
-        // Tight threshold (≤2). The off-screen-uiview path is for
-        // legitimately-adjacent neighbours that just became focusable
-        // after a scroll; any scroll request to a target several items
-        // away from the user's live focus is almost always VoiceOver's
-        // fallback-fascination on a far _ASDisplayView, not real
-        // navigation intent. Vetoing those keeps the list from being
-        // dragged to a position that's neither where the user was nor
-        // where they were going.
+        // Tight threshold (≤1). With kSynthNeighbours=1 the only
+        // legitimate off-screen-uiview-handler target is the immediate
+        // ±1 neighbour. Any scroll request to a target further away is
+        // almost always VoiceOver's fallback-fascination on a stale
+        // _ASDisplayView, not real navigation intent.
         //
-        // Path that uses this veto: ListView.handleSystemAccessibility
-        // FocusNotification's off-screen-uiview branch. Rotor and
-        // edge-extend-scroll go through their own paths (rotor calls
-        // base `scrollVoiceOverFocusToItem` directly; edge-extend goes
-        // through `voForceScrollToItem` which gates via the same
-        // method but only ever targets `lastKnown ± 1`, well under the
-        // threshold).
-        let maxJump = 2
+        // edge-extend-scroll calls go through `voForceScrollToItem`
+        // which bypasses this veto entirely (kEdgeLead can target
+        // li±2 or more), so tightening here doesn't constrain our own
+        // intentional scrolls.
+        let maxJump = 1
         if abs(localIndex - lastKnown) > maxJump {
             return false
         }
