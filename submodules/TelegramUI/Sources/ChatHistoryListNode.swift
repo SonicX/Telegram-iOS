@@ -2247,13 +2247,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // promotes the next-closest off-screen item into a
             // neighbour slot — the user advances one step per swipe
             // continuously).
-            // Single synthetic neighbour per side: VoiceOver picks the
-            // closest spatial neighbour, and with N=1 that's
-            // unambiguously the array-adjacent off-screen bubble. With
-            // N=3 (the previous setting) VoiceOver sometimes picked
-            // the 2nd or 3rd slot, causing observable "jump 2-3
-            // messages" on a single swipe at the array edge.
-            let kSynthNeighbours = 1
+            // Synthetic neighbours per side. More = more swipes the user
+            // can take inside the bounded window before hitting the edge
+            // (and the cascade-prone fly-away that follows). A previous
+            // iteration kept this at N=1 because VoiceOver was picking
+            // the wrong neighbour (the "jump 2-3 messages" bug), but
+            // that was rooted in the rotation-inverted prefix/suffix
+            // selection that has since been fixed. With the closest
+            // neighbours correctly identified, larger N stays consistent.
+            // 5 gives ~10 swipes per window before the edge.
+            let kSynthNeighbours = 5
 
             let visibleItems = collected.filter { $0.isVisible }
             // Compute the visible band extent from the **clipped**
@@ -2618,46 +2621,23 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                self.voFocusLostTimestamp > 0,
                CACurrentMediaTime() - self.voFocusLostTimestamp < 0.5,
                abs(focusedLocalIndex - lastLocalIndex) > 2 {
-                // Fly-away → redirect to the user's *intended* next target.
-                //
-                // After `edge-extend-scroll` brings the next adjacent
-                // bubble into view, VoiceOver still tends to lose anchor
-                // because iOS's UIKit-level accessibility auto-scroll
-                // chases the off-screen real bounds of whichever bubble
-                // was momentarily focused (the subclass-veto blocks
-                // ListView's own scroll, but iOS's `_accessibilityScroll`
-                // is below us in the stack and fires regardless). The
-                // result is that the cursor ends up far from where the
-                // user was going.
-                //
-                // Direction heuristic: in chat history the user almost
-                // always swipes toward older messages (decreasing
-                // localIndex in this rotated layout), so target =
-                // `lastLocalIndex - 1`. If that index is in the post-
-                // scroll array and materialised, the `.layoutChanged`
-                // post pulls VoiceOver onto it; otherwise we fall back
-                // to redirecting to the last live focus to at least keep
-                // the cursor in a meaningful place.
-                let intendedTarget = lastLocalIndex - 1
-                let redirectView: UIView?
-                let redirectTargetLi: Int
-                if intendedTarget >= 0,
-                   let view = self.voBubbleView(forLocalIndex: intendedTarget) {
-                    redirectView = view
-                    redirectTargetLi = intendedTarget
-                } else if let view = self.voBubbleView(forLocalIndex: lastLocalIndex) {
-                    redirectView = view
-                    redirectTargetLi = lastLocalIndex
-                } else {
-                    redirectView = nil
-                    redirectTargetLi = -1
-                }
-                print("[VO-CHAT] fly-away-redirect from-li=\(focusedLocalIndex) -> intended-li=\(redirectTargetLi) (lastLive=\(lastLocalIndex))")
+                // Suppress only — do not `UIAccessibility.post(.layout
+                // Changed, …)`. Empirically the post is ineffective once
+                // iOS has auto-scrolled the list past the edge: the
+                // intended target (lastLocalIndex - 1) is no longer in
+                // the post-scroll bounded window (its accessibility view
+                // is `accessibilityElementsHidden = true`), so iOS
+                // silently ignores the redirect and the cursor settles
+                // on whatever VoiceOver picked anyway. The earlier
+                // bouncing-around behaviour we observed was the redirect
+                // *fighting* iOS without winning. The bigger
+                // `kSynthNeighbours` window above is the real countermeasure
+                // — more swipes per window before the edge, less frequent
+                // fly-aways. When one does still happen, swallow it
+                // quietly.
+                print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
                 self.voFocusLostTimestamp = 0
                 self.lastFocusedElementIdentity = nil
-                if let redirectView {
-                    UIAccessibility.post(notification: .layoutChanged, argument: redirectView)
-                }
                 return
             }
 
