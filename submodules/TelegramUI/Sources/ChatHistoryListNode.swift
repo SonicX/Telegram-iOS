@@ -2792,6 +2792,20 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 if let target = extendTarget, let next = intendedNext {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
                     print("[VO-CHAT] reactive-edge-extend left-from-li=\(lastLi) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
+                    // Pre-set the restore anchor *before* starting the
+                    // scroll. The transaction's completion block also sets
+                    // it, but iOS frequently delivers an intermediate
+                    // focus event (cursor briefly lands on a wrong bubble
+                    // during the scroll's reshuffle) *before* completion
+                    // fires — by that time `voPendingRestoreAnchorLi` is
+                    // still nil, the cascade-guard mismatch check finds
+                    // nothing to retry, and the wrong cursor is the
+                    // user-visible result. Setting the anchor up-front
+                    // lets the retry path inside `handleVoiceOverFocus
+                    // Changed`'s focused-branch fire on that intermediate
+                    // event and pull the cursor onto the right bubble.
+                    self.voPendingRestoreAnchorLi = next
+                    self.voPendingRestoreRetried = false
                     self.voForceScrollToItem(at: target, restoreFocusOn: next)
                 }
             }
