@@ -2868,9 +2868,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             return
         }
         print("[VO-CHAT] force-scroll-transaction li=\(localIndex)")
+        // `.visible` scrolls just enough to bring the target into the
+        // viewport without disrupting items that are already on-screen.
+        // We need a *minimal* shift here so the user's current live
+        // focus (the visible-edge bubble that triggered the edge-extend)
+        // stays roughly in place — `.center(.bottom)` was too aggressive
+        // and pushed the focused bubble off-screen, causing VoiceOver
+        // to lose anchor and re-pick a far-away item.
         let scrollToItem = ListViewScrollToItem(
             index: localIndex,
-            position: .center(.bottom),
+            position: .visible,
             animated: false,
             curve: .Default(duration: nil),
             directionHint: .Down
