@@ -2703,7 +2703,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 if let target = extendTarget {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
                     print("[VO-CHAT] edge-extend-scroll focusedLi=\(focusedLocalIndex) visible=\(visibleRange.top)..\(visibleRange.bottom) -> li=\(target)")
-                    self.scrollVoiceOverFocusToItem(at: target)
+                    self.voForceScrollToItem(at: target)
                 }
             }
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
@@ -2845,6 +2845,48 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         guard let localIndex = matchedLocalIndex else { return nil }
         guard let info = provider([localIndex]) else { return nil }
         return (position: info.first, total: info.total)
+    }
+
+    /// Force-scroll the list to bring an item into view, bypassing the
+    /// geometric `alreadyOnScreen` short-circuit in the base
+    /// `scrollVoiceOverFocusToItem`. The base implementation tests
+    /// `itemNode.frame.intersection(...)` in ListView's local space — that
+    /// works for an unrotated chat list, but in this rotated history list
+    /// the local-space coordinates don't line up with screen visibility,
+    /// so a fully off-screen bubble can look "already on screen" and the
+    /// scroll silently becomes a no-op.
+    ///
+    /// Used by the edge-extend path in `handleVoiceOverFocusChanged` to
+    /// pull the next adjacent bubble into the viewport when the user's
+    /// focus reaches the visible edge of the bounded sliding window.
+    /// `accessibilityShouldAllowScrollToItem(at:)` still gates the call so
+    /// a stray request to a far-away `localIndex` doesn't drag the list
+    /// to the wrong end of the buffer.
+    private func voForceScrollToItem(at localIndex: Int) {
+        guard self.accessibilityShouldAllowScrollToItem(at: localIndex) else {
+            print("[VO-CHAT] force-scroll-veto li=\(localIndex)")
+            return
+        }
+        print("[VO-CHAT] force-scroll-transaction li=\(localIndex)")
+        let scrollToItem = ListViewScrollToItem(
+            index: localIndex,
+            position: .center(.bottom),
+            animated: false,
+            curve: .Default(duration: nil),
+            directionHint: .Down
+        )
+        self.transaction(
+            deleteIndices: [],
+            insertIndicesAndItems: [],
+            updateIndicesAndItems: [],
+            options: ListViewDeleteAndInsertOptions(),
+            scrollToItem: scrollToItem,
+            additionalScrollDistance: 0.0,
+            updateSizeAndInsets: nil,
+            stationaryItemRange: nil,
+            updateOpaqueState: nil,
+            completion: { _ in }
+        )
     }
 
     /// Veto bogus scroll-to-uiview triggered from
