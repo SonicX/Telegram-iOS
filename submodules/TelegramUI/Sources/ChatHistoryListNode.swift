@@ -680,6 +680,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     // user actually moves to a different bubble, the anchor clears and
     // A-check re-arms.
     private var voPendingRestoreAnchorLi: Int?
+    private var voPendingRestoreRetried: Bool = false
 
     // Tracks message bubbles we *promoted* to a single accessibility leaf
     // (via `isAccessibilityElement = true`) while VoiceOver is active —
@@ -2730,6 +2731,30 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // swipe past the edge — and only then do we scroll. Keeps
             // us from triggering scrolls the user didn't actually want.
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
+
+            // Restore-focus retry. If we just posted a `.screenChanged`
+            // for an anchor view but iOS settled focus elsewhere (e.g.
+            // on a closer-to-old-focus visible bubble), try one more
+            // post. Single retry — beyond that we accept whatever
+            // VoiceOver chose, to avoid spinning forever if iOS just
+            // refuses our suggestion.
+            if let pending = self.voPendingRestoreAnchorLi {
+                if pending == focusedLocalIndex {
+                    self.voPendingRestoreAnchorLi = nil
+                    self.voPendingRestoreRetried = false
+                } else if !self.voPendingRestoreRetried,
+                          let pendingNode = self.voItemNode(forLocalIndex: pending) {
+                    self.voPendingRestoreRetried = true
+                    pendingNode.isAccessibilityElement = true
+                    pendingNode.view.accessibilityElementsHidden = false
+                    pendingNode.view.isAccessibilityElement = true
+                    print("[VO-CHAT] force-scroll-restore-focus-retry li=\(pending) (current=\(focusedLocalIndex ?? -1))")
+                    UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
+                } else {
+                    self.voPendingRestoreAnchorLi = nil
+                    self.voPendingRestoreRetried = false
+                }
+            }
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
             // Mark when focus left the list so the B-path above can
@@ -2997,6 +3022,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 anchorNode.view.isAccessibilityElement = true
                 print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
                 self.voPendingRestoreAnchorLi = anchor
+                self.voPendingRestoreRetried = false
                 UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
             }
         )
