@@ -2701,7 +2701,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                let lastLocalIndex = self.voLastFocusedItemLocalIndex,
                self.voFocusLostTimestamp > 0,
                CACurrentMediaTime() - self.voFocusLostTimestamp < 0.5,
-               abs(focusedLocalIndex - lastLocalIndex) > 2 {
+               abs(focusedLocalIndex - lastLocalIndex) > 2,
+               // **Don't suppress our own restore-arrival.** When
+               // `force-scroll-restore-focus-retry` posts `.screenChanged`
+               // on the anchor, iOS first fires a `focus-left-list` event
+               // (resetting `voFocusLostTimestamp`), then delivers the
+               // focus arrival on the anchor. The distance between the
+               // wrong-pick `lastLocalIndex` (e.g. li=48) and our anchor
+               // (li=45) is naturally >2 — exactly the fly-away pattern.
+               // But this *is* the recovery we asked for, not iOS's
+               // mistaken pick.  Suppressing it leaves
+               // `lastFocusedElementIdentity = nil`; iOS, getting no
+               // acknowledgement, drifts focus to the navbar
+               // (`ChatTitleView`, `NavigationButtonItemNode`) — visible
+               // as the "залипание" the user reported.  Exempting the
+               // pending-anchor lets our own retry land cleanly and
+               // proceed through the normal cursor-log + restore-clear
+               // path below.
+               self.voPendingRestoreAnchorLi != focusedLocalIndex {
                 // Suppress only — do not `UIAccessibility.post(.layout
                 // Changed, …)`. Empirically the post is ineffective once
                 // iOS has auto-scrolled the list past the edge: the
