@@ -3185,20 +3185,27 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     /// Used by the edge-extend path in `handleVoiceOverFocusChanged` to
     /// pull the next adjacent bubble into the viewport when the user's
     /// focus reaches the visible edge of the bounded sliding window.
-    /// Proactive direct-delta scroll: shift contentOffset by an
-    /// explicit points delta using `additionalScrollDistance`. Unlike
-    /// `voForceScrollToItem(at:restoreFocusOn:)` (which calls
-    /// `transaction(scrollToItem:)` with a `ListViewScrollPosition`
-    /// that triggers ListView's "is the target already visible?"
-    /// heuristic), this method scrolls by the exact distance we ask
-    /// for. Used by the proactive edge-extend path when the cursor
-    /// approaches the visible-window edge in the direction of motion.
+    /// Proactive direct-delta scroll: shift `scroller.contentOffset.y`
+    /// by an explicit points delta. We bypass
+    /// `transaction(scrollToItem:)` entirely because its
+    /// `ListViewScrollPosition`-based path runs heuristics ("is target
+    /// already visible?") that misfire for mixed-height content.
+    /// `additionalScrollDistance` parameter of `transaction` is also
+    /// useless here: ListView only applies it inside the
+    /// `updateSizeAndInsets`-driven `offsetFix` branch
+    /// (`ListView.swift:3387`), and we pass `updateSizeAndInsets: nil`,
+    /// so it gets silently dropped.
     ///
-    /// The cursor's bubble (`anchorLi`) does not move with the
-    /// viewport — we pin focus on it via pre-post `.screenChanged`,
-    /// narrow-window, modal flag, and a completion-post on the same
-    /// view. From the user's perspective the list slides under their
-    /// finger by half a screen, the cursor stays on the same message.
+    /// Going through the underlying `UIScrollView` (`self.scroller`)
+    /// is the most direct: `setContentOffset(_:animated:false)` moves
+    /// the scroll view immediately, ListView's `scrollViewDidScroll`
+    /// delegate picks up the change and reflows items accordingly. No
+    /// heuristics, no can-be-ignored knobs — just "shift by N points".
+    ///
+    /// The cursor's bubble (`anchorLi`) is pinned in place via
+    /// pre-post `.screenChanged` + narrow-window + modal flag +
+    /// completion-post on the same view, identical to the reactive
+    /// `voForceScrollToItem(at:restoreFocusOn:)` path.
     private func voProactiveScrollByDelta(delta: CGFloat, restoreFocusOn anchorLi: Int) {
         guard let anchorNode = self.voItemNode(forLocalIndex: anchorLi) else {
             return
@@ -3210,40 +3217,35 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.voPendingRestoreAnchorLi = anchorLi
         self.voPendingRestoreRetried = false
         self.voScrollWindowAnchorLi = anchorLi
-        print("[VO-CHAT] proactive-pre-post li=\(anchorLi) narrow-window=on modal=on")
+        let oldOffset = self.scroller.contentOffset.y
+        print("[VO-CHAT] proactive-pre-post li=\(anchorLi) narrow-window=on modal=on contentOffsetY=\(Int(oldOffset))")
         UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
-        self.transaction(
-            deleteIndices: [],
-            insertIndicesAndItems: [],
-            updateIndicesAndItems: [],
-            options: ListViewDeleteAndInsertOptions(),
-            scrollToItem: nil,
-            additionalScrollDistance: delta,
-            updateSizeAndInsets: nil,
-            stationaryItemRange: nil,
-            updateOpaqueState: nil,
-            completion: { [weak self] _ in
-                guard let self,
-                      let anchorNode = self.voItemNode(forLocalIndex: anchorLi) else {
-                    return
-                }
-                anchorNode.isAccessibilityElement = true
-                anchorNode.view.accessibilityElementsHidden = false
-                anchorNode.view.isAccessibilityElement = true
-                self.voScrollWindowAnchorLi = nil
-                self.voPendingRestoreAnchorLi = anchorLi
-                self.voPendingRestoreRetried = false
-                print("[VO-CHAT] proactive-restore-focus li=\(anchorLi) narrow-window=off")
-                UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    if self.voScrollWindowAnchorLi == nil {
-                        self.view.accessibilityViewIsModal = false
-                        print("[VO-CHAT] proactive-release-modal")
-                    }
-                }
+        // **Direct scroller manipulation.** No transaction()
+        // heuristics, no maybe-applied additionalScrollDistance.
+        // Just set contentOffset.y and let ListView's delegate
+        // catch up.
+        let newOffset = oldOffset + delta
+        self.scroller.setContentOffset(CGPoint(x: 0.0, y: newOffset), animated: false)
+        print("[VO-CHAT] proactive-scroll-applied delta=\(Int(delta))pt offset=\(Int(oldOffset))->\(Int(newOffset))")
+        // Re-post focus on anchor + clean up modal/narrow-window
+        // state. Synchronous because `setContentOffset(animated:false)`
+        // is sync — the visible items have already updated by the time
+        // we get here.
+        anchorNode.isAccessibilityElement = true
+        anchorNode.view.accessibilityElementsHidden = false
+        anchorNode.view.isAccessibilityElement = true
+        self.voScrollWindowAnchorLi = nil
+        self.voPendingRestoreAnchorLi = anchorLi
+        self.voPendingRestoreRetried = false
+        print("[VO-CHAT] proactive-restore-focus li=\(anchorLi) narrow-window=off")
+        UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.voScrollWindowAnchorLi == nil {
+                self.view.accessibilityViewIsModal = false
+                print("[VO-CHAT] proactive-release-modal")
             }
-        )
+        }
     }
 
     /// `accessibilityShouldAllowScrollToItem(at:)` still gates the call so
