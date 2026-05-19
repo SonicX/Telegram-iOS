@@ -3210,16 +3210,36 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on modal=on")
             UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
         }
-        // `.visible` scrolls just enough to bring the target into the
-        // viewport without disrupting items that are already on-screen.
-        // We need a *minimal* shift here so the user's current live
-        // focus (the visible-edge bubble that triggered the edge-extend)
-        // stays roughly in place — `.center(.bottom)` was too aggressive
-        // and pushed the focused bubble off-screen, causing VoiceOver
-        // to lose anchor and re-pick a far-away item.
+        // `.center(.center)` puts the target into the middle of the
+        // viewport, guaranteeing a substantial contentOffset shift.
+        //
+        // Earlier we used `.visible` for minimal disruption, but it
+        // turns out to be unreliable in the presence of mixed-height
+        // items (chat history with photos/videos, or with reply
+        // headers / unread dividers): `.visible` does a "is the
+        // target's frame already partially intersecting the viewport?"
+        // check, and if yes, it does no scroll at all. With per-item
+        // visibility threshold of 44pt + larger items mixed in, a
+        // tiny intersection counts as "already visible" while the
+        // restore target on the other side of that big item never
+        // crosses the 44pt threshold. Result: contentOffset barely
+        // moves, visible window doesn't shift, restore target stays
+        // hidden, retry fires, reactive-edge-extend re-triggers from
+        // the same `lastLi` → infinite loop ("курсор улетает", the
+        // user gets stuck cycling on a single message).
+        //
+        // `.center(.bottom)` was once tried and rejected as "too
+        // aggressive" — it pushed the focused bubble off-screen.
+        // `.center(.top)` uses the opposite overflow direction: when
+        // the target is taller than the viewport, the *top* of the
+        // target aligns with the viewport top (not bottom), which in
+        // our rotated chat history layout means the target's content
+        // appears toward where the user's focus was advancing —
+        // hopefully bringing the restore-target into the visible
+        // band without ejecting the cursor's anchor.
         let scrollToItem = ListViewScrollToItem(
             index: localIndex,
-            position: .visible,
+            position: .center(.top),
             animated: false,
             curve: .Default(duration: nil),
             directionHint: .Down
