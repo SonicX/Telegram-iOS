@@ -2719,21 +2719,43 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                // proceed through the normal cursor-log + restore-clear
                // path below.
                self.voPendingRestoreAnchorLi != focusedLocalIndex {
-                // Suppress only — do not `UIAccessibility.post(.layout
-                // Changed, …)`. Empirically the post is ineffective once
-                // iOS has auto-scrolled the list past the edge: the
-                // intended target (lastLocalIndex - 1) is no longer in
-                // the post-scroll bounded window (its accessibility view
-                // is `accessibilityElementsHidden = true`), so iOS
-                // silently ignores the redirect and the cursor settles
-                // on whatever VoiceOver picked anyway. The earlier
-                // bouncing-around behaviour we observed was the redirect
-                // *fighting* iOS without winning. The bigger
-                // `kSynthNeighbours` window above is the real countermeasure
-                // — more swipes per window before the edge, less frequent
-                // fly-aways. When one does still happen, swallow it
-                // quietly.
-                print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
+                // **If we have a pending restore anchor, force-redirect
+                // to it immediately.** Without this push, iOS sits on
+                // the fly-away target (e.g. li=52 when user expected
+                // li=44) until its own recovery tick eventually drifts
+                // closer to the anchor — meanwhile the user hears a
+                // sequence of wrong bubbles ("Ринат … Ринат … Ринат")
+                // and has to "повторить прямой свайп" to push the
+                // navigation forward.
+                //
+                // The pending anchor is a now-visible item we just
+                // force-scrolled to expose, so its accessibility view
+                // is promoted (`isAccessibilityElement = true`,
+                // `accessibilityElementsHidden = false`) and the
+                // `.screenChanged` post is honoured. Re-promote on this
+                // path too in case anything stomped on those flags
+                // between the original force-scroll completion and the
+                // fly-away delivery.
+                //
+                // We use the same single-retry budget as the regular
+                // retry path (`voPendingRestoreRetried`) so a stubborn
+                // anchor doesn't loop forever. After this push, the
+                // next focus event (from iOS settling on the anchor)
+                // flows through the normal cursor-log + restore-clear
+                // path because `voPendingRestoreAnchorLi == focused
+                // LocalIndex` falls into the early-exempt branch above.
+                if let pending = self.voPendingRestoreAnchorLi,
+                   !self.voPendingRestoreRetried,
+                   let pendingNode = self.voItemNode(forLocalIndex: pending) {
+                    self.voPendingRestoreRetried = true
+                    pendingNode.isAccessibilityElement = true
+                    pendingNode.view.accessibilityElementsHidden = false
+                    pendingNode.view.isAccessibilityElement = true
+                    print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex), retry-anchor li=\(pending)")
+                    UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
+                } else {
+                    print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
+                }
                 self.voFocusLostTimestamp = 0
                 self.lastFocusedElementIdentity = nil
                 return
