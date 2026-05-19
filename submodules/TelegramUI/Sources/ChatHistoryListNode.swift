@@ -2822,6 +2822,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // *that* is the unambiguous signal that the user tried to
             // swipe past the edge — and only then do we scroll. Keeps
             // us from triggering scrolls the user didn't actually want.
+            // Capture the previous focused li *before* updating. The
+            // proactive-edge-extend block below uses this to detect
+            // user's direction of motion. Using `unfocusedPosition` from
+            // the notification doesn't work in practice: iOS frequently
+            // fires an intermediate `focused == nil` event between two
+            // bubble focus events, so when the second bubble arrives
+            // its `unfocusedPosition` is nil (the previous step lost
+            // focus to outside). `voLastFocusedItemLocalIndex` persists
+            // across those nil events and gives us a reliable
+            // before-vs-after reference.
+            let voPriorFocusedLi = self.voLastFocusedItemLocalIndex
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
 
             // Restore-focus retry. If we just posted a `.screenChanged`
@@ -2851,13 +2862,11 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // **Proactive edge-extend.** Don't wait for the cursor to
             // hit the very edge of the visible window (the "reactive"
             // path below, in the focus-LEFT branch). When the cursor
-            // arrives in the *last quartile* of the window in the
-            // direction of motion (≤25% of positions remaining before
-            // that edge), scroll by half a window *while keeping focus
-            // on the current bubble*. The user keeps their cursor on
-            // the same message, the list slides under it so they have
-            // ~50% of the window's worth of bubbles ahead before
-            // another scroll is needed.
+            // is *near* the edge in the direction of motion, scroll by
+            // half a window *while keeping focus on the current bubble*.
+            // The user keeps their cursor on the same message, the list
+            // slides under it so they have ~50% of the window's worth
+            // of bubbles ahead before another scroll is needed.
             //
             // Why this is better than purely-reactive: reactive scroll
             // triggers AFTER focus-loss, which is the brief audible
@@ -2866,20 +2875,28 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // never lets the cursor leave the array in the first place —
             // it pre-emptively makes room.
             //
-            // Critical: **only trigger in the direction of motion**.
-            // Direction is computed from `unfocusedPosition` (prior
-            // array position) vs `focusedPosition` (current).
-            // - `focusedPos > priorPos`: user swiped forward in the
-            //   (reversed-order) array → moving toward smaller `localIndex`
-            //   → extend toward the smaller-li edge.
-            // - `focusedPos < priorPos`: user swiped backward → moving
-            //   toward larger `localIndex` → extend toward the larger-li
-            //   edge.
-            // - `unfocusedPosition == nil`: cursor entered the list
-            //   from outside (system nav, app launch). Direction is
-            //   unknown. Skip — earlier we mis-triggered on entry,
-            //   scrolling AWAY from the user's eventual motion, which
-            //   the user reported as "стало сильно хуже".
+            // Direction detection via `voPriorFocusedLi` (captured just
+            // before we updated `voLastFocusedItemLocalIndex`), NOT via
+            // `unfocusedPosition`. In practice iOS routinely fires an
+            // intermediate `focused == nil` event between two bubble
+            // focus events, so `unfocusedPosition` is nil for every
+            // arrival (the "prev=outside" in our cursor log). Using
+            // it as a direction source skipped every event and the
+            // proactive scroll never fired. `voPriorFocusedLi` persists
+            // through nil events and gives us a reliable
+            // before-vs-after pair.
+            //
+            // Trigger threshold = `distance < 3`: fire as soon as the
+            // user is within 2 positions of the edge, so the scroll
+            // happens **one swipe earlier** than it otherwise would —
+            // the next swipe lands the cursor in the middle of a new
+            // window instead of pushing off the edge into the brief
+            // navbar-transit / fly-away territory that the user kept
+            // perceiving as "залипание". Constant 3 (not a percentage
+            // of windowSize) because the navbar-transit risk doesn't
+            // scale with window size; it's a fixed structural hazard
+            // at the array edge regardless of how many items the array
+            // contains.
             //
             // Guards:
             // - `voPendingRestoreAnchorLi == nil`: don't double-fire if
@@ -2890,33 +2907,33 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // - 0.2s debounce: same as reactive.
             if self.voPendingRestoreAnchorLi == nil,
                let focusedLi = focusedLocalIndex,
-               let priorPos = unfocusedPosition,
-               focusedPosition != priorPos,
+               let priorLi = voPriorFocusedLi,
+               focusedLi != priorLi,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
                 let windowSize = visibleRange.bottom - visibleRange.top + 1
                 if windowSize >= 4 {
-                    let quartile = max(1, windowSize / 4)
+                    let triggerDistance = 3  // fire one swipe earlier
                     let halfWindow = max(2, windowSize / 2)
                     var extendTarget: Int?
-                    if focusedPosition > priorPos {
-                        // Moving forward in array = toward smaller li.
-                        // Only trigger if approaching the smaller-li edge.
+                    if focusedLi < priorLi {
+                        // Moving toward smaller li (forward in reversed
+                        // array — newer-to-older direction).
                         let distanceToTop = focusedLi - visibleRange.top
-                        if distanceToTop < quartile, focusedLi > 0 {
+                        if distanceToTop < triggerDistance, focusedLi > 0 {
                             extendTarget = max(0, focusedLi - halfWindow)
                         }
                     } else {
-                        // Moving backward in array = toward larger li.
-                        // Only trigger if approaching the larger-li edge.
+                        // Moving toward larger li (backward through
+                        // history).
                         let distanceToBottom = visibleRange.bottom - focusedLi
-                        if distanceToBottom < quartile {
+                        if distanceToBottom < triggerDistance {
                             extendTarget = focusedLi + halfWindow
                         }
                     }
                     if let target = extendTarget, target != focusedLi {
                         self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                        print("[VO-CHAT] proactive-edge-extend at-li=\(focusedLi) priorPos=\(priorPos) focusedPos=\(focusedPosition) visible=\(visibleRange.top)..\(visibleRange.bottom) windowSize=\(windowSize) quartile=\(quartile) -> scroll-li=\(target) restore-li=\(focusedLi)")
+                        print("[VO-CHAT] proactive-edge-extend at-li=\(focusedLi) priorLi=\(priorLi) visible=\(visibleRange.top)..\(visibleRange.bottom) windowSize=\(windowSize) triggerDistance=\(triggerDistance) -> scroll-li=\(target) restore-li=\(focusedLi)")
                         // restore-on the *current* focused bubble — the
                         // user's cursor doesn't move, only the viewport
                         // beneath it.
