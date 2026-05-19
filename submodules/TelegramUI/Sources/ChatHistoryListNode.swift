@@ -2905,15 +2905,37 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             //   (1-2 items, e.g. photo/video bubbles that fill the
             //   screen). Reactive handles it.
             // - 0.2s debounce: same as reactive.
+            // **Anti-cascade guards** (learned from the previous version
+            // misfiring on every single focus event):
+            //
+            // - `abs(focusedLi - priorLi) == 1`: only react to real
+            //   single-step user swipes. iOS routinely fires "jiggle"
+            //   focus events with localIndex jumps of 3-5 positions
+            //   (fly-aways suppressed elsewhere, post-scroll cursor
+            //   shuffles, etc.). Those don't represent user intent —
+            //   acting on them led to chaos in the previous attempt
+            //   ("стало хуже"): proactive scroll firing for jumps in
+            //   the *wrong direction* relative to the user's actual
+            //   movement.
+            // - 1.0s debounce: after a proactive scroll fires, iOS
+            //   emits several follow-up focus events (cursor settling
+            //   1 position past the requested anchor, narrow-window
+            //   tear-down, full-window rebuild). Each of those could
+            //   re-enter the "near edge" condition and trigger
+            //   another scroll. The longer debounce ensures one
+            //   proactive scroll = one consumed user swipe, with
+            //   enough headroom for the user to swipe through the
+            //   freshly-exposed window before the next pre-emptive
+            //   scroll.
             if self.voPendingRestoreAnchorLi == nil,
                let focusedLi = focusedLocalIndex,
                let priorLi = voPriorFocusedLi,
-               focusedLi != priorLi,
+               abs(focusedLi - priorLi) == 1,
                let visibleRange = self.voVisibleLocalIndexRange(),
-               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 1.0 {
                 let windowSize = visibleRange.bottom - visibleRange.top + 1
                 if windowSize >= 4 {
-                    let triggerDistance = 3  // fire one swipe earlier
+                    let triggerDistance = 2  // fire at distance 0 or 1
                     let halfWindow = max(2, windowSize / 2)
                     var extendTarget: Int?
                     if focusedLi < priorLi {
