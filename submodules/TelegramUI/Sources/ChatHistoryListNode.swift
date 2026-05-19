@@ -2859,112 +2859,43 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
             }
 
-            // **Proactive edge-extend.** Don't wait for the cursor to
-            // hit the very edge of the visible window (the "reactive"
-            // path below, in the focus-LEFT branch). When the cursor
-            // is *near* the edge in the direction of motion, scroll by
-            // half a window *while keeping focus on the current bubble*.
-            // The user keeps their cursor on the same message, the list
-            // slides under it so they have ~50% of the window's worth
-            // of bubbles ahead before another scroll is needed.
+            // **No proactive edge-extend.** Several iterations tried to
+            // pre-emptively scroll when the cursor approached the edge
+            // of the visible window (so the user wouldn't experience
+            // the brief focus-loss → reactive-edge-extend transition
+            // that they perceived as "залипание / надо обратно
+            // свайпнуть"). Every variant introduced new failure modes:
             //
-            // Why this is better than purely-reactive: reactive scroll
-            // triggers AFTER focus-loss, which is the brief audible
-            // "cursor leaves the list" moment the user heard as
-            // "залипание / улёт на короткое время". Proactive scroll
-            // never lets the cursor leave the array in the first place —
-            // it pre-emptively makes room.
+            // - Triggering on any near-edge arrival → fired on every
+            //   single swipe in the danger zone, cascading scrolls.
+            // - Direction from `unfocusedPosition` → never fired
+            //   because iOS routinely inserts intermediate
+            //   `focused==nil` events between bubble focuses.
+            // - Direction from `voLastFocusedItemLocalIndex` + larger
+            //   trigger threshold → triggered in *wrong* direction on
+            //   post-scroll cursor jiggle (iOS reshuffling looked like
+            //   reversed motion).
+            // - Adding `abs(delta) == 1` + 1.0s debounce → still each
+            //   proactive scroll left the cursor 1 position past the
+            //   anchor, immediately re-entered the danger zone, fired
+            //   on every settled swipe; navigation became chaotic
+            //   ("стало хуже чем было изначально").
             //
-            // Direction detection via `voPriorFocusedLi` (captured just
-            // before we updated `voLastFocusedItemLocalIndex`), NOT via
-            // `unfocusedPosition`. In practice iOS routinely fires an
-            // intermediate `focused == nil` event between two bubble
-            // focus events, so `unfocusedPosition` is nil for every
-            // arrival (the "prev=outside" in our cursor log). Using
-            // it as a direction source skipped every event and the
-            // proactive scroll never fired. `voPriorFocusedLi` persists
-            // through nil events and gives us a reliable
-            // before-vs-after pair.
+            // The fundamental problem: every `voForceScrollToItem`
+            // disturbs iOS's focus tree enough that the cursor lands
+            // slightly differently than requested, generating multiple
+            // follow-up focus events. We can't tell them apart from a
+            // real user swipe with the data the system provides.
+            // Proactive scrolling on every "near edge" arrival turns
+            // those follow-up events into more scrolls — a runaway
+            // feedback loop.
             //
-            // Trigger threshold = `distance < 3`: fire as soon as the
-            // user is within 2 positions of the edge, so the scroll
-            // happens **one swipe earlier** than it otherwise would —
-            // the next swipe lands the cursor in the middle of a new
-            // window instead of pushing off the edge into the brief
-            // navbar-transit / fly-away territory that the user kept
-            // perceiving as "залипание". Constant 3 (not a percentage
-            // of windowSize) because the navbar-transit risk doesn't
-            // scale with window size; it's a fixed structural hazard
-            // at the array edge regardless of how many items the array
-            // contains.
-            //
-            // Guards:
-            // - `voPendingRestoreAnchorLi == nil`: don't double-fire if
-            //   we're mid-restore from a previous scroll.
-            // - `windowSize >= 4`: skip proactive in degenerate windows
-            //   (1-2 items, e.g. photo/video bubbles that fill the
-            //   screen). Reactive handles it.
-            // - 0.2s debounce: same as reactive.
-            // **Anti-cascade guards** (learned from the previous version
-            // misfiring on every single focus event):
-            //
-            // - `abs(focusedLi - priorLi) == 1`: only react to real
-            //   single-step user swipes. iOS routinely fires "jiggle"
-            //   focus events with localIndex jumps of 3-5 positions
-            //   (fly-aways suppressed elsewhere, post-scroll cursor
-            //   shuffles, etc.). Those don't represent user intent —
-            //   acting on them led to chaos in the previous attempt
-            //   ("стало хуже"): proactive scroll firing for jumps in
-            //   the *wrong direction* relative to the user's actual
-            //   movement.
-            // - 1.0s debounce: after a proactive scroll fires, iOS
-            //   emits several follow-up focus events (cursor settling
-            //   1 position past the requested anchor, narrow-window
-            //   tear-down, full-window rebuild). Each of those could
-            //   re-enter the "near edge" condition and trigger
-            //   another scroll. The longer debounce ensures one
-            //   proactive scroll = one consumed user swipe, with
-            //   enough headroom for the user to swipe through the
-            //   freshly-exposed window before the next pre-emptive
-            //   scroll.
-            if self.voPendingRestoreAnchorLi == nil,
-               let focusedLi = focusedLocalIndex,
-               let priorLi = voPriorFocusedLi,
-               abs(focusedLi - priorLi) == 1,
-               let visibleRange = self.voVisibleLocalIndexRange(),
-               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 1.0 {
-                let windowSize = visibleRange.bottom - visibleRange.top + 1
-                if windowSize >= 4 {
-                    let triggerDistance = 2  // fire at distance 0 or 1
-                    let halfWindow = max(2, windowSize / 2)
-                    var extendTarget: Int?
-                    if focusedLi < priorLi {
-                        // Moving toward smaller li (forward in reversed
-                        // array — newer-to-older direction).
-                        let distanceToTop = focusedLi - visibleRange.top
-                        if distanceToTop < triggerDistance, focusedLi > 0 {
-                            extendTarget = max(0, focusedLi - halfWindow)
-                        }
-                    } else {
-                        // Moving toward larger li (backward through
-                        // history).
-                        let distanceToBottom = visibleRange.bottom - focusedLi
-                        if distanceToBottom < triggerDistance {
-                            extendTarget = focusedLi + halfWindow
-                        }
-                    }
-                    if let target = extendTarget, target != focusedLi {
-                        self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                        print("[VO-CHAT] proactive-edge-extend at-li=\(focusedLi) priorLi=\(priorLi) visible=\(visibleRange.top)..\(visibleRange.bottom) windowSize=\(windowSize) triggerDistance=\(triggerDistance) -> scroll-li=\(target) restore-li=\(focusedLi)")
-                        // restore-on the *current* focused bubble — the
-                        // user's cursor doesn't move, only the viewport
-                        // beneath it.
-                        self.voPendingRestoreAnchorLi = focusedLi
-                        self.voPendingRestoreRetried = false
-                        self.voForceScrollToItem(at: target, restoreFocusOn: focusedLi)
-                    }
-                }
-            }
+            // Accept the small reactive-path glitch instead: the user
+            // hits the edge, briefly loses focus, the reactive
+            // `voForceScrollToItem` fires once, narrow-window + modal
+            // + redirect-anchor pull the cursor onto the next bubble.
+            // One audible blip per page boundary instead of constant
+            // scrolling chaos.
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
             // Mark when focus left the list so the B-path above can
