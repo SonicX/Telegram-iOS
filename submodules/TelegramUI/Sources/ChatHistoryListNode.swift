@@ -2868,9 +2868,8 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // - 0.2s debounce: same as reactive.
             if self.voPendingRestoreAnchorLi == nil,
                let focusedLi = focusedLocalIndex,
-               let focusedPos = focusedPosition,
                let priorPos = unfocusedPosition,
-               focusedPos != priorPos,
+               focusedPosition != priorPos,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
                 let windowSize = visibleRange.bottom - visibleRange.top + 1
@@ -2878,7 +2877,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     let quartile = max(1, windowSize / 4)
                     let halfWindow = max(2, windowSize / 2)
                     var extendTarget: Int?
-                    if focusedPos > priorPos {
+                    if focusedPosition > priorPos {
                         // Moving forward in array = toward smaller li.
                         // Only trigger if approaching the smaller-li edge.
                         let distanceToTop = focusedLi - visibleRange.top
@@ -2895,7 +2894,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     }
                     if let target = extendTarget, target != focusedLi {
                         self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                        print("[VO-CHAT] proactive-edge-extend at-li=\(focusedLi) priorPos=\(priorPos) focusedPos=\(focusedPos) visible=\(visibleRange.top)..\(visibleRange.bottom) windowSize=\(windowSize) quartile=\(quartile) -> scroll-li=\(target) restore-li=\(focusedLi)")
+                        print("[VO-CHAT] proactive-edge-extend at-li=\(focusedLi) priorPos=\(priorPos) focusedPos=\(focusedPosition) visible=\(visibleRange.top)..\(visibleRange.bottom) windowSize=\(windowSize) quartile=\(quartile) -> scroll-li=\(target) restore-li=\(focusedLi)")
                         // restore-on the *current* focused bubble — the
                         // user's cursor doesn't move, only the viewport
                         // beneath it.
