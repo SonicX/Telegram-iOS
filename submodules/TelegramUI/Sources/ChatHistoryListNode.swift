@@ -2934,6 +2934,42 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // that's the anchor we redirect back to.
             self.voFocusLostTimestamp = CACurrentMediaTime()
 
+            // **Mid-force-scroll navbar transit guard.** If
+            // `voPendingRestoreAnchorLi` is set, we are *inside* a
+            // force-scroll cycle — `voForceScrollToItem` pre-posted
+            // `.screenChanged` on the anchor, the scroll transaction
+            // ran, and the completion block posted again. In between
+            // those moments iOS sometimes routes focus to navbar
+            // elements (`ChatTitleView`, `NavigationButtonItemNode`)
+            // because `accessibilityViewIsModal = true` on our list
+            // view only hides direct siblings; the navigation bar lives
+            // higher in the view hierarchy. If the user happens to
+            // swipe during this transit, they end up parked on the
+            // navbar with no way back except a backward swipe — exactly
+            // the "при залипании по прежнему нужно обратно свайпнуть"
+            // symptom the user reported.
+            //
+            // The remedy: as soon as we see focus leave the list while
+            // a restore is pending, push `.screenChanged` on the anchor
+            // again immediately. This catches the navbar transit at the
+            // first hop and pulls the cursor back into the list before
+            // the user has time to swipe.
+            //
+            // Uses the same single-retry budget so a stubborn anchor
+            // doesn't loop. Skip if reactive-edge-extend would fire
+            // anyway (the existing path below handles that case).
+            if let pending = self.voPendingRestoreAnchorLi,
+               !self.voPendingRestoreRetried,
+               let pendingNode = self.voItemNode(forLocalIndex: pending) {
+                self.voPendingRestoreRetried = true
+                pendingNode.isAccessibilityElement = true
+                pendingNode.view.accessibilityElementsHidden = false
+                pendingNode.view.isAccessibilityElement = true
+                print("[VO-CHAT] focus-left-redirect-anchor li=\(pending)")
+                UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
+                return
+            }
+
             // **Reactive edge-extend.** With kSynthNeighbours=0 the array
             // ends at the visible edges. When VoiceOver swipes past the
             // last array element it can't navigate further — focus first
