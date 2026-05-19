@@ -2822,6 +2822,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // *that* is the unambiguous signal that the user tried to
             // swipe past the edge — and only then do we scroll. Keeps
             // us from triggering scrolls the user didn't actually want.
+            //
+            // Capture prior li BEFORE updating — proactive code below
+            // uses this for direction & single-step detection.
+            let voPriorFocusedLi = self.voLastFocusedItemLocalIndex
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
 
             // Restore-focus retry. If we just posted a `.screenChanged`
@@ -2848,43 +2852,73 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
             }
 
-            // **No proactive edge-extend.** Several iterations tried to
-            // pre-emptively scroll when the cursor approached the edge
-            // of the visible window (so the user wouldn't experience
-            // the brief focus-loss → reactive-edge-extend transition
-            // that they perceived as "залипание / надо обратно
-            // свайпнуть"). Every variant introduced new failure modes:
+            // **Proactive direct-delta scroll.** Detect that the user
+            // is approaching the edge of the visible window in their
+            // direction of motion, and scroll the list by an EXPLICIT
+            // points delta (half the visible band) using
+            // `additionalScrollDistance`. Critical: this bypasses
+            // ListView's `scrollToItem` heuristics (which we observed
+            // failing in mixed-height content — barely-intersecting
+            // target counted as "already visible", contentOffset
+            // shifted only ~40pt, restore target never crossed the
+            // visibility threshold, the user got stuck in a feedback
+            // loop). With `additionalScrollDistance` we say exactly
+            // "shift by N points" — deterministic, no heuristics.
             //
-            // - Triggering on any near-edge arrival → fired on every
-            //   single swipe in the danger zone, cascading scrolls.
-            // - Direction from `unfocusedPosition` → never fired
-            //   because iOS routinely inserts intermediate
-            //   `focused==nil` events between bubble focuses.
-            // - Direction from `voLastFocusedItemLocalIndex` + larger
-            //   trigger threshold → triggered in *wrong* direction on
-            //   post-scroll cursor jiggle (iOS reshuffling looked like
-            //   reversed motion).
-            // - Adding `abs(delta) == 1` + 1.0s debounce → still each
-            //   proactive scroll left the cursor 1 position past the
-            //   anchor, immediately re-entered the danger zone, fired
-            //   on every settled swipe; navigation became chaotic
-            //   ("стало хуже чем было изначально").
-            //
-            // The fundamental problem: every `voForceScrollToItem`
-            // disturbs iOS's focus tree enough that the cursor lands
-            // slightly differently than requested, generating multiple
-            // follow-up focus events. We can't tell them apart from a
-            // real user swipe with the data the system provides.
-            // Proactive scrolling on every "near edge" arrival turns
-            // those follow-up events into more scrolls — a runaway
-            // feedback loop.
-            //
-            // Accept the small reactive-path glitch instead: the user
-            // hits the edge, briefly loses focus, the reactive
-            // `voForceScrollToItem` fires once, narrow-window + modal
-            // + redirect-anchor pull the cursor onto the next bubble.
-            // One audible blip per page boundary instead of constant
-            // scrolling chaos.
+            // Guard rails learned from prior cascade-bug iterations:
+            // - `abs(focusedLi - priorLi) == 1`: only react to real
+            //   single-step user swipes; iOS jiggle (cursor reshuffle
+            //   after our previous scroll) jumps ≥2 positions and
+            //   doesn't count as user intent.
+            // - 0.4s debounce: one proactive scroll = one user swipe
+            //   consumed. iOS follow-up events within the debounce
+            //   window are ignored.
+            // - `voPendingRestoreAnchorLi == nil`: don't pile up
+            //   scrolls if a restore is already in flight.
+            // - `windowSize >= 4`: need a real window to compute
+            //   distance-to-edge; degenerate windows (1-2 photos that
+            //   fill the screen) fall back to reactive path.
+            if self.voPendingRestoreAnchorLi == nil,
+               let focusedLi = focusedLocalIndex,
+               let priorLi = voPriorFocusedLi,
+               abs(focusedLi - priorLi) == 1,
+               let visibleRange = self.voVisibleLocalIndexRange(),
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.4 {
+                let windowSize = visibleRange.bottom - visibleRange.top + 1
+                if windowSize >= 4 {
+                    let triggerDistance = 2  // fire at distance 0 or 1
+                    // Direct points delta = half the visible band.
+                    // Sign convention: in the rotated chat history layout,
+                    // moving forward through the conversation (toward
+                    // smaller localIndex / older messages) corresponds to
+                    // a DECREASING contentOffset (verified empirically:
+                    // each successful force-scroll dropped contentOffsetY
+                    // by 60-200pt while exposing smaller-li items).
+                    // Therefore "forward" → negative delta, "backward" →
+                    // positive delta.
+                    let band = max(120.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+                    let halfBand = band * 0.5
+                    var scrollDelta: CGFloat?
+                    if focusedLi < priorLi {
+                        // Moving toward smaller li (forward).
+                        let distanceToTop = focusedLi - visibleRange.top
+                        if distanceToTop < triggerDistance, focusedLi > 0 {
+                            scrollDelta = -halfBand
+                        }
+                    } else {
+                        // Moving toward larger li (backward).
+                        let distanceToBottom = visibleRange.bottom - focusedLi
+                        if distanceToBottom < triggerDistance {
+                            scrollDelta = halfBand
+                        }
+                    }
+                    if let delta = scrollDelta {
+                        self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                        print("[VO-CHAT] proactive-scroll-direct at-li=\(focusedLi) priorLi=\(priorLi) visible=\(visibleRange.top)..\(visibleRange.bottom) delta=\(Int(delta))pt -> restore-li=\(focusedLi)")
+                        self.voProactiveScrollByDelta(delta: delta, restoreFocusOn: focusedLi)
+                    }
+                }
+            }
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
             // Mark when focus left the list so the B-path above can
@@ -3147,6 +3181,67 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     /// Used by the edge-extend path in `handleVoiceOverFocusChanged` to
     /// pull the next adjacent bubble into the viewport when the user's
     /// focus reaches the visible edge of the bounded sliding window.
+    /// Proactive direct-delta scroll: shift contentOffset by an
+    /// explicit points delta using `additionalScrollDistance`. Unlike
+    /// `voForceScrollToItem(at:restoreFocusOn:)` (which calls
+    /// `transaction(scrollToItem:)` with a `ListViewScrollPosition`
+    /// that triggers ListView's "is the target already visible?"
+    /// heuristic), this method scrolls by the exact distance we ask
+    /// for. Used by the proactive edge-extend path when the cursor
+    /// approaches the visible-window edge in the direction of motion.
+    ///
+    /// The cursor's bubble (`anchorLi`) does not move with the
+    /// viewport — we pin focus on it via pre-post `.screenChanged`,
+    /// narrow-window, modal flag, and a completion-post on the same
+    /// view. From the user's perspective the list slides under their
+    /// finger by half a screen, the cursor stays on the same message.
+    private func voProactiveScrollByDelta(delta: CGFloat, restoreFocusOn anchorLi: Int) {
+        guard let anchorNode = self.voItemNode(forLocalIndex: anchorLi) else {
+            return
+        }
+        self.view.accessibilityViewIsModal = true
+        anchorNode.isAccessibilityElement = true
+        anchorNode.view.accessibilityElementsHidden = false
+        anchorNode.view.isAccessibilityElement = true
+        self.voPendingRestoreAnchorLi = anchorLi
+        self.voPendingRestoreRetried = false
+        self.voScrollWindowAnchorLi = anchorLi
+        print("[VO-CHAT] proactive-pre-post li=\(anchorLi) narrow-window=on modal=on")
+        UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+        self.transaction(
+            deleteIndices: [],
+            insertIndicesAndItems: [],
+            updateIndicesAndItems: [],
+            options: ListViewDeleteAndInsertOptions(),
+            scrollToItem: nil,
+            additionalScrollDistance: delta,
+            updateSizeAndInsets: nil,
+            stationaryItemRange: nil,
+            updateOpaqueState: nil,
+            completion: { [weak self] _ in
+                guard let self,
+                      let anchorNode = self.voItemNode(forLocalIndex: anchorLi) else {
+                    return
+                }
+                anchorNode.isAccessibilityElement = true
+                anchorNode.view.accessibilityElementsHidden = false
+                anchorNode.view.isAccessibilityElement = true
+                self.voScrollWindowAnchorLi = nil
+                self.voPendingRestoreAnchorLi = anchorLi
+                self.voPendingRestoreRetried = false
+                print("[VO-CHAT] proactive-restore-focus li=\(anchorLi) narrow-window=off")
+                UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if self.voScrollWindowAnchorLi == nil {
+                        self.view.accessibilityViewIsModal = false
+                        print("[VO-CHAT] proactive-release-modal")
+                    }
+                }
+            }
+        )
+    }
+
     /// `accessibilityShouldAllowScrollToItem(at:)` still gates the call so
     /// a stray request to a far-away `localIndex` doesn't drag the list
     /// to the wrong end of the buffer.
@@ -3210,36 +3305,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on modal=on")
             UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
         }
-        // `.center(.center)` puts the target into the middle of the
-        // viewport, guaranteeing a substantial contentOffset shift.
-        //
-        // Earlier we used `.visible` for minimal disruption, but it
-        // turns out to be unreliable in the presence of mixed-height
-        // items (chat history with photos/videos, or with reply
-        // headers / unread dividers): `.visible` does a "is the
-        // target's frame already partially intersecting the viewport?"
-        // check, and if yes, it does no scroll at all. With per-item
-        // visibility threshold of 44pt + larger items mixed in, a
-        // tiny intersection counts as "already visible" while the
-        // restore target on the other side of that big item never
-        // crosses the 44pt threshold. Result: contentOffset barely
-        // moves, visible window doesn't shift, restore target stays
-        // hidden, retry fires, reactive-edge-extend re-triggers from
-        // the same `lastLi` → infinite loop ("курсор улетает", the
-        // user gets stuck cycling on a single message).
-        //
-        // `.center(.bottom)` was once tried and rejected as "too
-        // aggressive" — it pushed the focused bubble off-screen.
-        // `.center(.top)` uses the opposite overflow direction: when
-        // the target is taller than the viewport, the *top* of the
-        // target aligns with the viewport top (not bottom), which in
-        // our rotated chat history layout means the target's content
-        // appears toward where the user's focus was advancing —
-        // hopefully bringing the restore-target into the visible
-        // band without ejecting the cursor's anchor.
+        // `.visible` scrolls minimally to bring the target into the
+        // viewport. Kept for the reactive path because it has been
+        // empirically validated for chat-list. For the stuck-at-edge
+        // case where `.visible` does nothing (mixed-height items
+        // where the target already barely intersects the viewport
+        // and ListView decides "no scroll needed"), the proactive
+        // `voProactiveScroll(byDelta:)` path below uses an explicit
+        // points delta via `additionalScrollDistance` — no heuristic,
+        // direct contentOffset shift.
         let scrollToItem = ListViewScrollToItem(
             index: localIndex,
-            position: .center(.top),
+            position: .visible,
             animated: false,
             curve: .Default(duration: nil),
             directionHint: .Down
