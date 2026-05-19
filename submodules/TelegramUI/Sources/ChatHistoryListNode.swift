@@ -2887,7 +2887,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 let windowSize = visibleRange.bottom - visibleRange.top + 1
                 if windowSize >= 4 {
                     let triggerDistance = 2  // fire at distance 0 or 1
-                    // Direct points delta = half the visible band.
+                    // Direct points delta = 50% of the list view's
+                    // height. No fudge-minimums, no inset subtraction —
+                    // pure half-screen scroll. The user explicitly
+                    // asked for this:
+                    //     "сделай 50% от высоты экрана подскролку"
+                    //
                     // Sign convention: in the rotated chat history layout,
                     // moving forward through the conversation (toward
                     // smaller localIndex / older messages) corresponds to
@@ -2896,8 +2901,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     // by 60-200pt while exposing smaller-li items).
                     // Therefore "forward" → negative delta, "backward" →
                     // positive delta.
-                    let band = max(120.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
-                    let halfBand = band * 0.5
+                    let halfBand = self.visibleSize.height * 0.5
                     var scrollDelta: CGFloat?
                     if focusedLi < priorLi {
                         // Moving toward smaller li (forward).
