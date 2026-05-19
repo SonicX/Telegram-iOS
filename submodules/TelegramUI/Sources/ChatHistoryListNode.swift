@@ -2825,6 +2825,67 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     self.voPendingRestoreRetried = false
                 }
             }
+
+            // **Proactive edge-extend.** Don't wait for the cursor to
+            // hit the very edge of the visible window (the "reactive"
+            // path below, in the focus-LEFT branch). When the cursor
+            // arrives in the *last quartile* of the window (≤25% of
+            // positions remaining before the edge), scroll by half a
+            // window *while keeping focus on the current bubble*. The
+            // user keeps their cursor on the same message, the list
+            // slides under it so they have ~50% of the window's worth of
+            // bubbles ahead before another scroll is needed.
+            //
+            // Why this is better than purely-reactive: reactive scroll
+            // triggers AFTER focus-loss, which is the brief audible
+            // "cursor leaves the list" moment the user heard as
+            // "залипание / улёт на короткое время". Proactive scroll
+            // never lets the cursor leave the array in the first place —
+            // it pre-emptively makes room.
+            //
+            // Guards:
+            // - `voPendingRestoreAnchorLi == nil`: don't double-fire if
+            //   we're mid-restore from a previous scroll. The arriving
+            //   focus event is processed normally above; only then do we
+            //   consider a new scroll.
+            // - `windowSize >= 4`: skip proactive in degenerate windows
+            //   (1-2 items visible, e.g. photo/video bubbles that fill
+            //   the screen). With such small windows, "1/4" is degenerate
+            //   and the reactive path handles it.
+            // - 0.2s debounce: same as reactive, prevents stacking.
+            if self.voPendingRestoreAnchorLi == nil,
+               let focusedLi = focusedLocalIndex,
+               let visibleRange = self.voVisibleLocalIndexRange(),
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
+                let windowSize = visibleRange.bottom - visibleRange.top + 1
+                if windowSize >= 4 {
+                    let quartile = max(1, windowSize / 4)
+                    let halfWindow = max(2, windowSize / 2)
+                    let distanceToTop = focusedLi - visibleRange.top
+                    let distanceToBottom = visibleRange.bottom - focusedLi
+                    var extendTarget: Int?
+                    if distanceToTop < quartile, focusedLi > 0 {
+                        // Approaching the smaller-localIndex edge.
+                        // Scroll target = `focusedLi - halfWindow`, so
+                        // after scroll the focused bubble is roughly in
+                        // the middle of the new visible window.
+                        extendTarget = max(0, focusedLi - halfWindow)
+                    } else if distanceToBottom < quartile {
+                        // Approaching the larger-localIndex edge.
+                        extendTarget = focusedLi + halfWindow
+                    }
+                    if let target = extendTarget, target != focusedLi {
+                        self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                        print("[VO-CHAT] proactive-edge-extend at-li=\(focusedLi) visible=\(visibleRange.top)..\(visibleRange.bottom) windowSize=\(windowSize) quartile=\(quartile) -> scroll-li=\(target) restore-li=\(focusedLi)")
+                        // restore-on the *current* focused bubble — the
+                        // user's cursor doesn't move, only the viewport
+                        // beneath it.
+                        self.voPendingRestoreAnchorLi = focusedLi
+                        self.voPendingRestoreRetried = false
+                        self.voForceScrollToItem(at: target, restoreFocusOn: focusedLi)
+                    }
+                }
+            }
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
             // Mark when focus left the list so the B-path above can
