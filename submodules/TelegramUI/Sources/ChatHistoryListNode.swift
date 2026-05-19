@@ -2849,15 +2849,37 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             if let lastLi = self.voLastFocusedItemLocalIndex,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
-                let kReactiveLead = 2
+                // **Scroll target = intendedNext** (lead == 1).
+                //
+                // The earlier `kReactiveLead = 2` aimed the scroll *one
+                // item past* `intendedNext` on the assumption that the
+                // post-scroll visible window would slide far enough for
+                // both the lead item and `intendedNext` to land inside
+                // it. That worked for chat-list rows (~60-100pt tall) and
+                // for short text bubbles, but broke spectacularly in chat
+                // history with photos/videos: those bubbles are
+                // 700-1400pt tall while the visible band is ~625pt, so a
+                // single bubble fills the entire viewport. Scrolling to
+                // `lastLi - 2` then put *that* huge bubble onto the
+                // screen and pushed `intendedNext` off-screen entirely —
+                // restore-focus failed (li hidden), retry re-fired,
+                // edge-extend re-triggered, infinite loop.
+                //
+                // Targeting `intendedNext` directly makes it the
+                // centerpiece of the post-scroll viewport regardless of
+                // bubble size. For small rows it still gives a 6-7 item
+                // window (`intendedNext` at the edge, neighbours filling
+                // the rest); for tall rows it gives a 1-item window
+                // with `intendedNext` as the sole visible bubble — which
+                // is the most we can show anyway.
                 var extendTarget: Int?
                 var intendedNext: Int?
                 if lastLi <= visibleRange.top, lastLi > 0 {
-                    extendTarget = max(0, lastLi - kReactiveLead)
                     intendedNext = max(0, lastLi - 1)
+                    extendTarget = intendedNext
                 } else if lastLi >= visibleRange.bottom {
-                    extendTarget = lastLi + kReactiveLead
                     intendedNext = lastLi + 1
+                    extendTarget = intendedNext
                 }
                 if let target = extendTarget, let next = intendedNext {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
