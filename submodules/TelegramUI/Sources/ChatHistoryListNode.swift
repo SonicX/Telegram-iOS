@@ -2822,17 +2822,6 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // *that* is the unambiguous signal that the user tried to
             // swipe past the edge — and only then do we scroll. Keeps
             // us from triggering scrolls the user didn't actually want.
-            // Capture the previous focused li *before* updating. The
-            // proactive-edge-extend block below uses this to detect
-            // user's direction of motion. Using `unfocusedPosition` from
-            // the notification doesn't work in practice: iOS frequently
-            // fires an intermediate `focused == nil` event between two
-            // bubble focus events, so when the second bubble arrives
-            // its `unfocusedPosition` is nil (the previous step lost
-            // focus to outside). `voLastFocusedItemLocalIndex` persists
-            // across those nil events and gives us a reliable
-            // before-vs-after reference.
-            let voPriorFocusedLi = self.voLastFocusedItemLocalIndex
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
 
             // Restore-focus retry. If we just posted a `.screenChanged`
