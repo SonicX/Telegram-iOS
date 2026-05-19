@@ -681,6 +681,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     // A-check re-arms.
     private var voPendingRestoreAnchorLi: Int?
     private var voPendingRestoreRetried: Bool = false
+    // While a `voForceScrollToItem` `transaction` is in flight, narrow the
+    // result of `customAccessibilityElements()` to a single element: the
+    // anchor itself.  During the scroll, iOS's focus-recovery picks the
+    // "nearest visible" target from whatever array we expose; if we keep
+    // exposing the full window iOS routinely lands focus on a transient
+    // bubble (observed: li=46 announced briefly before cursor settles on
+    // li=44).  Reducing the array to {anchor} for the duration of the
+    // scroll leaves iOS no other choice — the only legal focus target is
+    // the bubble we want.  Cleared in the transaction completion.
+    private var voScrollWindowAnchorLi: Int?
 
     // Tracks message bubbles we *promoted* to a single accessibility leaf
     // (via `isAccessibilityElement = true`) while VoiceOver is active —
@@ -2048,6 +2058,49 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         if voIsRunning {
             print("[VO-CHAT] customAccessibilityElements: enter rotated=\(self.rotated) fullMode=\(isFullMaterializationActive) trackDir=\(trackDirectionalFocus) contentOffsetY=\(Int(contentOffset.y)) visibleSize=\(Int(self.visibleSize.width))x\(Int(self.visibleSize.height)) windowY=[\(Int(visibleTop))..\(Int(visibleBottom))] navOrder=\(self.accessibilityNavigationOrder == .reversed ? "reversed" : "automatic")")
         }
+        // **Narrow-window mode**: a `voForceScrollToItem` `transaction` is in
+        // flight. Return only the anchor element so iOS's focus-recovery
+        // during the scroll has exactly one legal target — preventing the
+        // transient "wrong bubble" announcement (e.g. li=46 instead of
+        // li=44) that the user hears as "залипание/улёт на короткое время".
+        // When the transaction completes we clear the flag and the next
+        // `customAccessibilityElements()` call returns the full window.
+        if voIsRunning, let narrowAnchor = self.voScrollWindowAnchorLi,
+           let anchorNode = self.voItemNode(forLocalIndex: narrowAnchor),
+           anchorNode.isNodeLoaded {
+            // Promote and unhide so iOS treats the view as a valid leaf.
+            anchorNode.isAccessibilityElement = true
+            anchorNode.view.isAccessibilityElement = true
+            anchorNode.view.accessibilityElementsHidden = false
+            // Give the anchor a frame that's actually inside the clip,
+            // so iOS spatial recovery considers it "visible". Use the
+            // full visible band — there's only one element, dimensions
+            // don't compete.
+            anchorNode.view.accessibilityFrame = visibleScreenRect
+            // Hide every other materialised item from accessibility.
+            // iOS's focus-recovery during scroll can bypass our
+            // `customAccessibilityElements` array and walk the subview
+            // tree directly; if visible bubbles are still leaves there,
+            // it will pick one of them as "nearest visible" and announce
+            // it briefly. Hiding the whole tree leaves only the anchor
+            // as a legal focus target on either lookup path. The next
+            // normal `customAccessibilityElements` pass (right after the
+            // transaction completes and `voScrollWindowAnchorLi` is
+            // cleared) re-sets `accessibilityElementsHidden = false` for
+            // visible items, so this masking is transient.
+            self.forEachItemNode { node in
+                guard let listNode = node as? ListViewItemNode else { return }
+                if listNode === anchorNode { return }
+                if listNode.isNodeLoaded {
+                    listNode.view.accessibilityElementsHidden = true
+                }
+            }
+            let narrowList: [Any] = [anchorNode.view as Any]
+            self.lastAccessibilityElements = narrowList
+            self.updateAccessibilityDirectionalElements(narrowList)
+            print("[VO-CHAT] customAccessibilityElements: NARROW-WINDOW anchor=\(narrowAnchor) finalCount=1")
+            return narrowList
+        }
         var voTotalNodesVisited = 0
         // Variant Y iterates only over materialised item nodes, so the
         // "filtered by rect" bucket from the old proxy-based path is
@@ -2984,7 +3037,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             anchorNode.view.isAccessibilityElement = true
             self.voPendingRestoreAnchorLi = anchor
             self.voPendingRestoreRetried = false
-            print("[VO-CHAT] force-scroll-pre-post li=\(anchor)")
+            // Narrow the accessibility window to {anchor} for the entire
+            // scroll. iOS's parallel focus-recovery — the thing that
+            // briefly announces a wrong bubble (e.g. li=46 instead of
+            // li=44) — can only pick from the array we expose. With one
+            // element in it, there is no wrong bubble to pick.
+            self.voScrollWindowAnchorLi = anchor
+            print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on")
             UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
         }
         // `.visible` scrolls just enough to bring the target into the
@@ -3055,7 +3114,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 anchorNode.isAccessibilityElement = true
                 anchorNode.view.accessibilityElementsHidden = false
                 anchorNode.view.isAccessibilityElement = true
-                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor)")
+                // Clear narrow-window **before** posting so iOS's next
+                // `customAccessibilityElements` query (triggered by the
+                // post) returns the full window again. The anchor stays
+                // at the same focus position; the user just gets the
+                // full neighbour list back.
+                self.voScrollWindowAnchorLi = nil
+                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor) narrow-window=off")
                 self.voPendingRestoreAnchorLi = anchor
                 self.voPendingRestoreRetried = false
                 UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
