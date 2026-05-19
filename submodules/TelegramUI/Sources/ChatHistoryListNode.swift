@@ -3019,6 +3019,31 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // pre-emptive lead and lets iOS auto-scroll drive the list to
         // wherever VoiceOver wanders. Always allow.
         print("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
+        // **Make our list view modal to accessibility for the duration of
+        // the force-scroll.** Without this, when iOS loses focus on the
+        // previously-focused edge bubble (because the scroll is about to
+        // remove it from the visible array) it does a global spatial scan
+        // for "nearest accessibility element". Our list's items are in
+        // flux mid-transition, but `ChatTitleView` in the navbar is a
+        // stable sibling — iOS reliably picks it as the fallback, briefly
+        // routing focus to the chat title. Most of the time iOS auto-
+        // recovers within a few ticks (our completion-post pulls focus
+        // back onto the anchor), but occasionally it sticks, leaving the
+        // user parked on the navbar with no obvious way back into the
+        // conversation except a *backward* swipe.
+        //
+        // `accessibilityViewIsModal = true` tells iOS to treat siblings
+        // of this view (and their subtrees) as invisible to accessibility.
+        // During the force-scroll window, our list is the *only* place
+        // iOS can look. Combined with narrow-window (anchor is the only
+        // legal target inside the list), there is literally no element
+        // iOS can drift to except the anchor itself.
+        //
+        // The flag is cleared on the next runloop tick from the
+        // completion block — after iOS has processed our `.screenChanged`
+        // post at the still-modal state — so sibling views become
+        // accessible again as soon as the navigation has settled.
+        self.view.accessibilityViewIsModal = true
         // **Pre-post**: claim focus on the anchor *before* the transaction
         // starts. Without this, iOS's parallel focus-recovery picks a
         // visible bubble (e.g. li=46) during the scroll, VoiceOver
@@ -3043,7 +3068,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // li=44) — can only pick from the array we expose. With one
             // element in it, there is no wrong bubble to pick.
             self.voScrollWindowAnchorLi = anchor
-            print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on")
+            print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on modal=on")
             UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
         }
         // `.visible` scrolls just enough to bring the target into the
@@ -3124,6 +3149,33 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 self.voPendingRestoreAnchorLi = anchor
                 self.voPendingRestoreRetried = false
                 UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+                // Release modality on the next runloop tick. We post
+                // `.screenChanged` synchronously above, but iOS processes
+                // accessibility notifications asynchronously on the main
+                // queue; the focus decision is made *after* this
+                // completion block returns. If we cleared `modal = false`
+                // here synchronously, iOS would see the navbar as a valid
+                // sibling target by the time it picks where focus goes,
+                // and the navbar transit would be back.
+                //
+                // `DispatchQueue.main.async` is not a time-based delay —
+                // it just yields the current runloop iteration. iOS
+                // processes our post *during* the current tick, then our
+                // async block fires on the next tick, by which time
+                // focus has settled on the anchor and it's safe to
+                // restore sibling accessibility.
+                //
+                // The `voScrollWindowAnchorLi == nil` guard ensures we
+                // don't clobber modality if another force-scroll started
+                // before this async fires — only the *last* one in a
+                // rapid sequence releases the modal flag.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if self.voScrollWindowAnchorLi == nil {
+                        self.view.accessibilityViewIsModal = false
+                        print("[VO-CHAT] force-scroll-release-modal")
+                    }
+                }
             }
         )
     }
