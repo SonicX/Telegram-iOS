@@ -500,12 +500,34 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
+        // **`visibleRect` must be in the item-node frame space, which is
+        // the list view's own bounds (view space) — NOT offset by
+        // `scroller.contentOffset.y`.**
+        //
+        // `ListView` keeps materialised item nodes positioned directly
+        // in its view bounds (a visible row has `frame.minY` in
+        // `[insets.top, visibleSize.height - insets.bottom]`); the hidden
+        // `scroller` is only a gesture/offset proxy whose `contentOffset`
+        // hovers around `infiniteScrollSize` (10 000) due to the
+        // infinite-scroll trick. Adding `contentOffset.y` to the
+        // viewport rect therefore shifts it ~10 000 pt away from where
+        // the item frames actually are.
+        //
+        // For the chat *list* this went unnoticed: there
+        // `contentOffset.y == 0`, so `+ contentOffset.y` was a harmless
+        // no-op and `visibleRect` matched the item frames. For rotated
+        // chat *history* `contentOffset.y == 10 000`, so `visibleRect`
+        // landed at y≈10 144 while item frames sit at y≈-700…400 — they
+        // never intersected, the filter dropped every element, and
+        // `customAccessibilityElements()` returned an empty array
+        // (diagnosed via the `[VO-BASE-DIAG]` log). Dropping
+        // `contentOffset.y` puts `visibleRect` back in item-frame space.
         if self.rotated {
-            visibleTop = contentOffset.y + self.insets.bottom
-            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.top
+            visibleTop = self.insets.bottom
+            visibleBottom = self.visibleSize.height - self.insets.top
         } else {
-            visibleTop = contentOffset.y + self.insets.top
-            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
+            visibleTop = self.insets.top
+            visibleBottom = self.visibleSize.height - self.insets.bottom
         }
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
         // Expanded accessibility inclusion zone.
