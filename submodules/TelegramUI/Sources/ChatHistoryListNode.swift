@@ -1110,18 +1110,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // 10k increments; for very heavy channels lower it further.
         let updateFullMaterialization: () -> Void = { [weak self] in
             guard let self else { return }
-            // **No forced full materialisation in base-engine mode.**
-            // Force-materialising 10 000 pt of message views is the
-            // wrong model — the chat list does NOT do this. It keeps a
-            // normal materialised window; VoiceOver navigates it, hits
-            // the edge, calls `accessibilityScroll`, ListView
-            // page-scrolls, the next batch materialises and the
-            // accessibility array grows. We make chat history behave
-            // the same way: leave `accessibilityInvisibleInsetOverride`
-            // nil and rely on the base engine's bounded window +
-            // `accessibilityScroll`.
+            // **Keep a large materialised buffer while VoiceOver runs.**
+            //
+            // This is exactly what the chat list does — its diagnostic
+            // dump shows `inclusionRect=(-5e8..5e8)`, i.e. it fully
+            // materialises every row. That is *why* chat-list VoiceOver
+            // navigation never freezes: materialised views are never
+            // recycled, so the element VoiceOver has focused always
+            // stays valid.
+            //
+            // Chat history can't materialise thousands of messages, but
+            // `accessibilityInvisibleInsetOverride = 10000` keeps a
+            // ±10 000 pt buffer (~100 messages) — far more than a single
+            // navigation session traverses, so the focused message
+            // bubble is never recycled out from under VoiceOver. Without
+            // this buffer the cursor froze after ~3 page scrolls: the
+            // focused bubble's view got recycled, `isDescendant(of:)`
+            // turned false, and focus was orphaned.
             let shouldForce = UIAccessibility.isVoiceOverRunning
-                && !ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment
             let desired: CGFloat? = shouldForce ? 10_000.0 : nil
             if self.accessibilityInvisibleInsetOverride != desired {
                 let previous = self.accessibilityInvisibleInsetOverride
