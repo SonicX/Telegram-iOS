@@ -1110,15 +1110,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // 10k increments; for very heavy channels lower it further.
         let updateFullMaterialization: () -> Void = { [weak self] in
             guard let self else { return }
-            // Keep full materialisation ON while VoiceOver runs. This is
-            // the chat-list model the user described: the accessibility
-            // array holds *every* loaded message, and as pagination
-            // loads more, the array grows and VoiceOver navigation
-            // continues. The base `customAccessibilityElements` exposes
-            // the whole materialised buffer; the off-screen-focus scroll
-            // handler scrolls the list as the cursor moves, which in
-            // turn drives ListView's pagination to load the next batch.
+            // **No forced full materialisation in base-engine mode.**
+            // Force-materialising 10 000 pt of message views is the
+            // wrong model — the chat list does NOT do this. It keeps a
+            // normal materialised window; VoiceOver navigates it, hits
+            // the edge, calls `accessibilityScroll`, ListView
+            // page-scrolls, the next batch materialises and the
+            // accessibility array grows. We make chat history behave
+            // the same way: leave `accessibilityInvisibleInsetOverride`
+            // nil and rely on the base engine's bounded window +
+            // `accessibilityScroll`.
             let shouldForce = UIAccessibility.isVoiceOverRunning
+                && !ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment
             let desired: CGFloat? = shouldForce ? 10_000.0 : nil
             if self.accessibilityInvisibleInsetOverride != desired {
                 let previous = self.accessibilityInvisibleInsetOverride

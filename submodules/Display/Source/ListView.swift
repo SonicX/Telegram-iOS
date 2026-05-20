@@ -542,6 +542,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         } else {
             accessibilityInclusionRect = visibleRect.insetBy(dx: 0.0, dy: -max(visibleRect.height, 1.0))
         }
+        // **DIAGNOSTIC** — dump the coordinate model so we can see why
+        // the rotated chat-history list filters everything out.
+        if UIAccessibility.isVoiceOverRunning {
+            var sampleFrames: [String] = []
+            var sampleCount = 0
+            self.forEachItemNode({ node in
+                guard sampleCount < 6 else { return }
+                if let itemNode = node as? ListViewItemNode, let idx = itemNode.index {
+                    let f = itemNode.frame
+                    sampleFrames.append("li=\(idx) frame=(\(Int(f.minY))..\(Int(f.maxY)) h=\(Int(f.height)))")
+                    sampleCount += 1
+                }
+            })
+            print("[VO-BASE-DIAG] rotated=\(self.rotated) contentOffsetY=\(Int(contentOffset.y)) visibleRect=(\(Int(visibleRect.minY))..\(Int(visibleRect.maxY))) inclusionRect=(\(Int(accessibilityInclusionRect.minY))..\(Int(accessibilityInclusionRect.maxY))) trackDir=\(trackDirectionalFocus) items=[\(sampleFrames.joined(separator: " | "))]")
+        }
         self.forEachItemNode({ node in
             if trackDirectionalFocus {
                 guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
