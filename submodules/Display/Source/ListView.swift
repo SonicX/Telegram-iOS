@@ -5726,9 +5726,23 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         if let focusedAny, !self.isAccessibilityObjectInsideCurrentListSequence(focusedAny) {
-            print("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
-            self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
-            return
+            // The focused element is not in the *current* accessibility
+            // array. Normally that means focus genuinely left the list
+            // (navbar etc.) — bail out. BUT if the focused object is
+            // still a descendant of this list view, it's one of our own
+            // item nodes that has scrolled out of the materialised
+            // window and been dropped from the array. That is exactly
+            // the case the off-screen-focus scroll handler below must
+            // handle (scroll it back into view). Returning here instead
+            // froze VoiceOver navigation after a few page scrolls — the
+            // cursor sat on an off-screen item, this guard fired every
+            // time, and the scroll handler was never reached.
+            if !self.isAccessibilityObjectInsideListView(focusedAny) {
+                print("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
+                self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
+                return
+            }
+            print("[VO-STATE] focus-left-sequence-but-inside-list type=\(type(of: focusedAny)) — falling through to off-screen scroll")
         }
         if let focusedView = focusedAny as? UIView,
            self.isAccessibilityObjectInsideListView(focusedView),
