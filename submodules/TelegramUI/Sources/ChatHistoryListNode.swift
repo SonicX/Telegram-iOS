@@ -1994,7 +1994,32 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         )
     }
 
+    /// **EXPERIMENT** — fall back to the base `ListView` accessibility
+    /// engine instead of this file's custom bounded-window override.
+    ///
+    /// The base `ListView.customAccessibilityElements()`, in
+    /// full-materialisation mode (`accessibilityInvisibleInsetOverride`
+    /// is set, which chat history does), already exposes *every*
+    /// materialised message with its real `convertToScreenCoordinates`
+    /// frame — exactly the model the system Messages app gets for free
+    /// from `UICollectionView`. It also has `accessibilityScroll` and
+    /// an off-screen-focus scroll handler. The chat list uses this base
+    /// engine untouched and scrolls fine under VoiceOver.
+    ///
+    /// This flag short-circuits the custom override so we can observe
+    /// whether the base engine drives chat history correctly. If it
+    /// does, the entire bounded-window / edge-extend / narrow-window
+    /// machinery can be deleted.
+    private static let voUseBaseAccessibilityExperiment = true
+
     override public func customAccessibilityElements() -> [Any]? {
+        if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
+            let elements = super.customAccessibilityElements()
+            if UIAccessibility.isVoiceOverRunning {
+                print("[VO-CHAT] BASE-ENGINE-EXPERIMENT: super returned \(elements?.count ?? 0) elements")
+            }
+            return elements
+        }
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
@@ -2596,6 +2621,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
     private func handleVoiceOverFocusChanged(notification: Notification) {
         guard UIAccessibility.isVoiceOverRunning else { return }
+        // **EXPERIMENT** — when running on the base `ListView`
+        // accessibility engine, this custom focus handler (edge-extend,
+        // fly-away-suppress, force-scroll, narrow-window, retry,
+        // redirect-anchor) must NOT interfere. The base engine + its
+        // own off-screen-focus scroll handler drive everything. Skip
+        // the whole custom handler so the experiment observes pure
+        // base-engine behaviour.
+        if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
+            return
+        }
         guard let userInfo = notification.userInfo else { return }
         let focusedAny = userInfo[UIAccessibility.focusedElementUserInfoKey]
         let unfocusedAny = userInfo[UIAccessibility.unfocusedElementUserInfoKey]
@@ -3314,6 +3349,14 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     /// user's last live-focused bubble is not a legitimate VoiceOver
     /// target.
     override public func accessibilityShouldAllowScrollToItem(at localIndex: Int) -> Bool {
+        // **EXPERIMENT** — let the base engine's off-screen-focus
+        // handler scroll freely. The veto below depends on
+        // `voLastFocusedItemLocalIndex`, which the custom focus handler
+        // (disabled in experiment mode) no longer updates, so the veto
+        // would otherwise block every legitimate base-engine scroll.
+        if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
+            return true
+        }
         guard let lastKnown = self.voLastFocusedItemLocalIndex else {
             return true
         }
