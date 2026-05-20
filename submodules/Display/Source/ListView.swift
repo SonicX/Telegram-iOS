@@ -6624,26 +6624,39 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // observed in the user's logs).  We only scroll when the target
         // row is genuinely outside the viewport.
         if let itemNode = self.itemNodes.first(where: { $0.index == localIndex }) {
-            let visibleTop = self.insets.top
-            let visibleBottom = self.visibleSize.height - self.insets.bottom
-            let frame = itemNode.frame
-            // "Sufficiently visible" means the row is fully inside the
-            // clip OR its visible portion is larger than the clip
-            // (taller-than-screen bubble whose top or bottom is at the
-            // edge — user can already read the start of it).
-            let intersection = frame.intersection(CGRect(x: 0, y: visibleTop, width: self.visibleSize.width, height: max(0, visibleBottom - visibleTop)))
-            let clipHeight = max(0, visibleBottom - visibleTop)
-            let alreadyOnScreen: Bool
-            if frame.height >= clipHeight {
-                // Tall row: any non-trivial overlap counts — the user can
-                // start reading without an extra scroll.
-                alreadyOnScreen = intersection.height >= clipHeight * 0.9
-            } else {
-                // Short row: must be fully visible.
-                alreadyOnScreen = intersection.height >= frame.height - 1.0
-            }
-            if alreadyOnScreen {
-                return
+            // **Rotation-correct visibility test.** The earlier version
+            // compared `itemNode.frame` (ListView layout space) against a
+            // viewport rect built from `insets`/`visibleSize`. For a
+            // rotated list (chat history) the layout-space frame and the
+            // on-screen position diverge — the test reported "already on
+            // screen" for genuinely off-screen rows, so the whole method
+            // short-circuited and never scrolled (the bug behind "скролл
+            // не проходит / застряло после 2-3 подскролов").
+            //
+            // `UIAccessibility.convertToScreenCoordinates` walks the full
+            // view hierarchy including the 180° rotation transform, so
+            // the screen frame is correct regardless of rotation. We
+            // compare it against the list's own on-screen clip frame.
+            let itemScreenFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            let listClipFrame = self.accessibilityClippingFrameInScreenCoordinates()
+                ?? UIAccessibility.convertToScreenCoordinates(
+                    CGRect(x: 0.0, y: self.insets.top, width: self.visibleSize.width, height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)),
+                    in: self.view)
+            if !itemScreenFrame.isNull, !listClipFrame.isNull {
+                let intersection = itemScreenFrame.intersection(listClipFrame)
+                let intersectionHeight = intersection.isNull ? 0.0 : intersection.height
+                let alreadyOnScreen: Bool
+                if itemScreenFrame.height >= listClipFrame.height {
+                    // Taller-than-clip row: a large overlap is enough —
+                    // the user can already read its start.
+                    alreadyOnScreen = intersectionHeight >= listClipFrame.height * 0.9
+                } else {
+                    // Short row: must be (almost) fully visible.
+                    alreadyOnScreen = intersectionHeight >= itemScreenFrame.height - 1.0
+                }
+                if alreadyOnScreen {
+                    return
+                }
             }
         }
 
