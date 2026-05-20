@@ -5729,7 +5729,16 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 // and skips when the row is sufficiently on-screen,
                 // so repeated transient focus events don't pile up
                 // scroll transactions.
-                if let itemNode = self.itemNodes.first(where: { $0.view === focusedView }),
+                // Match the focused view against item nodes — either the
+                // item node's own view IS the focused element (chat-list
+                // case: each row is a single accessibility element), or
+                // the focused element is a *descendant* view inside the
+                // item node (chat-history case: a message bubble is an
+                // accessibility container whose child elements are the
+                // focus targets). Walking up to the enclosing item node
+                // is what lets the off-screen-focus scroll handler work
+                // for container-style cells.
+                if let itemNode = self.itemNodes.first(where: { $0.view === focusedView || focusedView.isDescendant(of: $0.view) }),
                    let localIndex = itemNode.index {
                     // Bogus-fallback guard. After a swipe at the edge of the
                     // variant-Y sliding window, VoiceOver can land focus on
@@ -5740,15 +5749,18 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     // `scrollVoiceOverFocusToItem` for that bogus focus
                     // yanks the list to the far end of the buffer.
                     //
-                    // Two guards:
-                    //  1. If the item is *demoted* (we explicitly hid it),
-                    //     it can't be an intentional VoiceOver target.
-                    //  2. Subclass-level distance veto (chat history uses it
-                    //     to compare against the last live-focus localIndex).
+                    // Guard: if the item was *explicitly hidden* from
+                    // accessibility (`accessibilityElementsHidden = true`),
+                    // it can't be an intentional VoiceOver target. We do
+                    // NOT also test `!isAccessibilityElement` — that is
+                    // false for every container-style cell (chat-history
+                    // bubbles) and would wrongly block their scroll. The
+                    // subclass-level distance veto
+                    // (`accessibilityShouldAllowScrollToItem`) is the
+                    // other line of defence.
                     let viewHidden = itemNode.view.accessibilityElementsHidden
-                    let nodeHidden = !itemNode.isAccessibilityElement
-                    if viewHidden || nodeHidden {
-                        print("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden) nodeHidden=\(nodeHidden)")
+                    if viewHidden {
+                        print("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden)")
                         return
                     }
                     if !self.accessibilityShouldAllowScrollToItem(at: localIndex) {
