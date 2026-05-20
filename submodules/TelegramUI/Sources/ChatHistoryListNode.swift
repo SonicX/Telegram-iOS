@@ -2031,11 +2031,64 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
     override public func customAccessibilityElements() -> [Any]? {
         if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
-            let elements = super.customAccessibilityElements()
             if UIAccessibility.isVoiceOverRunning {
-                print("[VO-CHAT] BASE-ENGINE-EXPERIMENT: super returned \(elements?.count ?? 0) elements")
+                // **Promote each materialised message bubble to a single
+                // accessibility leaf — exactly what `ChatListItemNode`
+                // does (`isAccessibilityElement = true`).**
+                //
+                // This is the missing piece. The chat list works because
+                // every row is ONE accessibility element, so the base
+                // engine (`ListView.swift:555`) wraps it via
+                // `reuseOrCreateDirectionalElement` into a *pooled,
+                // identity-stable* `FocusTrackingAccessibilityElement`.
+                // That element survives every array refresh, so the
+                // element VoiceOver has focused stays valid across
+                // scrolls.
+                //
+                // Chat-history bubbles are accessibility *containers*
+                // (`isAccessibilityElement == false`), so the base engine
+                // took the other branch and emitted their raw child
+                // views directly — un-pooled, no stable identity. On
+                // scroll those raw children were recreated, VoiceOver
+                // lost the focused one, and navigation froze (the
+                // `focus-left-list type=View` loop after ~3 page scrolls).
+                //
+                // Promoting the item node here makes the base engine
+                // treat chat history exactly like the chat list.
+                let visibleScreenRect = self.accessibilityClippingFrameInScreenCoordinates()
+                    ?? UIAccessibility.convertToScreenCoordinates(
+                        CGRect(
+                            x: 0.0,
+                            y: self.rotated ? self.insets.bottom : self.insets.top,
+                            width: self.visibleSize.width,
+                            height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+                        ),
+                        in: self.view
+                    )
+                var voPromotedCount = 0
+                self.forEachItemNode { node in
+                    guard let itemNode = node as? ListViewItemNode else { return }
+                    guard let payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect),
+                          !payload.label.isEmpty else {
+                        return
+                    }
+                    itemNode.view.accessibilityElementsHidden = false
+                    itemNode.isAccessibilityElement = true
+                    itemNode.accessibilityLabel = payload.label
+                    itemNode.accessibilityValue = payload.value
+                    itemNode.accessibilityHint = payload.hint
+                    itemNode.accessibilityIdentifier = payload.identifier
+                    itemNode.accessibilityTraits = payload.traits
+                    itemNode.view.accessibilityCustomActions = payload.customActions
+                    ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
+                    self.voPromotedItemNodes.add(itemNode)
+                    voPromotedCount += 1
+                }
+                let elements = super.customAccessibilityElements()
+                print("[VO-CHAT] BASE-ENGINE-EXPERIMENT: promoted=\(voPromotedCount) super returned \(elements?.count ?? 0) elements")
+                return elements
             }
-            return elements
+            return super.customAccessibilityElements()
         }
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
