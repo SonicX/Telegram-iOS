@@ -681,6 +681,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     // A-check re-arms.
     private var voPendingRestoreAnchorLi: Int?
     private var voPendingRestoreRetried: Bool = false
+    // Monotonic anchor for the proactive direct-delta scroll. Each
+    // proactive scroll must anchor at a *strictly smaller* localIndex
+    // than the previous one (proactive is forward-only — toward smaller
+    // li, the dominant chat-reading direction). A proactive scroll
+    // generates several follow-up focus events (our restore/redirect
+    // `.screenChanged` posts, iOS auto-advance, cursor jiggle); those
+    // echoes re-report localIndices at or above the last anchor.
+    // Requiring strict forward progress rejects every echo by
+    // construction, which is what kills the forward↔backward scroll
+    // oscillation. Reset when the reactive path takes over or when
+    // focus jumps far back (chat switch / big reversal).
+    private var voProactiveLastAnchorLi: Int?
     // While a `voForceScrollToItem` `transaction` is in flight, narrow the
     // result of `customAccessibilityElements()` to a single element: the
     // anchor itself.  During the scroll, iOS's focus-recovery picks the
@@ -2822,10 +2834,6 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // *that* is the unambiguous signal that the user tried to
             // swipe past the edge — and only then do we scroll. Keeps
             // us from triggering scrolls the user didn't actually want.
-            //
-            // Capture prior li BEFORE updating — proactive code below
-            // uses this for direction & single-step detection.
-            let voPriorFocusedLi = self.voLastFocusedItemLocalIndex
             self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
 
             // Restore-focus retry. If we just posted a `.screenChanged`
@@ -2852,75 +2860,69 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
             }
 
-            // **Proactive direct-delta scroll.** Detect that the user
-            // is approaching the edge of the visible window in their
-            // direction of motion, and scroll the list by an EXPLICIT
-            // points delta (half the visible band) using
-            // `additionalScrollDistance`. Critical: this bypasses
-            // ListView's `scrollToItem` heuristics (which we observed
-            // failing in mixed-height content — barely-intersecting
-            // target counted as "already visible", contentOffset
-            // shifted only ~40pt, restore target never crossed the
-            // visibility threshold, the user got stuck in a feedback
-            // loop). With `additionalScrollDistance` we say exactly
-            // "shift by N points" — deterministic, no heuristics.
+            // **Proactive forward-only direct-delta scroll.** When the
+            // cursor reaches the smaller-localIndex edge of the visible
+            // window, scroll the list by an explicit half-screen points
+            // delta via `scroller.setContentOffset` (see
+            // `voProactiveScrollByDelta`) — no `scrollToItem` heuristic.
             //
-            // Guard rails learned from prior cascade-bug iterations:
-            // - `abs(focusedLi - priorLi) == 1`: only react to real
-            //   single-step user swipes; iOS jiggle (cursor reshuffle
-            //   after our previous scroll) jumps ≥2 positions and
-            //   doesn't count as user intent.
-            // - 0.4s debounce: one proactive scroll = one user swipe
-            //   consumed. iOS follow-up events within the debounce
-            //   window are ignored.
-            // - `voPendingRestoreAnchorLi == nil`: don't pile up
-            //   scrolls if a restore is already in flight.
-            // - `windowSize >= 4`: need a real window to compute
-            //   distance-to-edge; degenerate windows (1-2 photos that
-            //   fill the screen) fall back to reactive path.
+            // **Forward-only + monotonic anchor** is the key invariant
+            // that kills the oscillation observed in the prior version:
+            // a proactive scroll spawns several follow-up focus events
+            // (our restore/redirect `.screenChanged` posts, iOS
+            // auto-advance, cursor jiggle). Some of those echoes look
+            // like *backward* motion (cursor briefly at anchor+1),
+            // which made the previous direction-from-`priorLi` logic
+            // fire a reverse scroll, then the reverse spawned a
+            // forward-looking echo → endless forward↔backward toggling
+            // ("курсор летает туда обратно, скроллы мигают").
+            //
+            // The fix: proactive only ever scrolls toward smaller li
+            // (the dominant chat-reading direction), and each proactive
+            // scroll must anchor at a *strictly smaller* localIndex
+            // than the previous one (`voProactiveLastAnchorLi`). Every
+            // echo re-reports li ≥ the last anchor and is rejected by
+            // construction. Backward navigation is left entirely to the
+            // reactive edge-extend path.
+            //
+            // Guards:
+            // - `voPendingRestoreAnchorLi == nil`: a restore is not
+            //   already in flight.
+            // - 0.4s debounce.
+            // - `windowSize >= 4`: real window; degenerate 1-2-item
+            //   windows (photo bubbles) fall back to reactive.
+            // - `distanceToTop < 2`: cursor at/next-to the edge.
             if self.voPendingRestoreAnchorLi == nil,
                let focusedLi = focusedLocalIndex,
-               let priorLi = voPriorFocusedLi,
-               abs(focusedLi - priorLi) == 1,
+               focusedLi > 0,
                let visibleRange = self.voVisibleLocalIndexRange(),
                CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.4 {
                 let windowSize = visibleRange.bottom - visibleRange.top + 1
-                if windowSize >= 4 {
-                    let triggerDistance = 2  // fire at distance 0 or 1
-                    // Direct points delta = 50% of the list view's
-                    // height. No fudge-minimums, no inset subtraction —
-                    // pure half-screen scroll. The user explicitly
-                    // asked for this:
-                    //     "сделай 50% от высоты экрана подскролку"
-                    //
-                    // Sign convention: in the rotated chat history layout,
-                    // moving forward through the conversation (toward
-                    // smaller localIndex / older messages) corresponds to
-                    // a DECREASING contentOffset (verified empirically:
-                    // each successful force-scroll dropped contentOffsetY
-                    // by 60-200pt while exposing smaller-li items).
-                    // Therefore "forward" → negative delta, "backward" →
-                    // positive delta.
-                    let halfBand = self.visibleSize.height * 0.5
-                    var scrollDelta: CGFloat?
-                    if focusedLi < priorLi {
-                        // Moving toward smaller li (forward).
-                        let distanceToTop = focusedLi - visibleRange.top
-                        if distanceToTop < triggerDistance, focusedLi > 0 {
-                            scrollDelta = -halfBand
-                        }
-                    } else {
-                        // Moving toward larger li (backward).
-                        let distanceToBottom = visibleRange.bottom - focusedLi
-                        if distanceToBottom < triggerDistance {
-                            scrollDelta = halfBand
+                let distanceToTop = focusedLi - visibleRange.top
+                // Monotonic-anchor check.
+                var monotonicOK = true
+                if let lastAnchor = self.voProactiveLastAnchorLi {
+                    if focusedLi >= lastAnchor {
+                        // No forward progress past the last proactive
+                        // anchor — this is an echo of our own scroll.
+                        monotonicOK = false
+                        // If focus is *far* back from the anchor, the
+                        // user switched chats or made a big reversal —
+                        // re-arm so proactive works in the new context.
+                        if focusedLi > lastAnchor + 4 {
+                            self.voProactiveLastAnchorLi = nil
                         }
                     }
-                    if let delta = scrollDelta {
-                        self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                        print("[VO-CHAT] proactive-scroll-direct at-li=\(focusedLi) priorLi=\(priorLi) visible=\(visibleRange.top)..\(visibleRange.bottom) delta=\(Int(delta))pt -> restore-li=\(focusedLi)")
-                        self.voProactiveScrollByDelta(delta: delta, restoreFocusOn: focusedLi)
-                    }
+                }
+                if windowSize >= 4, monotonicOK, distanceToTop < 2 {
+                    // Half-screen delta. Negative = toward smaller li
+                    // (forward) — verified empirically: each forward
+                    // scroll decreases contentOffsetY.
+                    let delta = -(self.visibleSize.height * 0.5)
+                    self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                    self.voProactiveLastAnchorLi = focusedLi
+                    print("[VO-CHAT] proactive-scroll-direct at-li=\(focusedLi) visible=\(visibleRange.top)..\(visibleRange.bottom) delta=\(Int(delta))pt -> restore-li=\(focusedLi)")
+                    self.voProactiveScrollByDelta(delta: delta, restoreFocusOn: focusedLi)
                 }
             }
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
@@ -3021,6 +3023,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
                 if let target = extendTarget, let next = intendedNext {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                    // The reactive path took over — the proactive
+                    // monotonic chain is broken. Reset the anchor so
+                    // proactive re-arms cleanly from the next position.
+                    self.voProactiveLastAnchorLi = nil
                     print("[VO-CHAT] reactive-edge-extend left-from-li=\(lastLi) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
                     // Pre-set the restore anchor *before* starting the
                     // scroll. The transaction's completion block also sets
