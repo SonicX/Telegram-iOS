@@ -29,6 +29,27 @@ def run_fix_build_permissions(base_path):
         print('fix-build-permissions: skipped due to {}'.format(exception))
 
 
+def apply_signing_settings(base_path, xcodeproj_path, target_name):
+    """Проставляет настройки подписи в project.pbxproj через scripts/apply-signing-settings.py.
+
+    Применяется только к основному приложению (target_name == 'Telegram', проект Swiftgram).
+    Best-effort: если скрипт отсутствует или падает — генерация не прерывается.
+    """
+    if target_name != 'Telegram':
+        return
+    script = os.path.join(base_path, 'scripts', 'apply-signing-settings.py')
+    if not os.path.isfile(script):
+        return
+    pbxproj = os.path.join(base_path, xcodeproj_path, 'project.pbxproj')
+    if not os.path.isfile(pbxproj):
+        print('apply-signing: project.pbxproj не найден ({}), пропуск'.format(pbxproj))
+        return
+    try:
+        subprocess.call(['python3', script, '--pbxproj', pbxproj])
+    except Exception as exception:  # noqa: BLE001 - не валим генерацию из-за подписи
+        print('apply-signing: пропущено из-за {}'.format(exception))
+
+
 def generate_xcodeproj(build_environment: BuildEnvironment, disable_extensions, disable_provisioning_profiles, include_release, generate_dsym, bazel_app_arguments, target_name):
     run_fix_build_permissions(build_environment.base_path)
 
@@ -75,6 +96,14 @@ def generate_xcodeproj(build_environment: BuildEnvironment, disable_extensions, 
     if app_target_spec == "Telegram:Telegram": # MARK: Swiftgram
         app_target_spec = "Telegram/Swiftgram"
     xcodeproj_path = '{}.xcodeproj'.format(app_target_spec.replace(':', '/'))
+
+    # MARK: Swiftgram — фиксируем настройки подписи в сгенерированном проекте.
+    # rules_xcodeproj в bazel-режиме не пишет DEVELOPMENT_TEAM / CODE_SIGN_IDENTITY /
+    # PROVISIONING_PROFILE_SPECIFIER для file-based профилей, поэтому проставляем их
+    # сами (значения берутся из .mobileprovision). Делается ДО открытия Xcode, чтобы
+    # подпись «вставала на место» при каждой перегенерации без ручных правок.
+    apply_signing_settings(build_environment.base_path, xcodeproj_path, target_name)
+
     return xcodeproj_path
 
 

@@ -37,20 +37,22 @@ echo "Конфигурация: $CONFIGURATION_PATH"
 echo "Подпись:      $CODESIGNING_PATH"
 echo ""
 
-MAKE_ARGS=(
+# Глобальные опции Make идут ДО подкоманды generateProject
+GLOBAL_ARGS=()
+if [ -n "$CACHE_DIR" ]; then
+  GLOBAL_ARGS+=(--cacheDir="$CACHE_DIR")
+fi
+if [ -n "$OVERRIDE_XCODE_VERSION" ]; then
+  case "$OVERRIDE_XCODE_VERSION" in
+    1|true|yes|YES) GLOBAL_ARGS+=(--overrideXcodeVersion) ;;
+  esac
+fi
+
+SUBCOMMAND_ARGS=(
   generateProject
   --configurationPath="$CONFIGURATION_PATH"
   --codesigningInformationPath="$CODESIGNING_PATH"
   --disableExtensions
 )
 
-if [ -n "$CACHE_DIR" ]; then
-  MAKE_ARGS+=(--cacheDir="$CACHE_DIR")
-fi
-if [ -n "$OVERRIDE_XCODE_VERSION" ]; then
-  case "$OVERRIDE_XCODE_VERSION" in
-    1|true|yes|YES) MAKE_ARGS+=(--overrideXcodeVersion) ;;
-  esac
-fi
-
-python3 -u build-system/Make/Make.py "${MAKE_ARGS[@]}"
+python3 -u build-system/Make/Make.py "${GLOBAL_ARGS[@]}" "${SUBCOMMAND_ARGS[@]}"
