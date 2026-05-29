@@ -497,15 +497,36 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
         var activeLocalIndices = Set<Int>()
-        let contentOffset = self.scroller.contentOffset
         let visibleTop: CGFloat
         let visibleBottom: CGFloat
+        // **`visibleRect` must be in the item-node frame space, which is
+        // the list view's own bounds (view space) — NOT offset by
+        // `scroller.contentOffset.y`.**
+        //
+        // `ListView` keeps materialised item nodes positioned directly
+        // in its view bounds (a visible row has `frame.minY` in
+        // `[insets.top, visibleSize.height - insets.bottom]`); the hidden
+        // `scroller` is only a gesture/offset proxy whose `contentOffset`
+        // hovers around `infiniteScrollSize` (10 000) due to the
+        // infinite-scroll trick. Adding `contentOffset.y` to the
+        // viewport rect therefore shifts it ~10 000 pt away from where
+        // the item frames actually are.
+        //
+        // For the chat *list* this went unnoticed: there
+        // `contentOffset.y == 0`, so `+ contentOffset.y` was a harmless
+        // no-op and `visibleRect` matched the item frames. For rotated
+        // chat *history* `contentOffset.y == 10 000`, so `visibleRect`
+        // landed at y≈10 144 while item frames sit at y≈-700…400 — they
+        // never intersected, the filter dropped every element, and
+        // `customAccessibilityElements()` returned an empty array
+        // (diagnosed via the `[VO-BASE-DIAG]` log). Dropping
+        // `contentOffset.y` puts `visibleRect` back in item-frame space.
         if self.rotated {
-            visibleTop = contentOffset.y + self.insets.bottom
-            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.top
+            visibleTop = self.insets.bottom
+            visibleBottom = self.visibleSize.height - self.insets.top
         } else {
-            visibleTop = contentOffset.y + self.insets.top
-            visibleBottom = contentOffset.y + self.visibleSize.height - self.insets.bottom
+            visibleTop = self.insets.top
+            visibleBottom = self.visibleSize.height - self.insets.bottom
         }
         let visibleRect = CGRect(x: 0.0, y: visibleTop, width: self.visibleSize.width, height: max(0.0, visibleBottom - visibleTop))
         // Expanded accessibility inclusion zone.
@@ -5557,6 +5578,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
 
+    /// Subclass hook for vetoing the off-screen-uiview scroll path in
+    /// `handleSystemAccessibilityFocusNotification`. Default: allow.
+    ///
+    /// `ChatHistoryListNodeImpl` overrides this to reject scroll requests
+    /// whose target `localIndex` is far from the user's last live-focused
+    /// bubble. This blocks the "_ASDisplayView matched to a far item →
+    /// scroll-to-far-item" cascade that otherwise yanks the chat to the
+    /// far end of the buffer when VoiceOver loses anchor at the edge of
+    /// the bounded sliding window.
+    open func accessibilityShouldAllowScrollToItem(at localIndex: Int) -> Bool {
+        return true
+    }
+
     public func updateAccessibilityDirectionalElements(_ elements: [Any]) {
         guard self.accessibilityDirectionalAnnouncement != nil else {
             self.accessibilityPreviousFocusedDirectionalState = nil
@@ -5676,9 +5710,23 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         if let focusedAny, !self.isAccessibilityObjectInsideCurrentListSequence(focusedAny) {
-            print("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
-            self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
-            return
+            // The focused element is not in the *current* accessibility
+            // array. Normally that means focus genuinely left the list
+            // (navbar etc.) — bail out. BUT if the focused object is
+            // still a descendant of this list view, it's one of our own
+            // item nodes that has scrolled out of the materialised
+            // window and been dropped from the array. That is exactly
+            // the case the off-screen-focus scroll handler below must
+            // handle (scroll it back into view). Returning here instead
+            // froze VoiceOver navigation after a few page scrolls — the
+            // cursor sat on an off-screen item, this guard fired every
+            // time, and the scroll handler was never reached.
+            if !self.isAccessibilityObjectInsideListView(focusedAny) {
+                print("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
+                self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
+                return
+            }
+            print("[VO-STATE] focus-left-sequence-but-inside-list type=\(type(of: focusedAny)) — falling through to off-screen scroll")
         }
         if let focusedView = focusedAny as? UIView,
            self.isAccessibilityObjectInsideListView(focusedView),
@@ -5716,8 +5764,44 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 // and skips when the row is sufficiently on-screen,
                 // so repeated transient focus events don't pile up
                 // scroll transactions.
-                if let itemNode = self.itemNodes.first(where: { $0.view === focusedView }),
+                // Match the focused view against item nodes — either the
+                // item node's own view IS the focused element (chat-list
+                // case: each row is a single accessibility element), or
+                // the focused element is a *descendant* view inside the
+                // item node (chat-history case: a message bubble is an
+                // accessibility container whose child elements are the
+                // focus targets). Walking up to the enclosing item node
+                // is what lets the off-screen-focus scroll handler work
+                // for container-style cells.
+                if let itemNode = self.itemNodes.first(where: { $0.view === focusedView || focusedView.isDescendant(of: $0.view) }),
                    let localIndex = itemNode.index {
+                    // Bogus-fallback guard. After a swipe at the edge of the
+                    // variant-Y sliding window, VoiceOver can land focus on
+                    // a parent `_ASDisplayView` that happens to be one of
+                    // the item nodes — even one that is far from where the
+                    // user has been navigating (observed: localIndex=0 while
+                    // the user is around li=47). Reacting with a
+                    // `scrollVoiceOverFocusToItem` for that bogus focus
+                    // yanks the list to the far end of the buffer.
+                    //
+                    // Guard: if the item was *explicitly hidden* from
+                    // accessibility (`accessibilityElementsHidden = true`),
+                    // it can't be an intentional VoiceOver target. We do
+                    // NOT also test `!isAccessibilityElement` — that is
+                    // false for every container-style cell (chat-history
+                    // bubbles) and would wrongly block their scroll. The
+                    // subclass-level distance veto
+                    // (`accessibilityShouldAllowScrollToItem`) is the
+                    // other line of defence.
+                    let viewHidden = itemNode.view.accessibilityElementsHidden
+                    if viewHidden {
+                        print("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden)")
+                        return
+                    }
+                    if !self.accessibilityShouldAllowScrollToItem(at: localIndex) {
+                        print("[VO-STATE] focus-scroll-skip reason=subclass-veto localIndex=\(localIndex)")
+                        return
+                    }
                     print("[VO-STATE] focus-scroll-triggered-by-uiview localIndex=\(localIndex) type=\(type(of: focusedView))")
                     self.scrollVoiceOverFocusToItem(at: localIndex)
                     return
@@ -6575,26 +6659,39 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // observed in the user's logs).  We only scroll when the target
         // row is genuinely outside the viewport.
         if let itemNode = self.itemNodes.first(where: { $0.index == localIndex }) {
-            let visibleTop = self.insets.top
-            let visibleBottom = self.visibleSize.height - self.insets.bottom
-            let frame = itemNode.frame
-            // "Sufficiently visible" means the row is fully inside the
-            // clip OR its visible portion is larger than the clip
-            // (taller-than-screen bubble whose top or bottom is at the
-            // edge — user can already read the start of it).
-            let intersection = frame.intersection(CGRect(x: 0, y: visibleTop, width: self.visibleSize.width, height: max(0, visibleBottom - visibleTop)))
-            let clipHeight = max(0, visibleBottom - visibleTop)
-            let alreadyOnScreen: Bool
-            if frame.height >= clipHeight {
-                // Tall row: any non-trivial overlap counts — the user can
-                // start reading without an extra scroll.
-                alreadyOnScreen = intersection.height >= clipHeight * 0.9
-            } else {
-                // Short row: must be fully visible.
-                alreadyOnScreen = intersection.height >= frame.height - 1.0
-            }
-            if alreadyOnScreen {
-                return
+            // **Rotation-correct visibility test.** The earlier version
+            // compared `itemNode.frame` (ListView layout space) against a
+            // viewport rect built from `insets`/`visibleSize`. For a
+            // rotated list (chat history) the layout-space frame and the
+            // on-screen position diverge — the test reported "already on
+            // screen" for genuinely off-screen rows, so the whole method
+            // short-circuited and never scrolled (the bug behind "скролл
+            // не проходит / застряло после 2-3 подскролов").
+            //
+            // `UIAccessibility.convertToScreenCoordinates` walks the full
+            // view hierarchy including the 180° rotation transform, so
+            // the screen frame is correct regardless of rotation. We
+            // compare it against the list's own on-screen clip frame.
+            let itemScreenFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            let listClipFrame = self.accessibilityClippingFrameInScreenCoordinates()
+                ?? UIAccessibility.convertToScreenCoordinates(
+                    CGRect(x: 0.0, y: self.insets.top, width: self.visibleSize.width, height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)),
+                    in: self.view)
+            if !itemScreenFrame.isNull, !listClipFrame.isNull {
+                let intersection = itemScreenFrame.intersection(listClipFrame)
+                let intersectionHeight = intersection.isNull ? 0.0 : intersection.height
+                let alreadyOnScreen: Bool
+                if itemScreenFrame.height >= listClipFrame.height {
+                    // Taller-than-clip row: a large overlap is enough —
+                    // the user can already read its start.
+                    alreadyOnScreen = intersectionHeight >= listClipFrame.height * 0.9
+                } else {
+                    // Short row: must be (almost) fully visible.
+                    alreadyOnScreen = intersectionHeight >= itemScreenFrame.height - 1.0
+                }
+                if alreadyOnScreen {
+                    return
+                }
             }
         }
 

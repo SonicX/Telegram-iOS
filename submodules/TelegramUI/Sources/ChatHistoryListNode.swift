@@ -652,6 +652,46 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private var lastFocusedElementIdentity: ObjectIdentifier?
     private var elementFocusedObserver: NSObjectProtocol?
 
+    // Tracking for VoiceOver bounded-window edge advance + fly-away recovery.
+    // Both paths live inline inside `handleVoiceOverFocusChanged`.
+    //
+    // Why: with the N=1 synthetic neighbour design in
+    // `customAccessibilityElements`, the synthetic frame for the off-screen
+    // sibling collapses onto the visible bubble at the clip edge. VoiceOver
+    // can't reach it, fires `focus-left-list`, then re-anchors on `array[0]`
+    // — which in reversed nav order is the newest message in the window —
+    // and the cursor visibly «улетает» 6+ items away. We address this from
+    // two sides:
+    //   • A) Preemptively scroll when focus arrives at the visible edge in
+    //     the direction the user is moving, so the next bubble has a real
+    //     on-screen frame by the time VoiceOver tries to navigate to it.
+    //   • B) Strap a recovery net: if focus does still leave the list and
+    //     come back on a far-away `localIndex`, redirect it back to the
+    //     last known one via `.layoutChanged`.
+    private var voLastFocusedItemLocalIndex: Int?
+    private var voFocusLostTimestamp: CFTimeInterval = 0
+    private var voLastEdgeScrollTimestamp: CFTimeInterval = 0
+    // Anchor we're expecting iOS to deliver focus to after our most
+    // recent restore-focus post. While the cursor sits on this exact
+    // localIndex, A-check is suppressed — the focus event we get is
+    // *our own restore arriving*, not a fresh user swipe, so triggering
+    // another edge-extend would just chain into a runaway auto-scroll
+    // (cursor races through messages with no input). As soon as the
+    // user actually moves to a different bubble, the anchor clears and
+    // A-check re-arms.
+    private var voPendingRestoreAnchorLi: Int?
+    private var voPendingRestoreRetried: Bool = false
+    // While a `voForceScrollToItem` `transaction` is in flight, narrow the
+    // result of `customAccessibilityElements()` to a single element: the
+    // anchor itself.  During the scroll, iOS's focus-recovery picks the
+    // "nearest visible" target from whatever array we expose; if we keep
+    // exposing the full window iOS routinely lands focus on a transient
+    // bubble (observed: li=46 announced briefly before cursor settles on
+    // li=44).  Reducing the array to {anchor} for the duration of the
+    // scroll leaves iOS no other choice — the only legal focus target is
+    // the bubble we want.  Cleared in the transaction completion.
+    private var voScrollWindowAnchorLi: Int?
+
     // Tracks message bubbles we *promoted* to a single accessibility leaf
     // (via `isAccessibilityElement = true`) while VoiceOver is active —
     // exactly the same trick `ChatListItemNode` uses unconditionally
@@ -1070,6 +1110,23 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // 10k increments; for very heavy channels lower it further.
         let updateFullMaterialization: () -> Void = { [weak self] in
             guard let self else { return }
+            // **Keep a large materialised buffer while VoiceOver runs.**
+            //
+            // This is exactly what the chat list does — its diagnostic
+            // dump shows `inclusionRect=(-5e8..5e8)`, i.e. it fully
+            // materialises every row. That is *why* chat-list VoiceOver
+            // navigation never freezes: materialised views are never
+            // recycled, so the element VoiceOver has focused always
+            // stays valid.
+            //
+            // Chat history can't materialise thousands of messages, but
+            // `accessibilityInvisibleInsetOverride = 10000` keeps a
+            // ±10 000 pt buffer (~100 messages) — far more than a single
+            // navigation session traverses, so the focused message
+            // bubble is never recycled out from under VoiceOver. Without
+            // this buffer the cursor froze after ~3 page scrolls: the
+            // focused bubble's view got recycled, `isDescendant(of:)`
+            // turned false, and focus was orphaned.
             let shouldForce = UIAccessibility.isVoiceOverRunning
             let desired: CGFloat? = shouldForce ? 10_000.0 : nil
             if self.accessibilityInvisibleInsetOverride != desired {
@@ -1954,7 +2011,85 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         )
     }
 
+    /// **EXPERIMENT** — fall back to the base `ListView` accessibility
+    /// engine instead of this file's custom bounded-window override.
+    ///
+    /// The base `ListView.customAccessibilityElements()`, in
+    /// full-materialisation mode (`accessibilityInvisibleInsetOverride`
+    /// is set, which chat history does), already exposes *every*
+    /// materialised message with its real `convertToScreenCoordinates`
+    /// frame — exactly the model the system Messages app gets for free
+    /// from `UICollectionView`. It also has `accessibilityScroll` and
+    /// an off-screen-focus scroll handler. The chat list uses this base
+    /// engine untouched and scrolls fine under VoiceOver.
+    ///
+    /// This flag short-circuits the custom override so we can observe
+    /// whether the base engine drives chat history correctly. If it
+    /// does, the entire bounded-window / edge-extend / narrow-window
+    /// machinery can be deleted.
+    private static let voUseBaseAccessibilityExperiment = true
+
     override public func customAccessibilityElements() -> [Any]? {
+        if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
+            if UIAccessibility.isVoiceOverRunning {
+                // **Promote each materialised message bubble to a single
+                // accessibility leaf — exactly what `ChatListItemNode`
+                // does (`isAccessibilityElement = true`).**
+                //
+                // This is the missing piece. The chat list works because
+                // every row is ONE accessibility element, so the base
+                // engine (`ListView.swift:555`) wraps it via
+                // `reuseOrCreateDirectionalElement` into a *pooled,
+                // identity-stable* `FocusTrackingAccessibilityElement`.
+                // That element survives every array refresh, so the
+                // element VoiceOver has focused stays valid across
+                // scrolls.
+                //
+                // Chat-history bubbles are accessibility *containers*
+                // (`isAccessibilityElement == false`), so the base engine
+                // took the other branch and emitted their raw child
+                // views directly — un-pooled, no stable identity. On
+                // scroll those raw children were recreated, VoiceOver
+                // lost the focused one, and navigation froze (the
+                // `focus-left-list type=View` loop after ~3 page scrolls).
+                //
+                // Promoting the item node here makes the base engine
+                // treat chat history exactly like the chat list.
+                let visibleScreenRect = self.accessibilityClippingFrameInScreenCoordinates()
+                    ?? UIAccessibility.convertToScreenCoordinates(
+                        CGRect(
+                            x: 0.0,
+                            y: self.rotated ? self.insets.bottom : self.insets.top,
+                            width: self.visibleSize.width,
+                            height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+                        ),
+                        in: self.view
+                    )
+                var voPromotedCount = 0
+                self.forEachItemNode { node in
+                    guard let itemNode = node as? ListViewItemNode else { return }
+                    guard let payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect),
+                          !payload.label.isEmpty else {
+                        return
+                    }
+                    itemNode.view.accessibilityElementsHidden = false
+                    itemNode.isAccessibilityElement = true
+                    itemNode.accessibilityLabel = payload.label
+                    itemNode.accessibilityValue = payload.value
+                    itemNode.accessibilityHint = payload.hint
+                    itemNode.accessibilityIdentifier = payload.identifier
+                    itemNode.accessibilityTraits = payload.traits
+                    itemNode.view.accessibilityCustomActions = payload.customActions
+                    ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
+                    self.voPromotedItemNodes.add(itemNode)
+                    voPromotedCount += 1
+                }
+                let elements = super.customAccessibilityElements()
+                print("[VO-CHAT] BASE-ENGINE-EXPERIMENT: promoted=\(voPromotedCount) super returned \(elements?.count ?? 0) elements")
+                return elements
+            }
+            return super.customAccessibilityElements()
+        }
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
@@ -2017,6 +2152,49 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         }
         if voIsRunning {
             print("[VO-CHAT] customAccessibilityElements: enter rotated=\(self.rotated) fullMode=\(isFullMaterializationActive) trackDir=\(trackDirectionalFocus) contentOffsetY=\(Int(contentOffset.y)) visibleSize=\(Int(self.visibleSize.width))x\(Int(self.visibleSize.height)) windowY=[\(Int(visibleTop))..\(Int(visibleBottom))] navOrder=\(self.accessibilityNavigationOrder == .reversed ? "reversed" : "automatic")")
+        }
+        // **Narrow-window mode**: a `voForceScrollToItem` `transaction` is in
+        // flight. Return only the anchor element so iOS's focus-recovery
+        // during the scroll has exactly one legal target — preventing the
+        // transient "wrong bubble" announcement (e.g. li=46 instead of
+        // li=44) that the user hears as "залипание/улёт на короткое время".
+        // When the transaction completes we clear the flag and the next
+        // `customAccessibilityElements()` call returns the full window.
+        if voIsRunning, let narrowAnchor = self.voScrollWindowAnchorLi,
+           let anchorNode = self.voItemNode(forLocalIndex: narrowAnchor),
+           anchorNode.isNodeLoaded {
+            // Promote and unhide so iOS treats the view as a valid leaf.
+            anchorNode.isAccessibilityElement = true
+            anchorNode.view.isAccessibilityElement = true
+            anchorNode.view.accessibilityElementsHidden = false
+            // Give the anchor a frame that's actually inside the clip,
+            // so iOS spatial recovery considers it "visible". Use the
+            // full visible band — there's only one element, dimensions
+            // don't compete.
+            anchorNode.view.accessibilityFrame = visibleScreenRect
+            // Hide every other materialised item from accessibility.
+            // iOS's focus-recovery during scroll can bypass our
+            // `customAccessibilityElements` array and walk the subview
+            // tree directly; if visible bubbles are still leaves there,
+            // it will pick one of them as "nearest visible" and announce
+            // it briefly. Hiding the whole tree leaves only the anchor
+            // as a legal focus target on either lookup path. The next
+            // normal `customAccessibilityElements` pass (right after the
+            // transaction completes and `voScrollWindowAnchorLi` is
+            // cleared) re-sets `accessibilityElementsHidden = false` for
+            // visible items, so this masking is transient.
+            self.forEachItemNode { node in
+                guard let listNode = node as? ListViewItemNode else { return }
+                if listNode === anchorNode { return }
+                if listNode.isNodeLoaded {
+                    listNode.view.accessibilityElementsHidden = true
+                }
+            }
+            let narrowList: [Any] = [anchorNode.view as Any]
+            self.lastAccessibilityElements = narrowList
+            self.updateAccessibilityDirectionalElements(narrowList)
+            print("[VO-CHAT] customAccessibilityElements: NARROW-WINDOW anchor=\(narrowAnchor) finalCount=1")
+            return narrowList
         }
         var voTotalNodesVisited = 0
         // Variant Y iterates only over materialised item nodes, so the
@@ -2116,6 +2294,19 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // tap-target's worth of on-screen content — enough to be
             // a genuine focus target, small enough not to reject a
             // short text bubble at the viewport edge.
+            //
+            // **However**, an absolute 44pt threshold excludes short
+            // service cells (pinned-message indicator, unread divider,
+            // date headers — typically 28..40pt tall) even when they
+            // are *fully* on-screen, because their entire intersection
+            // is < 44pt. The user observed VoiceOver "skipping past"
+            // these placeholders. We therefore lower the bar for cells
+            // whose natural height is below the 44pt floor: a cell is
+            // visible if ≥ 90% of its own height is on-screen.
+            //
+            // The tall-bubble protection is preserved: for a 1500pt
+            // bubble, `min(44, 1500*0.9)` is still 44, so the original
+            // 44pt requirement applies.
             let kMinVisibleHeight: CGFloat = 44.0
             var collected: [CollectedItem] = []
             self.forEachItemNode { node in
@@ -2134,9 +2325,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
                 let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
                 let intersection = realFrame.isNull ? CGRect.null : realFrame.intersection(synthClip)
+                // Per-item required-visible-height: 44pt for tall cells,
+                // 90% of natural height for short cells (placeholders).
+                let requiredVisibleHeight: CGFloat
+                if realFrame.isNull {
+                    requiredVisibleHeight = kMinVisibleHeight
+                } else {
+                    requiredVisibleHeight = min(kMinVisibleHeight, realFrame.height * 0.9)
+                }
                 let isVisible = !realFrame.isNull
                     && !intersection.isNull
-                    && intersection.height >= kMinVisibleHeight
+                    && intersection.height >= requiredVisibleHeight
                     && intersection.width > 1.0
                 // `clippedFrame` is the on-screen slice; falls back to
                 // the raw real frame when there's no intersection
@@ -2206,13 +2405,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // promotes the next-closest off-screen item into a
             // neighbour slot — the user advances one step per swipe
             // continuously).
-            // Single synthetic neighbour per side: VoiceOver picks the
-            // closest spatial neighbour, and with N=1 that's
-            // unambiguously the array-adjacent off-screen bubble. With
-            // N=3 (the previous setting) VoiceOver sometimes picked
-            // the 2nd or 3rd slot, causing observable "jump 2-3
-            // messages" on a single swipe at the array edge.
-            let kSynthNeighbours = 1
+            // **No synthetic neighbours.** Every value of N≥1 we tried
+            // produced occasional fly-aways because VoiceOver's fallback-
+            // fascination on focus loss picked a synthetic-neighbour slot
+            // at random (sometimes the *farthest* one), regardless of
+            // stagger spacing.
+            //
+            // With N=0 the accessibility array contains *only* fully-
+            // visible bubbles. When the user swipes past the visible
+            // edge, VoiceOver has no next element to navigate to — focus
+            // either stays on the edge bubble (silent swipe) or leaves to
+            // a sibling container. Our A-check (cursor-at-edge detection
+            // in `handleVoiceOverFocusChanged`) is now the *sole*
+            // mechanism extending the buffer: when cursor lands on the
+            // visible-range edge, we force-scroll to expose more items
+            // and restore focus onto the intended next bubble, which is
+            // now genuinely visible (no degenerate synthetic frame for
+            // VoiceOver to stumble on).
+            let kSynthNeighbours = 0
 
             let visibleItems = collected.filter { $0.isVisible }
             // Compute the visible band extent from the **clipped**
@@ -2238,15 +2448,51 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let belowAll = collected.filter { !$0.isVisible && !$0.isAboveVisible }
                 .sorted { $0.localIndex < $1.localIndex }
             // Neighbours: take the closest-to-visible items from each
-            // side. For `aboveAll` (sorted asc), the **highest**
-            // localIndex sits closest to visible — so the neighbour
-            // slice is the *suffix*. For `belowAll`, the **lowest**
-            // localIndex is closest — take the *prefix*.
-            let aboveNeighbours = aboveAll.suffix(kSynthNeighbours)
-            let belowNeighbours = belowAll.prefix(kSynthNeighbours)
+            // side. In a **non-rotated** ListView (e.g. chat list) the
+            // localIndex order matches the visual top-to-bottom order, so
+            // `aboveAll` (sorted asc) ends with the items closest to the
+            // visible top → take the *suffix*; `belowAll` starts with the
+            // items closest to the visible bottom → take the *prefix*.
+            //
+            // In a **rotated** ListView (chat history) the layer is
+            // 180°-flipped, so the localIndex order is *visually inverted*:
+            // the highest localIndex sits at the top of the viewport, and
+            // items visually above the viewport have **larger** localIndex
+            // than the topmost visible bubble. `aboveAll` is therefore the
+            // tail end of the localIndex range, and the item closest to
+            // the visible top is the *smallest* localIndex in `aboveAll`
+            // → take the *prefix*. Symmetrically for `belowAll`.
+            //
+            // Without this rotation-aware swap the bounded sliding window
+            // picked the farthest off-screen items as "neighbours" in
+            // rotated mode (observed: `firstSorted=0 lastSorted=87` for a
+            // visible window around li=47..52). When VoiceOver then tried
+            // to navigate from the visible edge to those far neighbours,
+            // their synthetic frames were degenerate, focus fell off, and
+            // UIKit's accessibility auto-scroll yanked the chat to the
+            // far end of the buffer (contentOffsetY +1000pt jump).
+            let aboveNeighbours: ArraySlice<CollectedItem>
+            let belowNeighbours: ArraySlice<CollectedItem>
+            if self.rotated {
+                aboveNeighbours = aboveAll.prefix(kSynthNeighbours)
+                belowNeighbours = belowAll.suffix(kSynthNeighbours)
+            } else {
+                aboveNeighbours = aboveAll.suffix(kSynthNeighbours)
+                belowNeighbours = belowAll.prefix(kSynthNeighbours)
+            }
 
             let synthHeight: CGFloat = 1.0
-            let synthStep: CGFloat = 0.5
+            // 5pt stagger between synthetic-neighbour slots, not 0.5pt.
+            // With kSynthNeighbours=5, the previous 0.5pt step packed
+            // all five slots into 2.5pt of vertical space — VoiceOver's
+            // spatial scan couldn't tell them apart and routinely
+            // picked the wrong slot (e.g. the far end of the below-
+            // neighbour stack instead of the closest one), causing the
+            // cursor to fly down several positions on the user's first
+            // swipe after an edge-extend restore. 5pt gives each slot
+            // ~5pt of unambiguous spatial separation while still fitting
+            // comfortably inside the clip even when clamped at edges.
+            let synthStep: CGFloat = 5.0
             let synthWidth = max(1.0, synthClip.width)
             let synthX = synthClip.minX
 
@@ -2445,6 +2691,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
     private func handleVoiceOverFocusChanged(notification: Notification) {
         guard UIAccessibility.isVoiceOverRunning else { return }
+        // **EXPERIMENT** — when running on the base `ListView`
+        // accessibility engine, this custom focus handler (edge-extend,
+        // fly-away-suppress, force-scroll, narrow-window, retry,
+        // redirect-anchor) must NOT interfere. The base engine + its
+        // own off-screen-focus scroll handler drive everything. Skip
+        // the whole custom handler so the experiment observes pure
+        // base-engine behaviour.
+        if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
+            return
+        }
         guard let userInfo = notification.userInfo else { return }
         let focusedAny = userInfo[UIAccessibility.focusedElementUserInfoKey]
         let unfocusedAny = userInfo[UIAccessibility.unfocusedElementUserInfoKey]
@@ -2493,6 +2749,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         let totalLoaded = elements.count
         var totalChat: Int?
         var absolutePosition: Int?
+        var focusedLocalIndex: Int?
         if let focusedPosition {
             // Resolve the source view for absolute-scroll info regardless
             // of whether the array stores `FocusTrackingAccessibilityElement`
@@ -2512,6 +2769,9 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 absolutePosition = info.position
                 totalChat = info.total
             }
+            if let sourceView {
+                focusedLocalIndex = self.voLocalIndex(forFocusedSourceView: sourceView)
+            }
         }
 
         if let focusedPosition {
@@ -2519,6 +2779,93 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             if self.lastFocusedElementIdentity == identity {
                 return
             }
+
+            // ── B) Catch fly-away.
+            //
+            // Symptom (see logs that triggered this code):
+            //   • Cursor at li=47 (position=7/8, top-edge of an 8-item
+            //     reversed-nav window).
+            //   • User swipes.  VoiceOver can't navigate to the synthetic
+            //     above-neighbour (degenerate frame at the clip edge),
+            //     fires `focus-left-list` → re-anchors on `array[0]` =
+            //     li=53 = chat=133 (six items in the opposite direction).
+            //
+            // Heuristic: a fresh focus that lands on a localIndex far away
+            // from the last known one, within a short window after focus
+            // left the list, is a recovery — redirect VoiceOver back to
+            // the previously focused bubble.  The user's swipe is then
+            // re-issued from the right place instead of the cursor
+            // disappearing to the far end of the buffer.
+            //
+            // The redirect itself triggers another focus event for the
+            // restored bubble; the same-localIndex check on the next entry
+            // (diff == 0) keeps it from looping.  `voFocusLostTimestamp`
+            // is cleared as a belt-and-braces guard so a single
+            // `focus-left-list` can only redirect once.
+            if let focusedLocalIndex,
+               let lastLocalIndex = self.voLastFocusedItemLocalIndex,
+               self.voFocusLostTimestamp > 0,
+               CACurrentMediaTime() - self.voFocusLostTimestamp < 0.5,
+               abs(focusedLocalIndex - lastLocalIndex) > 2,
+               // **Don't suppress our own restore-arrival.** When
+               // `force-scroll-restore-focus-retry` posts `.screenChanged`
+               // on the anchor, iOS first fires a `focus-left-list` event
+               // (resetting `voFocusLostTimestamp`), then delivers the
+               // focus arrival on the anchor. The distance between the
+               // wrong-pick `lastLocalIndex` (e.g. li=48) and our anchor
+               // (li=45) is naturally >2 — exactly the fly-away pattern.
+               // But this *is* the recovery we asked for, not iOS's
+               // mistaken pick.  Suppressing it leaves
+               // `lastFocusedElementIdentity = nil`; iOS, getting no
+               // acknowledgement, drifts focus to the navbar
+               // (`ChatTitleView`, `NavigationButtonItemNode`) — visible
+               // as the "залипание" the user reported.  Exempting the
+               // pending-anchor lets our own retry land cleanly and
+               // proceed through the normal cursor-log + restore-clear
+               // path below.
+               self.voPendingRestoreAnchorLi != focusedLocalIndex {
+                // **If we have a pending restore anchor, force-redirect
+                // to it immediately.** Without this push, iOS sits on
+                // the fly-away target (e.g. li=52 when user expected
+                // li=44) until its own recovery tick eventually drifts
+                // closer to the anchor — meanwhile the user hears a
+                // sequence of wrong bubbles ("Ринат … Ринат … Ринат")
+                // and has to "повторить прямой свайп" to push the
+                // navigation forward.
+                //
+                // The pending anchor is a now-visible item we just
+                // force-scrolled to expose, so its accessibility view
+                // is promoted (`isAccessibilityElement = true`,
+                // `accessibilityElementsHidden = false`) and the
+                // `.screenChanged` post is honoured. Re-promote on this
+                // path too in case anything stomped on those flags
+                // between the original force-scroll completion and the
+                // fly-away delivery.
+                //
+                // We use the same single-retry budget as the regular
+                // retry path (`voPendingRestoreRetried`) so a stubborn
+                // anchor doesn't loop forever. After this push, the
+                // next focus event (from iOS settling on the anchor)
+                // flows through the normal cursor-log + restore-clear
+                // path because `voPendingRestoreAnchorLi == focused
+                // LocalIndex` falls into the early-exempt branch above.
+                if let pending = self.voPendingRestoreAnchorLi,
+                   !self.voPendingRestoreRetried,
+                   let pendingNode = self.voItemNode(forLocalIndex: pending) {
+                    self.voPendingRestoreRetried = true
+                    pendingNode.isAccessibilityElement = true
+                    pendingNode.view.accessibilityElementsHidden = false
+                    pendingNode.view.isAccessibilityElement = true
+                    print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex), retry-anchor li=\(pending)")
+                    UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
+                } else {
+                    print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
+                }
+                self.voFocusLostTimestamp = 0
+                self.lastFocusedElementIdentity = nil
+                return
+            }
+
             self.lastFocusedElementIdentity = identity
 
             let element = elements[focusedPosition]
@@ -2538,8 +2885,212 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let total = totalChat.map(String.init) ?? "?"
             let prevPosition = unfocusedPosition.map { $0 + 1 }
             print("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
+
+            // Edge-extend scroll. When the user's focus lands on the
+            // edge of the visible-localIndex range (or beyond, on a
+            // synthetic-neighbour slot whose real frame is off-screen),
+            // preemptively scroll the list so the next adjacent bubble
+            // becomes a real visible item. Without this, the user
+            // navigates to the synthetic-neighbour slot, has no further
+            // element to swipe to, focus is lost, and VoiceOver re-anchors
+            // on whatever the first usable element in `accessibilityElements`
+            // is — visible as a "fly-away" jump 6-10 positions back.
+            //
+            // The cascade that bit an earlier iteration of this code
+            // (preemptive scroll → `_ASDisplayView` fallback → ListView's
+            // scroll-to-uiview for li=0 → +1000pt jump) is now blocked
+            // by three guards that run higher in the stack:
+            //   1. Rotation-aware prefix/suffix in
+            //      `customAccessibilityElements` so the bounded window
+            //      contains the *closest* neighbours, not the farthest.
+            //   2. `accessibilityElementsHidden`-aware skip in
+            //      `ListView.handleSystemAccessibilityFocusNotification`.
+            //   3. `accessibilityShouldAllowScrollToItem(at:)` veto for
+            //      targets far from the last known live focus.
+            // With those in place, `scrollVoiceOverFocusToItem` here can
+            // only scroll to an adjacent target near the live focus.
+            //
+            // Triggering criterion: focused localIndex is at-or-beyond
+            // the visible edge in the direction we want to extend. The
+            // `<=` / `>=` covers both visible-edge bubbles (top/bottom
+            // of `visibleRange`) and synthetic-neighbour focus
+            // (`focusedLocalIndex` outside the range entirely).
+            //
+            // Debounce 0.2s keeps repeated focus events at the same edge
+            // from queueing multiple scroll transactions on top of one
+            // another.
+            // No proactive edge-extend here. With kSynthNeighbours=0 the
+            // array contains only visible bubbles; nothing happens when
+            // the cursor merely *arrives* at the edge. The actual scroll
+            // happens **reactively** in the focus-left branch below:
+            // when VoiceOver gives up and lets focus leave the list,
+            // *that* is the unambiguous signal that the user tried to
+            // swipe past the edge — and only then do we scroll. Keeps
+            // us from triggering scrolls the user didn't actually want.
+            self.voLastFocusedItemLocalIndex = focusedLocalIndex ?? self.voLastFocusedItemLocalIndex
+
+            // Restore-focus retry. If we just posted a `.screenChanged`
+            // for an anchor view but iOS settled focus elsewhere (e.g.
+            // on a closer-to-old-focus visible bubble), try one more
+            // post. Single retry — beyond that we accept whatever
+            // VoiceOver chose, to avoid spinning forever if iOS just
+            // refuses our suggestion.
+            if let pending = self.voPendingRestoreAnchorLi {
+                if pending == focusedLocalIndex {
+                    self.voPendingRestoreAnchorLi = nil
+                    self.voPendingRestoreRetried = false
+                } else if !self.voPendingRestoreRetried,
+                          let pendingNode = self.voItemNode(forLocalIndex: pending) {
+                    self.voPendingRestoreRetried = true
+                    pendingNode.isAccessibilityElement = true
+                    pendingNode.view.accessibilityElementsHidden = false
+                    pendingNode.view.isAccessibilityElement = true
+                    print("[VO-CHAT] force-scroll-restore-focus-retry li=\(pending) (current=\(focusedLocalIndex ?? -1))")
+                    UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
+                } else {
+                    self.voPendingRestoreAnchorLi = nil
+                    self.voPendingRestoreRetried = false
+                }
+            }
+
+            // **No proactive edge-extend.** Proactive scrolling — moving
+            // the list *before* the cursor reaches the edge, while a
+            // bubble is still focused — is fundamentally incompatible
+            // with iOS VoiceOver. VoiceOver runs its own built-in
+            // "keep the focused element visible" auto-scroll: the
+            // instant our code shifts `contentOffset`, iOS sees the
+            // focused bubble move and counter-scrolls it back. The
+            // result is a tug-of-war between our scroll and iOS's
+            // auto-scroll — observed by the user as the cursor jerking
+            // back and forth ("нет плавности, постоянно дергается
+            // курсор VO"). Multiple proactive variants were tried
+            // (scrollToItem heuristics, additionalScrollDistance,
+            // direct setContentOffset, forward-only monotonic anchor)
+            // and every one hit this same wall.
+            //
+            // The reactive path below works precisely because it fires
+            // when focus is already *lost* (`focused == nil`, cursor
+            // between bubbles after a focus-left event). At that moment
+            // there is no focused element for iOS to keep visible, so
+            // there is no counter-scroll to fight. One scroll per page
+            // boundary, no jerk.
         } else if let unfocusedPosition, self.lastFocusedElementIdentity != nil {
             self.lastFocusedElementIdentity = nil
+            // Mark when focus left the list so the B-path above can
+            // distinguish a recovery refocus from a deliberate user
+            // re-engagement. Keep `voLastFocusedItemLocalIndex` intact —
+            // that's the anchor we redirect back to.
+            self.voFocusLostTimestamp = CACurrentMediaTime()
+
+            // **Mid-force-scroll navbar transit guard.** If
+            // `voPendingRestoreAnchorLi` is set, we are *inside* a
+            // force-scroll cycle — `voForceScrollToItem` pre-posted
+            // `.screenChanged` on the anchor, the scroll transaction
+            // ran, and the completion block posted again. In between
+            // those moments iOS sometimes routes focus to navbar
+            // elements (`ChatTitleView`, `NavigationButtonItemNode`)
+            // because `accessibilityViewIsModal = true` on our list
+            // view only hides direct siblings; the navigation bar lives
+            // higher in the view hierarchy. If the user happens to
+            // swipe during this transit, they end up parked on the
+            // navbar with no way back except a backward swipe — exactly
+            // the "при залипании по прежнему нужно обратно свайпнуть"
+            // symptom the user reported.
+            //
+            // The remedy: as soon as we see focus leave the list while
+            // a restore is pending, push `.screenChanged` on the anchor
+            // again immediately. This catches the navbar transit at the
+            // first hop and pulls the cursor back into the list before
+            // the user has time to swipe.
+            //
+            // Uses the same single-retry budget so a stubborn anchor
+            // doesn't loop. Skip if reactive-edge-extend would fire
+            // anyway (the existing path below handles that case).
+            if let pending = self.voPendingRestoreAnchorLi,
+               !self.voPendingRestoreRetried,
+               let pendingNode = self.voItemNode(forLocalIndex: pending) {
+                self.voPendingRestoreRetried = true
+                pendingNode.isAccessibilityElement = true
+                pendingNode.view.accessibilityElementsHidden = false
+                pendingNode.view.isAccessibilityElement = true
+                print("[VO-CHAT] focus-left-redirect-anchor li=\(pending)")
+                UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
+                return
+            }
+
+            // **Reactive edge-extend.** With kSynthNeighbours=0 the array
+            // ends at the visible edges. When VoiceOver swipes past the
+            // last array element it can't navigate further — focus first
+            // goes nil and then drifts to a sibling (navbar). That's the
+            // unambiguous user signal "I want to continue past the
+            // edge". Trigger the scroll here, after observing the focus
+            // loss, instead of preemptively when the cursor merely lands
+            // on an edge bubble.
+            //
+            // `voForceScrollToItem` posts `.layoutChanged` with the
+            // intended next bubble in its completion block, so VoiceOver
+            // is pulled back into the list onto the freshly-exposed
+            // message rather than left stranded on the navbar.
+            if let lastLi = self.voLastFocusedItemLocalIndex,
+               let visibleRange = self.voVisibleLocalIndexRange(),
+               CACurrentMediaTime() - self.voLastEdgeScrollTimestamp > 0.2 {
+                // **kReactiveLead = 2 is critical, not cosmetic.**
+                //
+                // It's tempting to set the scroll target equal to
+                // `intendedNext` (lead=1) — "scroll directly to the bubble
+                // we want focus on". Empirically this breaks chat-list:
+                // `ListView.transaction(scrollToItem: lastLi-1, .visible)`
+                // treats a target *one item* past the visible edge as
+                // "close enough" and refuses to scroll. `contentOffsetY`
+                // stays put, the anchor remains hidden, our
+                // `.screenChanged` post hits a hidden view, iOS falls
+                // back to picking the first element of the (reversed)
+                // array — which is the bubble at the *opposite* edge of
+                // the window — and the cursor flies sideways instead of
+                // advancing one row. `kReactiveLead = 2` aims *two* items
+                // past the edge, crossing the `.visible` no-op heuristic
+                // and forcing a real scroll; the post-scroll window
+                // contains both the lead item and `intendedNext`, focus
+                // lands cleanly on the anchor.
+                //
+                // (For chat-history with very tall photo/video bubbles —
+                // where one bubble fills the viewport and lead=2 makes
+                // the lead bubble fill the screen, hiding `intendedNext`
+                // — restore-focus falls back to a retry/loop. That's a
+                // separate edge case to address with a different
+                // mechanism (per-item-size-aware scrolling) rather than
+                // by sacrificing the dominant chat-list case.)
+                let kReactiveLead = 2
+                var extendTarget: Int?
+                var intendedNext: Int?
+                if lastLi <= visibleRange.top, lastLi > 0 {
+                    extendTarget = max(0, lastLi - kReactiveLead)
+                    intendedNext = max(0, lastLi - 1)
+                } else if lastLi >= visibleRange.bottom {
+                    extendTarget = lastLi + kReactiveLead
+                    intendedNext = lastLi + 1
+                }
+                if let target = extendTarget, let next = intendedNext {
+                    self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
+                    print("[VO-CHAT] reactive-edge-extend left-from-li=\(lastLi) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
+                    // Pre-set the restore anchor *before* starting the
+                    // scroll. The transaction's completion block also sets
+                    // it, but iOS frequently delivers an intermediate
+                    // focus event (cursor briefly lands on a wrong bubble
+                    // during the scroll's reshuffle) *before* completion
+                    // fires — by that time `voPendingRestoreAnchorLi` is
+                    // still nil, the cascade-guard mismatch check finds
+                    // nothing to retry, and the wrong cursor is the
+                    // user-visible result. Setting the anchor up-front
+                    // lets the retry path inside `handleVoiceOverFocus
+                    // Changed`'s focused-branch fire on that intermediate
+                    // event and pull the cursor onto the right bubble.
+                    self.voPendingRestoreAnchorLi = next
+                    self.voPendingRestoreRetried = false
+                    self.voForceScrollToItem(at: target, restoreFocusOn: next)
+                }
+            }
+
             let focusedKind: String
             let focusedLabel: String
             if let focusedAny {
@@ -2671,6 +3222,314 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         guard let localIndex = matchedLocalIndex else { return nil }
         guard let info = provider([localIndex]) else { return nil }
         return (position: info.first, total: info.total)
+    }
+
+    /// Force-scroll the list to bring an item into view, bypassing the
+    /// geometric `alreadyOnScreen` short-circuit in the base
+    /// `scrollVoiceOverFocusToItem`. The base implementation tests
+    /// `itemNode.frame.intersection(...)` in ListView's local space — that
+    /// works for an unrotated chat list, but in this rotated history list
+    /// the local-space coordinates don't line up with screen visibility,
+    /// so a fully off-screen bubble can look "already on screen" and the
+    /// scroll silently becomes a no-op.
+    ///
+    /// Used by the edge-extend path in `handleVoiceOverFocusChanged` to
+    /// pull the next adjacent bubble into the viewport when the user's
+    /// focus reaches the visible edge of the bounded sliding window.
+    /// `accessibilityShouldAllowScrollToItem(at:)` still gates the call so
+    /// a stray request to a far-away `localIndex` doesn't drag the list
+    /// to the wrong end of the buffer.
+    private func voForceScrollToItem(at localIndex: Int, restoreFocusOn anchorLocalIndex: Int? = nil) {
+        // **Bypass** the subclass-veto. That veto is for ListView's
+        // off-screen-uiview-handler, which reacts to VoiceOver fallback-
+        // fascination on stale targets. This method is *our* intentional
+        // edge-extend scroll — vetoing it just kneecaps our own
+        // pre-emptive lead and lets iOS auto-scroll drive the list to
+        // wherever VoiceOver wanders. Always allow.
+        print("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
+        // **Make our list view modal to accessibility for the duration of
+        // the force-scroll.** Without this, when iOS loses focus on the
+        // previously-focused edge bubble (because the scroll is about to
+        // remove it from the visible array) it does a global spatial scan
+        // for "nearest accessibility element". Our list's items are in
+        // flux mid-transition, but `ChatTitleView` in the navbar is a
+        // stable sibling — iOS reliably picks it as the fallback, briefly
+        // routing focus to the chat title. Most of the time iOS auto-
+        // recovers within a few ticks (our completion-post pulls focus
+        // back onto the anchor), but occasionally it sticks, leaving the
+        // user parked on the navbar with no obvious way back into the
+        // conversation except a *backward* swipe.
+        //
+        // `accessibilityViewIsModal = true` tells iOS to treat siblings
+        // of this view (and their subtrees) as invisible to accessibility.
+        // During the force-scroll window, our list is the *only* place
+        // iOS can look. Combined with narrow-window (anchor is the only
+        // legal target inside the list), there is literally no element
+        // iOS can drift to except the anchor itself.
+        //
+        // The flag is cleared on the next runloop tick from the
+        // completion block — after iOS has processed our `.screenChanged`
+        // post at the still-modal state — so sibling views become
+        // accessible again as soon as the navigation has settled.
+        self.view.accessibilityViewIsModal = true
+        // **Pre-post**: claim focus on the anchor *before* the transaction
+        // starts. Without this, iOS's parallel focus-recovery picks a
+        // visible bubble (e.g. li=46) during the scroll, VoiceOver
+        // announces it briefly, and our retry only fixes the *final*
+        // state — the user still hears the wrong intermediate label.
+        //
+        // Re-promoting the anchor view first makes it a valid focus
+        // target. Posting `.screenChanged` with it pins VoiceOver onto
+        // the anchor up-front. The subsequent scroll moves the list
+        // under the already-focused cursor, so there's no opportunity
+        // for iOS to drift focus to a transient pick.
+        if let anchor = anchorLocalIndex,
+           let anchorNode = self.voItemNode(forLocalIndex: anchor) {
+            anchorNode.isAccessibilityElement = true
+            anchorNode.view.accessibilityElementsHidden = false
+            anchorNode.view.isAccessibilityElement = true
+            self.voPendingRestoreAnchorLi = anchor
+            self.voPendingRestoreRetried = false
+            // Narrow the accessibility window to {anchor} for the entire
+            // scroll. iOS's parallel focus-recovery — the thing that
+            // briefly announces a wrong bubble (e.g. li=46 instead of
+            // li=44) — can only pick from the array we expose. With one
+            // element in it, there is no wrong bubble to pick.
+            self.voScrollWindowAnchorLi = anchor
+            print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on modal=on")
+            UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+        }
+        // `.visible` scrolls minimally to bring the target into the
+        // viewport. This is the reactive edge-extend path: it fires
+        // when focus has already left the list (`focused == nil`), so
+        // there is no focused element for iOS's VoiceOver auto-scroll
+        // to fight, and the scroll lands cleanly.
+        let scrollToItem = ListViewScrollToItem(
+            index: localIndex,
+            position: .visible,
+            animated: false,
+            curve: .Default(duration: nil),
+            directionHint: .Down
+        )
+        self.transaction(
+            deleteIndices: [],
+            insertIndicesAndItems: [],
+            updateIndicesAndItems: [],
+            options: ListViewDeleteAndInsertOptions(),
+            scrollToItem: scrollToItem,
+            additionalScrollDistance: 0.0,
+            updateSizeAndInsets: nil,
+            stationaryItemRange: nil,
+            updateOpaqueState: nil,
+            completion: { [weak self] _ in
+                // After the scroll settles, explicitly anchor VoiceOver
+                // focus back onto the bubble the user was on. Without
+                // this iOS settles focus on whatever bubble it picked
+                // during the scroll's parallel focus-loss reshuffle,
+                // typically *not* the bubble we intend.
+                //
+                // Synchronous post (no `DispatchQueue.main.async`):
+                // empirically, deferring the post by even one runloop
+                // tick lets iOS settle focus on a "wrong" visible bubble
+                // first (observed: cursor on li=46 when we wanted li=44).
+                // Posting straight from the completion block gets us in
+                // before iOS's recovery picks its own target.
+                //
+                // `.screenChanged` (not `.layoutChanged`): the former is
+                // the stronger signal — iOS treats it as "the entire
+                // accessible content of the screen has changed, re-focus
+                // on this element." `.layoutChanged` is advisory and
+                // sometimes ignored when iOS thinks its own focus pick
+                // is fine; `.screenChanged` overrides that.
+                guard let self,
+                      let anchor = anchorLocalIndex,
+                      let anchorNode = self.voItemNode(forLocalIndex: anchor) else {
+                    return
+                }
+                // With kSynthNeighbours=0 the anchor (the new edge) is
+                // *outside* the current visible-only array — its
+                // accessibility view has been demoted to
+                // `accessibilityElementsHidden=true` /
+                // `isAccessibilityElement=false`. iOS silently ignores
+                // `.screenChanged` posts whose argument is hidden, so
+                // the cursor ends up on whatever visible bubble iOS
+                // picks as a fallback (li=46 instead of li=44 in the
+                // observed logs — exactly the "залипание" symptom).
+                //
+                // Re-promote the anchor view *just before the post*.
+                // The next `customAccessibilityElements` call triggered
+                // by the same scroll will re-classify everything from
+                // scratch (the anchor will then be inside the new
+                // visible range and stay promoted naturally), so this
+                // touch-up only needs to bridge the gap until then.
+                anchorNode.isAccessibilityElement = true
+                anchorNode.view.accessibilityElementsHidden = false
+                anchorNode.view.isAccessibilityElement = true
+                // Clear narrow-window **before** posting so iOS's next
+                // `customAccessibilityElements` query (triggered by the
+                // post) returns the full window again. The anchor stays
+                // at the same focus position; the user just gets the
+                // full neighbour list back.
+                self.voScrollWindowAnchorLi = nil
+                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor) narrow-window=off")
+                self.voPendingRestoreAnchorLi = anchor
+                self.voPendingRestoreRetried = false
+                UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
+                // Release modality on the next runloop tick. We post
+                // `.screenChanged` synchronously above, but iOS processes
+                // accessibility notifications asynchronously on the main
+                // queue; the focus decision is made *after* this
+                // completion block returns. If we cleared `modal = false`
+                // here synchronously, iOS would see the navbar as a valid
+                // sibling target by the time it picks where focus goes,
+                // and the navbar transit would be back.
+                //
+                // `DispatchQueue.main.async` is not a time-based delay —
+                // it just yields the current runloop iteration. iOS
+                // processes our post *during* the current tick, then our
+                // async block fires on the next tick, by which time
+                // focus has settled on the anchor and it's safe to
+                // restore sibling accessibility.
+                //
+                // The `voScrollWindowAnchorLi == nil` guard ensures we
+                // don't clobber modality if another force-scroll started
+                // before this async fires — only the *last* one in a
+                // rapid sequence releases the modal flag.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if self.voScrollWindowAnchorLi == nil {
+                        self.view.accessibilityViewIsModal = false
+                        print("[VO-CHAT] force-scroll-release-modal")
+                    }
+                }
+            }
+        )
+    }
+
+    /// Veto bogus scroll-to-uiview triggered from
+    /// `ListView.handleSystemAccessibilityFocusNotification`.
+    ///
+    /// After VoiceOver loses anchor at the edge of the bounded window, it
+    /// can briefly re-focus on a parent `_ASDisplayView` that happens to
+    /// be one of our materialised item nodes — but a far one (e.g. li=0
+    /// while the user is around li=47). `ListView`'s off-screen-uiview
+    /// branch would then react with a real `scrollVoiceOverFocusToItem`,
+    /// dragging the chat to the far end of the buffer. We let ListView
+    /// know that any such target whose `localIndex` is far from the
+    /// user's last live-focused bubble is not a legitimate VoiceOver
+    /// target.
+    override public func accessibilityShouldAllowScrollToItem(at localIndex: Int) -> Bool {
+        // **EXPERIMENT** — let the base engine's off-screen-focus
+        // handler scroll freely. The veto below depends on
+        // `voLastFocusedItemLocalIndex`, which the custom focus handler
+        // (disabled in experiment mode) no longer updates, so the veto
+        // would otherwise block every legitimate base-engine scroll.
+        if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
+            return true
+        }
+        guard let lastKnown = self.voLastFocusedItemLocalIndex else {
+            return true
+        }
+        // Tight threshold (≤1). With kSynthNeighbours=1 the only
+        // legitimate off-screen-uiview-handler target is the immediate
+        // ±1 neighbour. Any scroll request to a target further away is
+        // almost always VoiceOver's fallback-fascination on a stale
+        // _ASDisplayView, not real navigation intent.
+        //
+        // edge-extend-scroll calls go through `voForceScrollToItem`
+        // which bypasses this veto entirely (kEdgeLead can target
+        // li±2 or more), so tightening here doesn't constrain our own
+        // intentional scrolls.
+        let maxJump = 1
+        if abs(localIndex - lastKnown) > maxJump {
+            return false
+        }
+        return true
+    }
+
+    private func voLocalIndex(forFocusedSourceView sourceView: UIView) -> Int? {
+        var matched: Int?
+        self.forEachItemNode({ node in
+            guard matched == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else { return }
+            if itemNode.view === sourceView || sourceView.isDescendant(of: itemNode.view) {
+                matched = itemIndex
+            }
+        })
+        return matched
+    }
+
+    private func voBubbleView(forLocalIndex localIndex: Int) -> UIView? {
+        var found: UIView?
+        self.forEachItemNode({ node in
+            guard found == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, itemNode.index == localIndex else { return }
+            if itemNode.isNodeLoaded {
+                found = itemNode.view
+            }
+        })
+        return found
+    }
+
+    private func voItemNode(forLocalIndex localIndex: Int) -> ListViewItemNode? {
+        var found: ListViewItemNode?
+        self.forEachItemNode({ node in
+            guard found == nil else { return }
+            guard let itemNode = node as? ListViewItemNode, itemNode.index == localIndex else { return }
+            if itemNode.isNodeLoaded {
+                found = itemNode
+            }
+        })
+        return found
+    }
+
+    /// Visible-edge localIndex range in this list.  Used by the edge-scroll
+    /// trigger in `handleVoiceOverFocusChanged` to detect whether the user
+    /// has just landed on the topmost or bottommost visible bubble.
+    ///
+    /// Mirrors the visibility test used by `customAccessibilityElements`
+    /// (44pt minimum on-screen height) so the two stay in sync — an item
+    /// counts as "edge" only if `customAccessibilityElements` would have
+    /// placed it as a `visibleItems` entry (not a synthetic neighbour).
+    private func voVisibleLocalIndexRange() -> (top: Int, bottom: Int)? {
+        let clipFrame: CGRect
+        if let frame = self.accessibilityClippingFrameInScreenCoordinates() {
+            clipFrame = frame
+        } else {
+            clipFrame = UIAccessibility.convertToScreenCoordinates(
+                CGRect(
+                    x: 0.0,
+                    y: self.rotated ? self.insets.bottom : self.insets.top,
+                    width: self.visibleSize.width,
+                    height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
+                ),
+                in: self.view
+            )
+        }
+        let kMinVisibleHeight: CGFloat = 44.0
+        var minIdx: Int?
+        var maxIdx: Int?
+        self.forEachItemNode({ node in
+            guard let itemNode = node as? ListViewItemNode, let idx = itemNode.index else { return }
+            guard itemNode.isNodeLoaded else { return }
+            let realFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            guard !realFrame.isNull else { return }
+            let intersection = realFrame.intersection(clipFrame)
+            // Mirror `customAccessibilityElements`: 44pt for tall cells,
+            // 90% of natural height for short service cells (pinned /
+            // unread / date headers) so they aren't silently skipped
+            // from the visibility-range calculation either.
+            let requiredVisibleHeight = min(kMinVisibleHeight, realFrame.height * 0.9)
+            guard !intersection.isNull,
+                  intersection.height >= requiredVisibleHeight,
+                  intersection.width > 1.0 else { return }
+            if let lo = minIdx { minIdx = min(lo, idx) } else { minIdx = idx }
+            if let hi = maxIdx { maxIdx = max(hi, idx) } else { maxIdx = idx }
+        })
+        if let lo = minIdx, let hi = maxIdx {
+            return (top: lo, bottom: hi)
+        }
+        return nil
     }
     
     public func updateTag(tag: HistoryViewInputTag?) {
