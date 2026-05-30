@@ -1001,76 +1001,48 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 return ""
             }
         }
-        self.accessibilityPageScrolledRangeString = { from, to, count in
-            return "Сообщения с \(from) по \(to) из \(count)"
-        }
-        self.accessibilityAbsoluteScrollInfo = { [weak self] visibleLocalIndices in
-            guard let strongSelf = self else {
-                print("[VO-DEBUG] absoluteScrollInfo: self is nil")
-                return nil
-            }
-            guard let historyView = (strongSelf.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView else {
-                print("[VO-DEBUG] absoluteScrollInfo: no historyView in opaqueTransactionState")
-                return nil
-            }
-            let entries = historyView.filteredEntries
-            guard !entries.isEmpty, !visibleLocalIndices.isEmpty else {
-                print("[VO-DEBUG] absoluteScrollInfo: entries=\(entries.count), visibleLocalIndices=\(visibleLocalIndices)")
-                return nil
-            }
-            
-            print("[VO-DEBUG] absoluteScrollInfo: entries.count=\(entries.count), visibleLocalIndices=\(visibleLocalIndices.sorted())")
-            
-            var minAbsolute: Int?
-            var maxAbsolute: Int?
-            var totalCount: Int?
-            var locationsFound = 0
-            var locationsNil = 0
-            
-            for localIndex in visibleLocalIndices {
-                let entryIndex = entries.count - 1 - localIndex
-                guard entryIndex >= 0, entryIndex < entries.count else {
-                    print("[VO-DEBUG] absoluteScrollInfo: localIndex=\(localIndex) -> entryIndex=\(entryIndex) OUT OF BOUNDS (entries.count=\(entries.count))")
-                    continue
-                }
-                let entry = entries[entryIndex]
-                let location: MessageHistoryEntryLocation?
-                switch entry {
-                case let .MessageEntry(_, _, _, loc, _, _):
-                    location = loc
-                case let .MessageGroupEntry(_, messages, _):
-                    location = messages.first?.4
-                default:
-                    location = nil
-                }
-                if let location = location {
-                    locationsFound += 1
-                    let absIndex = location.count - location.index
-                    if let current = minAbsolute {
-                        minAbsolute = min(current, absIndex)
-                    } else {
-                        minAbsolute = absIndex
-                    }
-                    if let current = maxAbsolute {
-                        maxAbsolute = max(current, absIndex)
-                    } else {
-                        maxAbsolute = absIndex
-                    }
-                    totalCount = location.count
-                } else {
-                    locationsNil += 1
-                }
-            }
-            
-            print("[VO-DEBUG] absoluteScrollInfo: locationsFound=\(locationsFound), locationsNil=\(locationsNil), min=\(minAbsolute as Any), max=\(maxAbsolute as Any), total=\(totalCount as Any)")
-            
-            if let first = minAbsolute, let last = maxAbsolute, let total = totalCount {
-                return (first: first, last: last, total: total)
-            }
-            return nil
-        }
         self.accessibilityLayoutChangedOnScroll = false
         self.accessibilityStatusAnnouncementOnScroll = false
+        // **No "N of M" scroll-position announcement.**
+        //
+        // Chat history is a *sliding window* over the server-side message
+        // list: a message's `location.count` reflects only the currently
+        // loaded slice, not the whole conversation, so any announced total
+        // jumped wildly (e.g. 51 ↔ 544) as new pages materialised during a
+        // 3-finger scroll — the spoken position misled rather than helped.
+        // There is no cheap, stable absolute index available, so all three
+        // numeric inputs that feed the status string stay disabled:
+        //   • `accessibilityAbsoluteScrollInfo` (nil) — absolute-index path
+        //   • `accessibilityPageScrolledUsesVisibleRange` (false) — its
+        //     default is `true`; if on, the visible-range fallback would
+        //     announce "… of \(items.count)" (the loaded slice), still
+        //     misleading
+        //   • `accessibilityPageScrolledRangeString` (nil) — the formatter
+        // Instead we announce the *date* of the top visible message (see
+        // `accessibilityScrollPositionAnnouncement` below), which is honest
+        // and stable.
+        self.accessibilityAbsoluteScrollInfo = nil
+        self.accessibilityPageScrolledUsesVisibleRange = false
+        self.accessibilityPageScrolledRangeString = nil
+
+        // **3-finger scroll announces the date, not a message.**
+        //
+        // Returning a non-nil string here makes `ListView.scrollWithDirection`
+        // post it via `.pageScrolled` AND skip the focus re-centring that
+        // otherwise read out whatever message landed near the viewport
+        // centre (the "random message after 3-finger scroll" the user
+        // reported). We speak the day of the top visible message so the user
+        // hears where in time the scroll landed.
+        self.accessibilityScrollPositionAnnouncement = { [weak self] in
+            guard let self else { return nil }
+            guard let message = self.topVisibleMessageForAccessibility() else { return nil }
+            let formatter = DateFormatter()
+            formatter.locale = Locale.current
+            formatter.dateStyle = .long
+            formatter.timeStyle = .none
+            return formatter.string(from: Date(timeIntervalSince1970: Double(message.timestamp)))
+        }
+
         self.accessibilityNavigationOrder = .reversed
 
         // VoiceOver buffer expansion.
@@ -6801,6 +6773,42 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         }
     }
     
+    /// The message whose bubble is visually highest on screen, chosen by
+    /// real screen geometry rather than list indices. The history list is
+    /// rotated (`transform = π`) and uses a reversed entry order, so neither
+    /// `visibleRange.firstIndex` nor `.lastIndex` maps cleanly to "top of
+    /// screen"; converting each materialised bubble's bounds to screen
+    /// coordinates and picking the smallest `minY` is unambiguous. Used by
+    /// the 3-finger-scroll date announcement so VoiceOver reports the date
+    /// of the topmost visible message (what the user just scrolled up to).
+    func topVisibleMessageForAccessibility() -> Message? {
+        let clip = self.accessibilityClippingFrameInScreenCoordinates()
+        var bestMessage: Message?
+        var bestMinY = CGFloat.greatestFiniteMagnitude
+        self.forEachItemNode { itemNode in
+            guard let itemNode = itemNode as? ChatMessageItemView, let item = itemNode.item else {
+                return
+            }
+            let screenFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            guard !screenFrame.isNull, screenFrame.height > 1.0 else {
+                return
+            }
+            // Only consider bubbles actually inside the visible viewport;
+            // the VoiceOver buffer materialises ~100 off-screen rows.
+            if let clip {
+                let intersection = screenFrame.intersection(clip)
+                guard !intersection.isNull, intersection.height > 1.0 else {
+                    return
+                }
+            }
+            if screenFrame.minY < bestMinY {
+                bestMinY = screenFrame.minY
+                bestMessage = item.message
+            }
+        }
+        return bestMessage
+    }
+
     func lastVisbleMesssage() -> Message? {
         var currentMessage: Message?
         if let historyView = self.historyView {

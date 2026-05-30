@@ -5578,6 +5578,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// When VoiceOver is on and the user scrolls with three fingers, this closure can return text to be announced for the message at the bottom of the visible area. Used by chat to read aloud the bottom message content.
     public var accessibilityAnnouncementForBottomVisibleItem: ((ListViewItemNode) -> String?)?
 
+    /// When set, a 3-finger VoiceOver scroll announces this string (e.g. the date of the top visible row) via `.pageScrolled` instead of reading a row, and suppresses the post-scroll focus re-centring. Chat history sets this; other lists leave it nil.
+    public var accessibilityScrollPositionAnnouncement: (() -> String?)?
+
     /// Subclass hook for vetoing the off-screen-uiview scroll path in
     /// `handleSystemAccessibilityFocusNotification`. Default: allow.
     ///
@@ -6966,7 +6969,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             
             let scrollStatus: String?
-            if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
+            // Highest priority: a caller-provided scroll-position string
+            // (chat history returns the date of the top visible message).
+            // When present it drives the `.pageScrolled` announcement below
+            // and (via `usedScrollPositionAnnouncement`) suppresses focus
+            // re-centring, so a 3-finger scroll speaks the position rather
+            // than reading a message near the viewport centre.
+            var usedScrollPositionAnnouncement = false
+            if let scrollPositionAnnouncement = self.accessibilityScrollPositionAnnouncement?(), !scrollPositionAnnouncement.isEmpty {
+                scrollStatus = scrollPositionAnnouncement
+                usedScrollPositionAnnouncement = true
+            } else if let absoluteInfo = self.accessibilityAbsoluteScrollInfo?(rangeIndices) {
                 voDebugLog("[VO-DEBUG] absoluteInfo: first=\(absoluteInfo.first), last=\(absoluteInfo.last), total=\(absoluteInfo.total)")
                 let absoluteCount = max(0, absoluteInfo.last - absoluteInfo.first + 1)
                 let absoluteCoverage: Double = absoluteInfo.total > 0 ? (Double(absoluteCount) / Double(absoluteInfo.total)) * 100.0 : 0.0
@@ -7006,7 +7019,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 voDebugLog("[VO-DEBUG] scrollStatus suppressed for programmatic edge scroll")
             }
 
-            if centerVoiceOverFocus, UIAccessibility.isVoiceOverRunning {
+            // Skip focus re-centring when we just announced a scroll
+            // position: re-centring moves the VoiceOver cursor onto the
+            // element nearest the viewport centre and reads it aloud, which
+            // is the "random message after 3-finger scroll" we replace.
+            if centerVoiceOverFocus, !usedScrollPositionAnnouncement, UIAccessibility.isVoiceOverRunning {
                 self.postAccessibilityCenterFocus(retryCount: 2)
             }
         }
