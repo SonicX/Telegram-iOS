@@ -1948,5 +1948,52 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
                 tipNode.animateIn()
             }
         }
+
+        // Move the VoiceOver cursor onto the first (topmost) menu item when
+        // the context menu appears. Each action row is already an
+        // accessibility element (see `ContextControllerActionsListActionItemNode`
+        // and `ContextActionNode`), but nothing focuses one on present, so the
+        // cursor used to stay on the source message. Posting `.screenChanged`
+        // with the topmost element makes VoiceOver announce it and lets the
+        // user walk the menu with left/right swipes. Delayed until after the
+        // present spring so the rows have their final on-screen frames.
+        print("[VO-MENU] actionsStackNode.animateIn voRunning=\(UIAccessibility.isVoiceOverRunning) containers=\(self.itemContainers.count)")
+        if UIAccessibility.isVoiceOverRunning {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                guard let self, UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
+                let focusTarget = self.topmostAccessibilityElement(in: self.view)
+                print("[VO-MENU] post-delay focusTarget=\(focusTarget != nil ? "found" : "nil")")
+                if let focusTarget {
+                    UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
+                }
+            }
+        }
+    }
+
+    /// Returns the view highest on screen (smallest `minY`) whose
+    /// `isAccessibilityElement` is true within the given subtree. Used to focus
+    /// the first context-menu item when the menu opens under VoiceOver.
+    private func topmostAccessibilityElement(in rootView: UIView) -> UIView? {
+        var best: UIView?
+        var bestMinY = CGFloat.greatestFiniteMagnitude
+        func walk(_ view: UIView) {
+            if view.isHidden || view.alpha <= 0.01 {
+                return
+            }
+            if view.isAccessibilityElement {
+                let screenFrame = view.convert(view.bounds, to: nil)
+                if !screenFrame.isNull, screenFrame.height > 1.0, screenFrame.minY < bestMinY {
+                    bestMinY = screenFrame.minY
+                    best = view
+                }
+            }
+            for subview in view.subviews {
+                walk(subview)
+            }
+        }
+        walk(rootView)
+        return best
     }
 }

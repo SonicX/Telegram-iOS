@@ -5439,13 +5439,29 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         if self.sendingTextDisabled {
             return
         }
-        
+
         if self.textInputNode == nil {
             self.loadTextInputNode()
         }
-        
+
         if !self.switching {
             self.textInputNode?.becomeFirstResponder()
+
+            // Move the VoiceOver cursor to the text input when focus is
+            // requested programmatically (e.g. after the "Reply" accessibility
+            // action opens the keyboard). `becomeFirstResponder` shows the
+            // keyboard but does not move the VO cursor, so it used to stay on
+            // the source message. Delay one runloop so the field is on-screen
+            // before we focus it.
+            if UIAccessibility.isVoiceOverRunning {
+                let focusTarget: Any? = self.textInputAccessibilityArea.view
+                DispatchQueue.main.async {
+                    guard UIAccessibility.isVoiceOverRunning, let focusTarget else {
+                        return
+                    }
+                    UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
+                }
+            }
         }
     }
     

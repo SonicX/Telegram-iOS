@@ -58,6 +58,14 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         self.strings = strings
         
         self.closeButton = HighlightableButtonNode()
+        // `ASButtonNode` defaults `isAccessibilityElement` to false, so an
+        // `accessibilityLabel` alone does NOT make the button focusable by
+        // VoiceOver — it must be flagged explicitly (same as `attachmentButton`
+        // in `ChatTextInputPanelNode`). Without this the close ("×") button
+        // was visible but unreachable by swipe even when present in the panel's
+        // `accessibilityElements`.
+        self.closeButton.isAccessibilityElement = true
+        self.closeButton.accessibilityTraits = [.button]
         self.closeButton.accessibilityLabel = strings.VoiceOver_DiscardPreparedContent
         self.closeButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         self.closeButton.setImage(PresentationResourcesChat.chatInputPanelCloseIconImage(theme), for: [])
@@ -478,6 +486,29 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         }
     }
     
+    // Expose the reply preview and its close button as explicit VoiceOver
+    // elements. The sibling text-input panel (`ChatTextInputPanelNode`)
+    // overrides `accessibilityElements` with a hardcoded list that does not
+    // include this panel, and relying on the default container traversal left
+    // the close ("×") button unreachable by swipe — the user could see it but
+    // not focus or tap it. Returning an explicit ordered list (preview first,
+    // then the close button) makes both reliably reachable. Hidden/transparent
+    // entries are filtered so a collapsed panel exposes nothing.
+    override public var accessibilityElements: [Any]? {
+        get {
+            var elements: [Any] = []
+            if !self.actionArea.isHidden, self.actionArea.alpha > 0.01 {
+                elements.append(self.actionArea.view)
+            }
+            if !self.closeButton.isHidden, self.closeButton.alpha > 0.01 {
+                elements.append(self.closeButton.view)
+            }
+            return elements.isEmpty ? nil : elements
+        }
+        set {
+        }
+    }
+
     @objc private func closePressed() {
         if let dismiss = self.dismiss {
             dismiss()
