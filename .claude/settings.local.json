@@ -120,7 +120,10 @@
       "Bash(git --no-pager diff -- submodules/TelegramUI/Sources/ChatController.swift)",
       "Bash(git --no-pager diff -- submodules/TelegramUI/Sources/ChatControllerForwardMessages.swift)",
       "Bash(git --no-pager diff -- submodules/TelegramUI/Sources/ChatControllerNode.swift)",
-      "Bash(git --no-pager diff -- submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift)"
+      "Bash(git --no-pager diff -- submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift)",
+      "Read(//Users/jtereschenko/Documents/Xcode/Swiftgram/**)",
+      "Read(//Users/jtereschenko/**)",
+      "Bash(git --no-pager diff --numstat)"
     ],
     "deny": []
   }
