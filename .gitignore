@@ -81,3 +81,7 @@ Telegram.LSP.json
 **/.build/**
 spm-files
 .bsp/**
+# Codesigning private keys / certificates — хранить ТОЛЬКО локально, не в git.
+# Профили (.mobileprovision) остаются в репозитории, ключи и сертификаты — нет.
+build-system/codesigning/certs/
+build-system/codesigning-dev/certs/

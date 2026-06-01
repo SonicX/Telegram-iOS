@@ -1934,6 +1934,8 @@ plist_fragment(
     <string>Swiftgram stores your contacts heavily encrypted in the Telegram cloud to let you connect with your friends across all your devices.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>You can use Face ID to unlock the app.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>When you send your location to your friends, Swiftgram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>When you send your location to your friends, Swiftgram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
@@ -2089,19 +2091,22 @@ ios_application(
     extensions = select({
         ":disableExtensionsSetting": [],
         "//conditions:default": [
+            # MARK: Swiftgram — keep only NotificationService so push works;
+            # the other extensions need their own distribution profiles which
+            # we don't have, so they're dropped from this build.
             # ":SGActionRequestHandler", # UX sucks https://t.me/swiftgramchat/7335
-            ":ShareExtension",
-            ":NotificationContentExtension",
+            # ":ShareExtension",
+            # ":NotificationContentExtension",
             ":NotificationServiceExtension" + notificationServiceExtensionVersion,
-            ":IntentsExtension",
-            ":WidgetExtension",
-            ":BroadcastUploadExtension",
+            # ":IntentsExtension",
+            # ":WidgetExtension",
+            # ":BroadcastUploadExtension",
         ],
     }),
     watch_application = select({
         ":disableExtensionsSetting": None,
-        "//conditions:default": ":TelegramWatchApp",
-    }), # MARK: Swiftgram
+        "//conditions:default": None,
+    }), # MARK: Swiftgram — Watch app disabled (no distribution profile)
     deps = [
         ":Main",
         ":Lib",
