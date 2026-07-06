@@ -812,6 +812,26 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     if let item = self.item {
                         item.controllerInteraction.openMessageContextMenu(item.message, false, self, self.imageNode.frame, nil, nil)
                     }
+                case .comments:
+                    if let item = self.item {
+                        if item.message.id.peerId.isReplies {
+                            item.controllerInteraction.openReplyThreadOriginalMessage(item.message)
+                        } else {
+                            item.controllerInteraction.openMessageReplies(item.message.id, true, true)
+                        }
+                    }
+                case .reactions:
+                    if let item = self.item {
+                        item.controllerInteraction.openMessageContextMenu(item.message, false, self, self.imageNode.frame, nil, nil)
+                    }
+                case let .toggleReaction(value):
+                    // Пункт-реакция блока «Реакции и просмотры»: ставим/снимаем реакцию.
+                    if let item = self.item {
+                        item.controllerInteraction.updateMessageReaction(item.message, .reaction(value), false, nil)
+                    }
+                case .info:
+                    // Информационный пункт «Реакции и просмотры» — только озвучка.
+                    break
             }
         }
     }

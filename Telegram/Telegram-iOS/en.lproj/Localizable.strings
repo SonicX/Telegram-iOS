@@ -2289,7 +2289,7 @@ Unused sets are archived when you add more.";
 
 "Call.EncryptionKey.Title" = "Encryption Key";
 
-"Application.Name" = "Tyflos Contsct";
+"Application.Name" = "OpenGramm";
 "DialogList.Pin" = "Pin";
 "DialogList.Unpin" = "Unpin";
 "DialogList.PinLimitError" = "Sorry, you can pin no more than %@ chats to the top.";
@@ -4816,6 +4816,8 @@ Sorry for the inconvenience.";
 "VoiceOver.MessageContextSend" = "Send";
 "VoiceOver.MessageContextReply" = "Reply";
 "VoiceOver.MessageContextOpenMessageMenu" = "Open message menu";
+"VoiceOver.MessageContextComments" = "Comments";
+"VoiceOver.MessageContextReactions" = "React";
 
 "VoiceOver.Keyboard" = "Keyboard";
 "VoiceOver.Stickers" = "Stickers";

@@ -223,6 +223,21 @@ public final class ReactionNode: ASDisplayNode, ReactionItemNode {
             self.addSubnode(animateInAnimationNode)
         }
         self.addSubnode(self.staticAnimationNode)
+
+        // VoiceOver: делаем реакцию отдельным доступным элементом, чтобы при
+        // открытии панели реакций курсор мог встать на неё, а двойной тап
+        // ставил реакцию. Активация проксируется в `accessibilityActivate`
+        // через колбэк, который выставляет `ReactionContextNode`.
+        self.isAccessibilityElement = true
+        self.accessibilityTraits = [.button]
+        switch item.reaction.rawValue {
+        case let .builtin(value):
+            self.accessibilityLabel = value
+        case .custom:
+            self.accessibilityLabel = "Custom emoji"
+        case .stars:
+            self.accessibilityLabel = "Star"
+        }
         
         self.animateInAnimationNode?.completed = { [weak self] _ in
             guard let strongSelf = self else {
@@ -270,7 +285,19 @@ public final class ReactionNode: ASDisplayNode, ReactionItemNode {
         self.fetchStickerDisposable?.dispose()
         self.fetchFullAnimationDisposable?.dispose()
     }
-    
+
+    // VoiceOver-активация реакции (двойной тап). Устанавливается
+    // `ReactionContextNode` при создании узла.
+    var accessibilityActivated: (() -> Void)?
+
+    override public func accessibilityActivate() -> Bool {
+        if let accessibilityActivated = self.accessibilityActivated {
+            accessibilityActivated()
+            return true
+        }
+        return false
+    }
+
     var maskNode: ASDisplayNode? {
         return nil
     }

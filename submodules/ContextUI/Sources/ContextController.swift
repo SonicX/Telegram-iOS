@@ -620,7 +620,7 @@ final class ContextControllerNode: ViewControllerTracingNode, ASScrollViewDelega
     
     override func didLoad() {
         super.didLoad()
-        
+
         self.dismissNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimNodeTapped)))
         
         if #available(iOS 13.0, *) {
@@ -2297,6 +2297,15 @@ public protocol ContextControllerItemsContent: AnyObject {
 }
 
 public final class ContextController: ViewController, StandalonePresentableController, ContextControllerProtocol, KeyShortcutResponder {
+    // VoiceOver: транзиентное намерение «при следующем открытии меню поставить
+    // курсор сразу на панель реакций, а не на первый пункт меню». Ставится из
+    // VoiceOver-действия «Реакции» на сообщении перед открытием контекстного
+    // меню и потребляется один раз в `ContextControllerActionsStackNode`
+    // (меню пропускает свой перехват фокуса, и побеждает фокус панели реакций).
+    // Контекстное меню модально и существует в единственном экземпляре, поэтому
+    // статический флаг безопасен.
+    public static var accessibilityFocusReactionsOnNextPresent: Bool = false
+
     public final class Source {
         public let id: AnyHashable
         public let title: String

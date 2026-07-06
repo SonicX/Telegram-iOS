@@ -1075,7 +1075,16 @@ public final class ReactionContextNode: ASDisplayNode, ASScrollViewDelegate {
                             break
                         }
                         
-                        itemNode = ReactionNode(context: self.context, theme: self.presentationData.theme, item: item, icon: icon, animationCache: self.animationCache, animationRenderer: self.animationRenderer, loopIdle: loopIdle, isLocked: isLocked)
+                        let reactionNode = ReactionNode(context: self.context, theme: self.presentationData.theme, item: item, icon: icon, animationCache: self.animationCache, animationRenderer: self.animationRenderer, loopIdle: loopIdle, isLocked: isLocked)
+                        // VoiceOver: двойной тап по реакции выбирает её через
+                        // тот же путь, что обычное нажатие.
+                        reactionNode.accessibilityActivated = { [weak self] in
+                            guard let self else {
+                                return
+                            }
+                            self.performReactionSelection(reaction: item.reaction, isLarge: false)
+                        }
+                        itemNode = reactionNode
                         maskNode = nil
                     case let .staticEmoji(emoji):
                         itemNode = EmojiItemNode(theme: self.presentationData.theme, emoji: emoji)
@@ -2506,8 +2515,29 @@ public final class ReactionContextNode: ASDisplayNode, ASScrollViewDelegate {
                 itemNode.appear(animated: false)
             }
         }
+
+        // VoiceOver: при появлении панели реакций переводим курсор на первую
+        // реакцию, чтобы пользователь сразу попадал на неё и мог свайпами
+        // выбрать нужную. Задержка — чтобы узлы реакций встали на свои места.
+        if UIAccessibility.isVoiceOverRunning {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
+                var firstItemNode: ReactionNode?
+                for i in 0 ..< self.items.count {
+                    if let node = self.visibleItemNodes[i] as? ReactionNode {
+                        firstItemNode = node
+                        break
+                    }
+                }
+                if let firstItemNode {
+                    UIAccessibility.post(notification: .screenChanged, argument: firstItemNode.view)
+                }
+            }
+        }
     }
-    
+
     public func animateOut(to targetAnchorRect: CGRect?, animatingOutToReaction: Bool) {
         self.isAnimatingOut = true
         

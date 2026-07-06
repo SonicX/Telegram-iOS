@@ -1206,7 +1206,20 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
             
             self.dismissTapNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: contentSize.width, height: max(contentSize.height, layout.size.height)))
-            self.dismissAccessibilityArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: contentSize.width, height: max(contentSize.height, layout.size.height)))
+            // VoiceOver: зона «Закрыть меню» — БОЛЬШАЯ, от верха пунктов меню до низа.
+            //
+            // Эмпирически (подтверждено на устройстве): размер этой зоны решает всё.
+            //  • Большая зона (во весь контент): рамка фокуса VO рисуется мгновенно.
+            //  • Маленькая зона (44pt, в любом месте): рамка опаздывает за звуком —
+            //    iOS на каждый шаг фокуса обходит всё открытое дерево меню (реакции,
+            //    извлечённое сообщение). Это квирк VoiceOver, не зависящий от позиции.
+            // Поэтому держим зону БОЛЬШОЙ (→ быстро), но начинаем её НИЖЕ панели реакций
+            // (с верха actionsFrame): реакции по геометрии идут раньше зоны → VO-курсор
+            // больше не «срывается» с реакции на «Закрыть». dismissTapNode (тап для
+            // закрытия) по-прежнему во весь контент.
+            let voTotalHeight = max(contentSize.height, layout.size.height)
+            let voCoverTop = max(0.0, actionsFrame.minY)
+            self.dismissAccessibilityArea.frame = CGRect(origin: CGPoint(x: 0.0, y: voCoverTop), size: CGSize(width: contentSize.width, height: max(1.0, voTotalHeight - voCoverTop)))
         }
         
         switch stateTransition {

@@ -309,7 +309,22 @@ extension ChatControllerImpl {
                 }
                 
                 self.canReadHistory.set(false)
-                
+
+                // VoiceOver: пока открыто контекстное меню сообщения, история
+                // НЕ должна вмешиваться в фокус. Иначе при открытии меню лента
+                // перестраивается, сфокусированное сообщение recycled →
+                // containment-проверка срабатывает и forward-escape redirect
+                // утаскивает курсор на поле ввода, перебивая фокус панели
+                // реакций / пунктов меню. Приостанавливаем на время показа меню.
+                self.chatDisplayNode.historyNode.accessibilityFocusHandlingSuspended = true
+                // VoiceOver: меню сообщения показывается в глобальном оверлее и НЕ модально,
+                // поэтому VO продолжает обходить историю чата под ним. `customAccessibilityElements`,
+                // возвращая nil, не помогает — UIKit тогда сам перечисляет сырые сабвью бабблов, и VO
+                // обходит это огромное дерево на КАЖДЫЙ свайп по пунктам меню → долгий отклик/лаги.
+                // Полностью убираем поддерево истории из доступности на время показа меню
+                // (`accessibilityElementsHidden` скрывает и детей). Снимаем в `dismissed`.
+                self.chatDisplayNode.historyNode.view.accessibilityElementsHidden = true
+
                 var hideReactionPanelTail = false
                 for media in message.media {
                     if let action = media as? TelegramMediaAction {
@@ -328,6 +343,9 @@ extension ChatControllerImpl {
                 let controller = ContextController(presentationData: self.presentationData, source: source, items: actionsSignal, recognizer: recognizer, gesture: gesture, disableScreenshots: isSecret, hideReactionPanelTail: hideReactionPanelTail)
                 controller.dismissed = { [weak self] in
                     self?.canReadHistory.set(true)
+                    // Возвращаем focus-обработку истории после закрытия меню.
+                    self?.chatDisplayNode.historyNode.accessibilityFocusHandlingSuspended = false
+                    self?.chatDisplayNode.historyNode.view.accessibilityElementsHidden = false
                 }
                 controller.immediateItemsTransitionAnimation = disableTransitionAnimations
                 self.currentContextController = controller
@@ -588,6 +606,8 @@ extension ChatControllerImpl {
                             }
                         }
                         
+                        // VoiceOver: озвучиваем результат («Реакция ❤️ проставлена/снята»).
+                        voAnnounceReactionUpdate(reaction: chosenReaction, message: message, removed: removedReaction != nil, languageCode: self.presentationData.strings.baseLanguageCode)
                         let _ = updateMessageReactionsInteractively(account: self.context.account, messageIds: [message.id], reactions: mappedUpdatedReactions, isLarge: isLarge, storeAsRecentlyUsed: true).startStandalone()
                     }
                 }
@@ -662,5 +682,45 @@ final class ChatControllerContextReferenceContentSource: ContextReferenceContent
     
     func transitionInfo() -> ContextControllerReferenceViewInfo? {
         return ContextControllerReferenceViewInfo(referenceView: self.sourceView, contentAreaInScreenSpace: UIScreen.main.bounds.inset(by: self.insets), insets: self.contentInsets)
+    }
+}
+
+/// VoiceOver: озвучивает установку/снятие реакции («Реакция ❤️ проставлена»).
+/// Используется обоими путями выбора реакции: из панели контекстного меню
+/// (reactionSelected выше) и из блока «Реакции и просмотры» в роторе сообщения
+/// (updateMessageReaction в ChatController).
+func voAnnounceReactionUpdate(reaction: MessageReaction.Reaction, message: Message, removed: Bool, languageCode: String) {
+    guard UIAccessibility.isVoiceOverRunning else {
+        return
+    }
+    let isRu = languageCode.lowercased().hasPrefix("ru")
+    let title: String
+    switch reaction {
+    case let .builtin(emoji):
+        title = emoji
+    case let .custom(fileId):
+        var alt: String?
+        if let file = message.associatedMedia[MediaId(namespace: Namespaces.Media.CloudFile, id: fileId)] as? TelegramMediaFile {
+            attributeLoop: for attribute in file.attributes {
+                if case let .CustomEmoji(_, _, altValue, _) = attribute, !altValue.isEmpty {
+                    alt = altValue
+                    break attributeLoop
+                }
+            }
+        }
+        title = alt ?? (isRu ? "эмодзи" : "emoji")
+    case .stars:
+        title = isRu ? "Звёзды" : "Stars"
+    }
+    let text: String
+    if isRu {
+        text = removed ? "Реакция \(title) снята" : "Реакция \(title) проставлена"
+    } else {
+        text = removed ? "Reaction \(title) removed" : "Reaction \(title) set"
+    }
+    // Задержка, чтобы объявление не перебилось системной озвучкой активации
+    // действия / закрытия меню (иначе VO проглатывает announcement).
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        UIAccessibility.post(notification: .announcement, argument: text)
     }
 }

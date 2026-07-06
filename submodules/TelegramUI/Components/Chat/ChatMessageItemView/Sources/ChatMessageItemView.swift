@@ -69,6 +69,16 @@ private let fileSizeFormatter: ByteCountFormatter = {
 public enum ChatMessageAccessibilityCustomActionType {
     case reply
     case options
+    case comments
+    case reactions
+    /// Информационный пункт цепочки свайпа вниз (VO-ротор действий):
+    /// только озвучивается, активация — no-op. Используется блоком
+    /// «Реакции и просмотры» (заголовок и счётчик просмотров).
+    case info
+    /// Пункт-реакция блока «Реакции и просмотры»: двойной тап ставит/снимает
+    /// эту реакцию на сообщении (через updateMessageReaction — тот же путь,
+    /// что и выбор в контекстном меню).
+    case toggleReaction(MessageReaction.Reaction)
 }
 
 public final class ChatMessageAccessibilityCustomAction: UIAccessibilityCustomAction {
@@ -598,9 +608,78 @@ public final class ChatMessageAccessibilityData {
                 }
             }
             
-            if canReply {
-                customActions.append(ChatMessageAccessibilityCustomAction(name: item.presentationData.strings.VoiceOver_MessageContextReply, target: nil, selector: #selector(self.noop), action: .reply))
+            // canReply больше не используется в быстрых действиях (кнопку
+            // «Ответить» из ротора убрали); оставляем вычисление как есть, но
+            // глушим предупреждение «written but never read».
+            _ = canReply
+
+            // VoiceOver: быстрый доступ (ротор custom actions сообщения) сведён к
+            // «Открыть меню». «Ответить»/«Комментарии»/«Реакции» как действия
+            // убраны отсюда — они доступны внутри самого контекстного меню.
+            //
+            // Количество комментариев и переход в тред обеспечивает кнопка-футер
+            // «Просмотреть N комментариев» под постом (отдельный VO-элемент,
+            // см. ChatMessageCommentFooterContentNode). Поэтому в озвучку самого
+            // сообщения счётчик НЕ добавляем — иначе дубль: «N комментариев» на
+            // сообщении и на футере.
+
+            // VoiceOver: блок «Реакции и просмотры» в цепочке свайпа вниз —
+            // между «Комментарии» (синтезируется из футера при промоуте баббла)
+            // и «Открыть меню». Заголовок, затем каждая реакция со счётчиком,
+            // затем количество просмотров. Пункты информационные (.info):
+            // активация — no-op, только озвучка (свайпы влево/вправо в роторе
+            // действий iOS всегда уводит на соседний элемент — перехватить их
+            // нельзя, поэтому перебор реакций сделан свайпами вниз/вверх).
+            var voReactionEntries: [(title: String, value: MessageReaction.Reaction)] = []
+            if let reactionsAttribute = item.message.reactionsAttribute {
+                for reaction in reactionsAttribute.reactions {
+                    let title: String
+                    switch reaction.value {
+                    case let .builtin(emoji):
+                        title = emoji
+                    case let .custom(fileId):
+                        var alt: String?
+                        if let file = item.message.associatedMedia[MediaId(namespace: Namespaces.Media.CloudFile, id: fileId)] as? TelegramMediaFile {
+                            attributeLoop: for attribute in file.attributes {
+                                if case let .CustomEmoji(_, _, altValue, _) = attribute {
+                                    alt = altValue.isEmpty ? nil : altValue
+                                    break attributeLoop
+                                }
+                            }
+                        }
+                        title = alt ?? (isRussianBaseLanguage(item: item) ? "Реакция" : "Reaction")
+                    case .stars:
+                        title = isRussianBaseLanguage(item: item) ? "Звёзды" : "Stars"
+                    }
+                    voReactionEntries.append((title: "\(title): \(reaction.count)", value: reaction.value))
+                }
             }
+            var voViewCount: Int?
+            for attribute in item.message.attributes {
+                if let attribute = attribute as? ViewCountMessageAttribute {
+                    voViewCount = attribute.count
+                    break
+                }
+            }
+            if !voReactionEntries.isEmpty || voViewCount != nil {
+                let isRu = isRussianBaseLanguage(item: item)
+                customActions.append(ChatMessageAccessibilityCustomAction(name: isRu ? "Реакции и просмотры" : "Reactions and views", target: nil, selector: #selector(self.noop), action: .info))
+                for entry in voReactionEntries {
+                    // Двойной тап по пункту-реакции ставит/снимает её (обработка
+                    // в performLocalAccessibilityCustomAction нод сообщений).
+                    customActions.append(ChatMessageAccessibilityCustomAction(name: entry.title, target: nil, selector: #selector(self.noop), action: .toggleReaction(entry.value)))
+                }
+                if let voViewCount {
+                    let viewsTitle: String
+                    if isRu {
+                        viewsTitle = "\(voViewCount) \(russianPluralViews(voViewCount))"
+                    } else {
+                        viewsTitle = voViewCount == 1 ? "1 view" : "\(voViewCount) views"
+                    }
+                    customActions.append(ChatMessageAccessibilityCustomAction(name: viewsTitle, target: nil, selector: #selector(self.noop), action: .info))
+                }
+            }
+
             customActions.append(ChatMessageAccessibilityCustomAction(name: item.presentationData.strings.VoiceOver_MessageContextOpenMessageMenu, target: nil, selector: #selector(self.noop), action: .options))
         }
         
@@ -617,6 +696,29 @@ public final class ChatMessageAccessibilityData {
     }
     
     @objc private func noop() {
+    }
+}
+
+// Наши кастомные ключи VoiceOver есть только в en.lproj — у русской
+// локализации их в словаре нет, поэтому fallback должен учитывать язык.
+// Определяем русский по baseLanguageCode (например, "ru", "ru-RU").
+private func isRussianBaseLanguage(item: ChatMessageItem) -> Bool {
+    return item.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+}
+
+/// Русское склонение слова «просмотр» для VO-озвучки счётчика.
+private func russianPluralViews(_ count: Int) -> String {
+    let mod100 = count % 100
+    if mod100 >= 11 && mod100 <= 14 {
+        return "просмотров"
+    }
+    switch count % 10 {
+    case 1:
+        return "просмотр"
+    case 2, 3, 4:
+        return "просмотра"
+    default:
+        return "просмотров"
     }
 }
 

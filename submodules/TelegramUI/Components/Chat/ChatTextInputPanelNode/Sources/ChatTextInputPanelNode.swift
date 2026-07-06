@@ -252,6 +252,16 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     public var mediaRecordingAccessibilityArea: AccessibilityAreaNode?
     private let textInputAccessibilityArea: AccessibilityAreaNode
     private let hideKeyboardAccessibilityArea: AccessibilityAreaNode
+    // VoiceOver: две кнопки-зоны в тулбаре (невидимы зрячим). «Написать
+    // сообщение»/«Добавить комментарий» (всегда, активация → фокус на поле) и
+    // «Отменить ответ»/«Отменить пересылку» (только когда есть плашка
+    // ответа/пересылки, активация → убрать плашку + фокус на поле). Делаем их
+    // настоящими элементами тулбара (как «Закрыть»), т.к. дописывание
+    // виртуального элемента в массив истории VO пропускает.
+    private let composeAccessibilityArea: AccessibilityAreaNode
+    private let cancelReplyForwardAccessibilityArea: AccessibilityAreaNode
+    // Заполняется из ChatControllerNode: убрать плашку ответа/пересылки.
+    public var accessibilityCancelReplyForwardAction: (() -> Void)?
     private let counterTextNode: ImmediateTextNode
     
     public let menuButton: HighlightTrackingButtonNode
@@ -324,7 +334,12 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     
     private var currentPlaceholder: String?
     private var sendingTextDisabled: Bool = false
-    
+    // VoiceOver: внешним потребителям (виртуальная кнопка «Добавить комментарий»
+    // в истории) нужно знать, разрешён ли ввод текста.
+    public var isSendingTextDisabled: Bool {
+        return self.sendingTextDisabled
+    }
+
     private var presentationInterfaceState: ChatPresentationInterfaceState?
     private var initializedPlaceholder = false
     
@@ -382,7 +397,39 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 didAppendSendButton = true
             }
 
-            appendNode(self.textInputAccessibilityArea)
+            // VoiceOver: кнопки «Написать сообщение»/«Отменить ответ» теперь
+            // живут в ленте истории как реальные пуловые элементы (см.
+            // ChatHistoryListNode), а не в тулбаре — до тулбар-зон VO не доходил.
+            //
+            // При поднятой клавиатуре (поле редактируется) показываем сам
+            // UITextView единственным элементом поля, а overlay-зону НЕ
+            // добавляем: иначе VO видит одновременно и зону, и реальное поле —
+            // отсюда «несколько вложенностей» и дёрганье фокуса между ними
+            // (focus-left-list ChatInputTextView ↔ View). Без клавиатуры
+            // показываем чистую overlay-зону как раньше.
+            if self.textInputNode?.isFirstResponder() == true, let textInputView = self.textInputNode?.textView {
+                elements.append(textInputView)
+            } else if !self.composeAccessibilityArea.isHidden {
+                // VoiceOver: с опущенной клавиатурой первым элементом панели
+                // показываем дискретную кнопку «Написать сообщение»/«Добавить
+                // комментарий» (composeAccessibilityArea). Именно на неё ведёт
+                // forward-escape-редирект, когда пользователь свайпает курсором
+                // вниз за последнее сообщение, — VO её озвучивает, а двойной тап
+                // поднимает клавиатуру и фокусирует поле (см. её `activate`).
+                // Раньше тут была overlay-зона поля без понятной кнопки-метки,
+                // а попытка сделать кнопку trailing-элементом ленты не
+                // озвучивалась (см. ChatHistoryListNode).
+                appendNode(self.composeAccessibilityArea)
+            } else {
+                appendNode(self.textInputAccessibilityArea)
+            }
+            // VoiceOver: кнопка «Отменить ответ»/«Отменить пересылку». Зона
+            // `cancelReplyForwardAccessibilityArea` уже спозиционирована и
+            // помечена, показывается (isHidden=false) только при активном
+            // ответе/пересылке — но её не было в списке, поэтому в тулбаре была
+            // лишь «Закрыть» (скрыть клавиатуру). Добавляем рядом с полем, чтобы
+            // отменить ответ можно было прямо из режима ввода.
+            appendNode(self.cancelReplyForwardAccessibilityArea)
             appendNode(self.hideKeyboardAccessibilityArea)
             if self.accessibilitySendButtonAnchor == .textInput {
                 appendSendButtonIfNeeded()
@@ -792,7 +839,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.mediaActionButtons.sendContainerNode.alpha = 0.0
         self.textInputAccessibilityArea = AccessibilityAreaNode()
         self.hideKeyboardAccessibilityArea = AccessibilityAreaNode()
-        
+        self.composeAccessibilityArea = AccessibilityAreaNode()
+        self.cancelReplyForwardAccessibilityArea = AccessibilityAreaNode()
+
         self.counterTextNode = ImmediateTextNode()
         self.counterTextNode.textAlignment = .center
         
@@ -806,6 +855,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         self.textInputAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
         self.hideKeyboardAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+        self.composeAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+        self.cancelReplyForwardAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
         self.hideKeyboardAccessibilityArea.accessibilityLabel = presentationInterfaceState.strings.Common_Close
         self.hideKeyboardAccessibilityArea.accessibilityHint = presentationInterfaceState.strings.VoiceOver_Keyboard
         self.hideKeyboardAccessibilityArea.accessibilityTraits = [.button]
@@ -819,6 +870,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 }
                 self.textInputAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
                 self.hideKeyboardAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+                self.composeAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
+                self.cancelReplyForwardAccessibilityArea.isUserInteractionEnabled = UIAccessibility.isVoiceOverRunning
             }
         )
         
@@ -835,7 +888,26 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.hideKeyboardAccessibilityArea.activate = { [weak self] in
             return self?.performHideKeyboardAccessibilityAction() ?? false
         }
-        
+        self.composeAccessibilityArea.accessibilityTraits = [.button]
+        self.composeAccessibilityArea.activate = { [weak self] in
+            guard let self else {
+                return false
+            }
+            if self.sendingTextDisabled {
+                return false
+            }
+            self.ensureFocused()
+            return true
+        }
+        self.cancelReplyForwardAccessibilityArea.accessibilityTraits = [.button]
+        self.cancelReplyForwardAccessibilityArea.activate = { [weak self] in
+            guard let self, let action = self.accessibilityCancelReplyForwardAction else {
+                return false
+            }
+            action()
+            return true
+        }
+
         self.view.addSubview(self.glassBackgroundContainer)
         
         self.slowModeButton.requestUpdate = { [weak self] in
@@ -1074,6 +1146,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.textInputContainerBackgroundView.contentView.addSubview(self.textInputNodeClippingContainer.view)
         self.textInputNodeClippingContainer.addSubnode(self.textInputAccessibilityArea)
         self.textInputNodeClippingContainer.addSubnode(self.hideKeyboardAccessibilityArea)
+        self.textInputNodeClippingContainer.addSubnode(self.composeAccessibilityArea)
+        self.textInputNodeClippingContainer.addSubnode(self.cancelReplyForwardAccessibilityArea)
         
         self.menuButton.view.addSubview(self.menuButtonBackgroundView)
         self.menuButton.addSubnode(self.menuButtonClippingNode)
@@ -3256,7 +3330,21 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         ]
         self.hideKeyboardAccessibilityArea.accessibilityLabel = interfaceState.strings.Common_Close
         self.hideKeyboardAccessibilityArea.accessibilityHint = interfaceState.strings.VoiceOver_Keyboard
-        
+
+        // VoiceOver compose/cancel: подписи по контексту.
+        if case .replyThread = interfaceState.chatLocation {
+            self.composeAccessibilityArea.accessibilityLabel = "Добавить комментарий"
+        } else {
+            self.composeAccessibilityArea.accessibilityLabel = "Написать сообщение"
+        }
+        let voHasReply = interfaceState.interfaceState.replyMessageSubject != nil
+        let voHasForward = interfaceState.interfaceState.forwardMessageIds != nil
+        if voHasReply {
+            self.cancelReplyForwardAccessibilityArea.accessibilityLabel = "Отменить ответ"
+        } else if voHasForward {
+            self.cancelReplyForwardAccessibilityArea.accessibilityLabel = "Отменить пересылку"
+        }
+
         let textPlaceholderFrame: CGRect
         if sendingTextDisabled {
             textPlaceholderFrame = CGRect(origin: CGPoint(x: floor((textInputContainerBackgroundFrame.width - textPlaceholderSize.width) / 2.0), y: actualTextInputViewInternalInsets.top + textInputViewRealInsets.top + UIScreenPixel + textFieldTopContentOffset), size: textPlaceholderSize)
@@ -3418,6 +3506,15 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         } else {
             self.hideKeyboardAccessibilityArea.isHidden = true
         }
+
+        // VoiceOver compose/cancel: фрейм — область поля ввода (зоны невидимы,
+        // важен лишь валидный фрейм). compose виден, когда ввод доступен и поле
+        // не скрыто; cancel — только при активной плашке ответа/пересылки.
+        let voFrameValid = textInputAccessibilityFrame.width > 1.0 && textInputAccessibilityFrame.height > 1.0
+        transition.updateFrame(node: self.composeAccessibilityArea, frame: textInputAccessibilityFrame)
+        self.composeAccessibilityArea.isHidden = !UIAccessibility.isVoiceOverRunning || self.sendingTextDisabled || self.textInputAccessibilityArea.isHidden || !voFrameValid
+        transition.updateFrame(node: self.cancelReplyForwardAccessibilityArea, frame: textInputAccessibilityFrame)
+        self.cancelReplyForwardAccessibilityArea.isHidden = !UIAccessibility.isVoiceOverRunning || !(voHasReply || voHasForward) || !voFrameValid
         if let (rect, containerSize) = self.absoluteRect {
             self.sendActionButtons.updateAbsoluteRect(CGRect(x: rect.origin.x + sendActionButtonsFrame.origin.x, y: rect.origin.y + sendActionButtonsFrame.origin.y, width: sendActionButtonsFrame.width, height: sendActionButtonsFrame.height), within: containerSize, transition: transition)
         }
@@ -5426,13 +5523,51 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     public var isFocused: Bool {
         return self.textInputNode?.isFirstResponder() ?? false
     }
-    
+
+    /// True if the given accessibility-focused view is the text input field's
+    /// accessibility area, the text view itself, or any descendant of this
+    /// panel. Used by the chat history list to recognise when VoiceOver has
+    /// legitimately moved focus onto the input (so it must not pull it back).
+    public func isAccessibilityFocusWithinInput(_ view: UIView) -> Bool {
+        if view === self.textInputAccessibilityArea.view {
+            return true
+        }
+        if let textInputView = self.textInputNode?.view, view === textInputView || view.isDescendant(of: textInputView) {
+            return true
+        }
+        if self.isNodeLoaded, view.isDescendant(of: self.view) {
+            return true
+        }
+        return false
+    }
+
+    /// VoiceOver: ставит курсор на дискретную кнопку «Написать сообщение»
+    /// (composeAccessibilityArea), НЕ поднимая клавиатуру. Вызывается
+    /// forward-escape-редиректом, когда пользователь свайпает курсором вниз за
+    /// последнее сообщение: VO озвучивает кнопку, а уже двойной тап по ней
+    /// (см. её `activate` → `ensureFocused`) поднимает клавиатуру и фокусирует
+    /// поле. Возвращает false, если кнопку показать нельзя (ввод запрещён или
+    /// панель ещё не сверстана) — тогда вызывающий код применяет запасной путь.
+    public func focusComposeAccessibilityButton() -> Bool {
+        guard !self.sendingTextDisabled, self.isNodeLoaded else {
+            return false
+        }
+        let buttonView = self.composeAccessibilityArea.view
+        guard !self.composeAccessibilityArea.isHidden, buttonView.alpha > 0.01, self.composeAccessibilityArea.accessibilityLabel?.isEmpty == false else {
+            return false
+        }
+        UIAccessibility.post(notification: .screenChanged, argument: buttonView)
+        return true
+    }
+
     public func ensureUnfocused() {
         self.textInputNode?.resignFirstResponder()
     }
     
     override public func accessibilityPerformEscape() -> Bool {
-        return self.performHideKeyboardAccessibilityAction()
+        let handled = self.performHideKeyboardAccessibilityAction()
+        voAccessibilityLog("[VO-ESCAPE] ChatTextInputPanelNode.accessibilityPerformEscape handled=\(handled) (isFirstResponder=\(self.textInputNode?.isFirstResponder() ?? false))")
+        return handled
     }
     
     public func ensureFocused() {
@@ -5454,9 +5589,21 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             // the source message. Delay one runloop so the field is on-screen
             // before we focus it.
             if UIAccessibility.isVoiceOverRunning {
-                let focusTarget: Any? = self.textInputAccessibilityArea.view
-                DispatchQueue.main.async {
-                    guard UIAccessibility.isVoiceOverRunning, let focusTarget else {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, UIAccessibility.isVoiceOverRunning else {
+                        return
+                    }
+                    // С поднятой клавиатурой поле редактируется и в
+                    // accessibilityElements теперь сам UITextView (а не
+                    // overlay-зона) — ставим курсор прямо на него, чтобы не
+                    // было дёрганья между зоной и реальным полем.
+                    let focusTarget: Any?
+                    if self.textInputNode?.isFirstResponder() == true, let textInputView = self.textInputNode?.textView {
+                        focusTarget = textInputView
+                    } else {
+                        focusTarget = self.textInputAccessibilityArea.view
+                    }
+                    guard let focusTarget else {
                         return
                     }
                     UIAccessibility.post(notification: .screenChanged, argument: focusTarget)

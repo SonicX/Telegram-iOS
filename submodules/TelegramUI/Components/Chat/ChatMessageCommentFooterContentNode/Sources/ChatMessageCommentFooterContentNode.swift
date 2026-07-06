@@ -12,13 +12,25 @@ import AnimatedAvatarSetNode
 import ChatMessageBubbleContentNode
 import ChatMessageItemCommon
 
+// VoiceOver: кнопка-футер «N комментариев / Написать комментарий». Node-кнопка
+// не форвардит accessibilityActivate в touchUpInside, поэтому double-tap VO
+// «ничего не делал». Подкласс явно вызывает обработчик нажатия.
+private final class CommentFooterButtonNode: HighlightTrackingButtonNode {
+    var onAccessibilityActivate: (() -> Void)?
+
+    override public func accessibilityActivate() -> Bool {
+        self.onAccessibilityActivate?()
+        return true
+    }
+}
+
 public final class ChatMessageCommentFooterContentNode: ChatMessageBubbleContentNode {
     private let separatorNode: ASDisplayNode
     private let countNode: AnimatedCountLabelNode
     private let alternativeCountNode: AnimatedCountLabelNode
     private let iconNode: ASImageNode
     private let arrowNode: ASImageNode
-    private let buttonNode: HighlightTrackingButtonNode
+    private let buttonNode: CommentFooterButtonNode
     private let avatarsContext: AnimatedAvatarSetContext
     private let avatarsNode: AnimatedAvatarSetNode
     private let unreadIconNode: ASImageNode
@@ -50,8 +62,8 @@ public final class ChatMessageCommentFooterContentNode: ChatMessageBubbleContent
         self.avatarsNode = AnimatedAvatarSetNode()
         self.avatarsNode.isUserInteractionEnabled = false
         
-        self.buttonNode = HighlightTrackingButtonNode()
-        
+        self.buttonNode = CommentFooterButtonNode()
+
         super.init()
         
         self.buttonNode.addSubnode(self.separatorNode)
@@ -62,7 +74,19 @@ public final class ChatMessageCommentFooterContentNode: ChatMessageBubbleContent
         self.buttonNode.addSubnode(self.arrowNode)
         self.buttonNode.addSubnode(self.avatarsNode)
         self.addSubnode(self.buttonNode)
-        
+
+        // VoiceOver: футер «Написать комментарий / N комментариев» — это и есть
+        // точка доступа к комментариям. Делаем его настоящей КНОПКОЙ (фокус +
+        // активация), дочерние метки скрываются автоматически (isAccessibilityElement
+        // = true делает узел листом). Действие сообщения «Комментарии» убрано из
+        // ротора, так что дубля больше нет. accessibilityLabel («Просмотреть N
+        // комментариев») выставляется при апдейте. По double-tap — buttonPressed.
+        self.buttonNode.isAccessibilityElement = true
+        self.buttonNode.accessibilityTraits = [.button]
+        self.buttonNode.onAccessibilityActivate = { [weak self] in
+            self?.buttonPressed()
+        }
+
         self.buttonNode.highligthedChanged = { [weak self] highlighted in
             if let strongSelf = self {
                 let nodes: [ASDisplayNode] = [

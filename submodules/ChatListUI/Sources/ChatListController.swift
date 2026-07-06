@@ -1068,11 +1068,22 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         }
         
         self.chatListDisplayNode.mainContainerNode.peerSelected = { [weak self] peer, threadId, animated, activateInput, promoInfo in
+            // VoiceOver: приостанавливаем focus-обработку списка чатов СИНХРОННО,
+            // прямо в момент активации строки — ДО `Task { @MainActor }` и
+            // async-колбэка postbox. Иначе флаг ставился слишком поздно: пока
+            // postbox грузит данные и идёт push, список ещё топовый и его
+            // focus-обработчик гонял курсор VO по соседним чатам (system-nonstep
+            // прокрутка) — ровно симптом бага. Только compact (в regular список
+            // остаётся виден; флаг сбросит viewDidAppear только в compact).
+            if let self, let layout = self.validLayout, case .compact = layout.metrics.widthClass {
+                self.chatListDisplayNode.effectiveContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = true
+                voAccessibilityLog("[VO-STATE] chatlist-suspend-set-on-peerSelected node=\(ObjectIdentifier(self.chatListDisplayNode.effectiveContainerNode.currentItemNode))")
+            }
             Task { @MainActor [weak self] in
                 guard let self else {
                     return
                 }
-                
+
                 let subject: ChatControllerSubject? = nil
                 
                 var forumSourcePeer: Signal<EnginePeer?, NoError> = .single(nil)
@@ -1120,6 +1131,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     }
                     
                     if openAsInlineForum, case let .channel(channel) = peer, channel.isForum, threadId == nil {
+                        // Inline-форум: экран НЕ меняется, поэтому снимаем
+                        // suspend, выставленный синхронно в начале peerSelected
+                        // (иначе список останется «глухим» к фокусу).
+                        self.chatListDisplayNode.effectiveContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
                         self.chatListDisplayNode.clearHighlightAnimated(true)
                         if self.chatListDisplayNode.inlineStackContainerNode?.location == .forum(peerId: channel.id) {
                             self.setInlineChatList(location: nil)
@@ -1128,7 +1143,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         }
                         return
                     }
-                    
+
                     if case let .channel(channel) = peer, channel.isForumOrMonoForum, let threadId {
                         self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(
                             navigationController: navigationController,
@@ -2421,7 +2436,11 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-                
+
+        // VoiceOver: снова топовый экран — разрешаем списку реагировать на
+        // фокус (был приостановлен при уходе в чат, см. viewWillDisappear).
+        self.chatListDisplayNode.mainContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
+
         if self.powerSavingMonitoringDisposable == nil {
             self.powerSavingMonitoringDisposable = (self.context.sharedContext.automaticMediaDownloadSettings
             |> mapToSignal { settings -> Signal<Bool, NoError> in
@@ -2889,7 +2908,12 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     override public func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        
+
+        // VoiceOver: уходим с экрана (push в чат / поиск). Приостанавливаем
+        // обработку фокуса, чтобы список чатов, оставаясь в окне под новым
+        // экраном, не гонял курсор VO по своим строкам, пока чат грузится.
+        self.chatListDisplayNode.mainContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = true
+
         self.chatListDisplayNode.mainContainerNode.updateEnableAdjacentFilterLoading(false)
         
         self.dismissAllUndoControllers()

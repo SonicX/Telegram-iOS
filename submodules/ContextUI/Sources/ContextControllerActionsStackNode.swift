@@ -1957,14 +1957,20 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
         // with the topmost element makes VoiceOver announce it and lets the
         // user walk the menu with left/right swipes. Delayed until after the
         // present spring so the rows have their final on-screen frames.
-        print("[VO-MENU] actionsStackNode.animateIn voRunning=\(UIAccessibility.isVoiceOverRunning) containers=\(self.itemContainers.count)")
-        if UIAccessibility.isVoiceOverRunning {
+        voAccessibilityLog("[VO-MENU] actionsStackNode.animateIn voRunning=\(UIAccessibility.isVoiceOverRunning) containers=\(self.itemContainers.count)")
+        // VoiceOver: если меню открыто действием «Реакции», НЕ перехватываем
+        // фокус на первый пункт — пусть курсор встанет на панель реакций
+        // (её фокус ставит ReactionContextNode). Потребляем флаг один раз.
+        if ContextController.accessibilityFocusReactionsOnNextPresent {
+            ContextController.accessibilityFocusReactionsOnNextPresent = false
+            voAccessibilityLog("[VO-MENU] skip menu-item focus: focusing reactions instead")
+        } else if UIAccessibility.isVoiceOverRunning {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
                 guard let self, UIAccessibility.isVoiceOverRunning else {
                     return
                 }
                 let focusTarget = self.topmostAccessibilityElement(in: self.view)
-                print("[VO-MENU] post-delay focusTarget=\(focusTarget != nil ? "found" : "nil")")
+                voAccessibilityLog("[VO-MENU] post-delay focusTarget=\(focusTarget != nil ? "found" : "nil")")
                 if let focusTarget {
                     UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
                 }

@@ -30,6 +30,7 @@ import AccessoryPanelNode
 import ForwardAccessoryPanelNode
 import ChatOverscrollControl
 import ChatInputPanelNode
+import ChatChannelSubscriberInputPanelNode
 import ChatInputContextPanelNode
 import TextSelectionNode
 import ReplyAccessoryPanelNode
@@ -983,6 +984,147 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.textInputPanelNode?.textInputAccessoryPanel = textInputAccessoryPanel
         self.textInputPanelNode?.textInputContextPanel = textInputContextPanel
         self.textInputPanelNode?.storedInputLanguage = chatPresentationInterfaceState.interfaceState.inputLanguage
+
+        // VoiceOver: когда пользователь свайпает за последнее (новейшее)
+        // сообщение, VO сам переводит курсор на поле ввода. Раньше наша
+        // focus-containment машинерия считала это «уходом из списка» и тащила
+        // курсор обратно на сообщение (потом он срывался в заголовок). Здесь
+        // мы помечаем поле ввода как ЛЕГИТИМНЫЙ выход — курсор остаётся на нём,
+        // и сам же ввод поднимает клавиатуру.
+        self.historyNode.accessibilityIsLegitimateFocusEscape = { [weak self] focusedObject in
+            guard let self else {
+                return false
+            }
+            guard let focusedView = focusedObject as? UIView else {
+                return false
+            }
+            // Фокус на поле ввода или любом элементе тулбара (потомке панели)
+            // считаем ЛЕГИТИМНЫМ — recovery не тащит курсор обратно в список.
+            // ВАЖНО: здесь НЕЛЬЗЯ вызывать ensureFocused() — это был баг: при
+            // попытке перейти на элементы тулбара (кнопка отмены, отправка,
+            // скрытие клавиатуры) ensureFocused постил фокус обратно на поле
+            // ввода, и курсор «прилипал» к нему, не давая переключаться. Это
+            // лишь предикат-классификатор, без побочных эффектов. Клавиатура
+            // поднимается при ЯВНОЙ активации поля/кнопки «Написать сообщение».
+            if let inputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode, inputPanelNode.isAccessibilityFocusWithinInput(focusedView) {
+                return true
+            }
+            // Панель неприсоединённой группы/канала («Вступить в группу»):
+            // её кнопка теперь VoiceOver-элемент. Считаем переход на неё
+            // легитимным, чтобы при свайпе за последнее сообщение курсор
+            // оставался на кнопке, а не срывался в заголовок чата.
+            if let subscriberPanelNode = self.inputPanelNode as? ChatChannelSubscriberInputPanelNode, subscriberPanelNode.isAccessibilityFocusWithinPanel(focusedView) {
+                return true
+            }
+            // Плашка ответа/пересылки над полем ввода: её превью сообщения и
+            // кнопка «Отменить» — VoiceOver-элементы. Фокус на ней легитимен,
+            // иначе recovery утащит курсор обратно в список и до «Отменить
+            // ответ» не добраться.
+            if let accessoryPanelNode = self.accessoryPanelNode, focusedView.isDescendant(of: accessoryPanelNode.view) {
+                return true
+            }
+            return false
+        }
+        // VoiceOver: куда поставить курсор, когда пользователь свайпает ВПЕРЁД
+        // за последнее (новейшее) сообщение, а iOS уводит фокус в заголовок
+        // (ChatTitleView) вместо нижней панели ввода. Возвращаем первый
+        // VoiceOver-элемент активной панели: поле ввода текста / «Добавить
+        // комментарий» для обычного чата и комментариев, либо кнопку «Вступить
+        // в группу» для неприсоединённой группы. ListView перенаправит курсор
+        // сюда вместо возврата в список.
+        self.historyNode.accessibilityForwardEscapeHandler = { [weak self] in
+            guard let self, let inputPanelNode = self.inputPanelNode else {
+                return false
+            }
+            // Если над полем есть плашка ответа/пересылки — ведём курсор СНАЧАЛА
+            // на неё (превью сообщения + кнопка «Отменить»), чтобы пользователь
+            // мог прочитать, на что отвечает, и отменить ответ. Клавиатуру тут
+            // не поднимаем: дальше свайпом доступно поле ввода (двойной тап по
+            // нему — печатать). Без этого редирект сразу поднимал клавиатуру и
+            // плашка с «Отменить ответ» оставалась недостижимой.
+            if let accessoryPanelNode = self.accessoryPanelNode,
+               let target = accessoryPanelNode.accessibilityElements?.first as? UIView, !target.isHidden, target.alpha > 0.01 {
+                UIAccessibility.post(notification: .screenChanged, argument: target)
+                return true
+            }
+            // Обычный чат / комментарии: ставим VO-курсор на дискретную кнопку
+            // «Написать сообщение»/«Добавить комментарий» в панели ввода
+            // (composeAccessibilityArea). Клавиатуру тут НЕ поднимаем — это
+            // делает уже двойной тап по кнопке (её `activate` → ensureFocused).
+            // Так пользователь, свайпая курсором вниз за последнее сообщение,
+            // сначала слышит кнопку, а печатать начинает осознанно. Если кнопку
+            // показать нельзя (например, панель ещё не сверстана) — запасной
+            // путь: поднять клавиатуру и сфокусировать поле напрямую.
+            if let textInputPanelNode = inputPanelNode as? ChatTextInputPanelNode {
+                if textInputPanelNode.isSendingTextDisabled {
+                    return false
+                }
+                if textInputPanelNode.focusComposeAccessibilityButton() {
+                    return true
+                }
+                textInputPanelNode.ensureFocused()
+                return true
+            }
+            // Неприсоединённая группа: клавиатуры нет — просто ставим курсор на
+            // кнопку «Вступить в группу» (первый элемент панели).
+            if let subscriberPanelNode = inputPanelNode as? ChatChannelSubscriberInputPanelNode,
+               let target = subscriberPanelNode.accessibilityElements?.first as? UIView, !target.isHidden, target.alpha > 0.01 {
+                UIAccessibility.post(notification: .screenChanged, argument: target)
+                return true
+            }
+            return false
+        }
+        // VoiceOver (Баг 2): trailing-кнопки в ленте истории. Info возвращает
+        // подпись если кнопку надо показать (иначе nil); Activate — действие.
+        self.historyNode.accessibilityComposeButtonInfo = { [weak self] in
+            guard let self, let inputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode, !inputPanelNode.isSendingTextDisabled else {
+                return nil
+            }
+            if case .replyThread = self.chatLocation {
+                return "Добавить комментарий"
+            } else {
+                return "Написать сообщение"
+            }
+        }
+        self.historyNode.accessibilityComposeButtonActivate = { [weak self] in
+            guard let self, let inputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode else {
+                return
+            }
+            inputPanelNode.ensureFocused()
+        }
+        self.historyNode.accessibilityCancelReplyForwardButtonInfo = { [weak self] in
+            guard let self, let accessoryPanelNode = self.accessoryPanelNode else {
+                return nil
+            }
+            if accessoryPanelNode is ReplyAccessoryPanelNode {
+                return "Отменить ответ"
+            } else if accessoryPanelNode is ForwardAccessoryPanelNode {
+                return "Отменить пересылку"
+            }
+            return nil
+        }
+        self.historyNode.accessibilityCancelReplyForwardActivate = { [weak self] in
+            guard let self else {
+                return
+            }
+            self.accessoryPanelNode?.dismiss?()
+            if let inputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode {
+                inputPanelNode.ensureFocused()
+            }
+        }
+        // VoiceOver: кнопка «Отменить ответ»/«Отменить пересылку» в тулбаре поля
+        // ввода (cancelReplyForwardAccessibilityArea). Без этого замыкания
+        // двойной тап по ней ничего не делал. Закрываем плашку ответа/пересылки
+        // и оставляем фокус на поле ввода.
+        self.textInputPanelNode?.accessibilityCancelReplyForwardAction = { [weak self] in
+            guard let self else {
+                return
+            }
+            self.accessoryPanelNode?.dismiss?()
+            if let inputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode {
+                inputPanelNode.ensureFocused()
+            }
+        }
         self.textInputPanelNode?.updateHeight = { [weak self] animated in
             if let strongSelf = self, let _ = strongSelf.inputPanelNode as? ChatTextInputPanelNode, !strongSelf.ignoreUpdateHeight {
                 if strongSelf.scheduledLayoutTransitionRequest == nil {

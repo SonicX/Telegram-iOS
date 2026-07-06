@@ -493,6 +493,14 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
 
     @objc open func customAccessibilityElements() -> [Any]? {
+        // Баг 1: пока список приостановлен (уходим в чат — см.
+        // accessibilityFocusHandlingSuspended), отдаём VoiceOver ПУСТОЙ набор.
+        // Иначе VO сам наводится на строки ещё видимого под новым экраном
+        // списка и зачитывает соседний чат, пока история открываемого грузится.
+        // Флаг ставит только список чатов (история его не выставляет).
+        if self.accessibilityFocusHandlingSuspended {
+            return nil
+        }
         var accessibilityElements: [Any] = []
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
@@ -625,6 +633,31 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             })
         }
         if trackDirectionalFocus {
+            // Баг 2: дописываем реальные trailing-элементы (кнопки) как пуловые
+            // FocusTrackingAccessibilityElement с синтетическим localIndex ниже
+            // минимального. После сортировки по возрастанию и reverse они
+            // оказываются последними swipe-стопами (после новейшего сообщения).
+            self.accessibilitySyntheticTrailingIndices.removeAll()
+            if let provider = self.accessibilityTrailingPooledElementsProvider {
+                let trailing = provider()
+                self.accessibilitySuppressTrailingBoundaryScroll = !trailing.isEmpty
+                if !trailing.isEmpty {
+                    let minLocalIndex = directionalCandidates.map({ $0.localIndex }).min() ?? 0
+                    for (i, item) in trailing.enumerated() {
+                        let synthIndex = minLocalIndex - 1 - i
+                        let element = self.reuseOrCreateDirectionalElement(localIndex: synthIndex, childOrder: 0, sourceView: item.sourceView)
+                        element.accessibilityFrame = item.frame
+                        element.accessibilityLabel = item.label
+                        element.accessibilityValue = item.value
+                        element.accessibilityHint = nil
+                        element.accessibilityTraits = item.traits
+                        element.accessibilityCustomActions = nil
+                        directionalCandidates.append((localIndex: synthIndex, order: 0, element: element))
+                        activeLocalIndices.insert(synthIndex)
+                        self.accessibilitySyntheticTrailingIndices.insert(synthIndex)
+                    }
+                }
+            }
             accessibilityElements = directionalCandidates.sorted(by: { lhs, rhs in
                 if lhs.localIndex != rhs.localIndex {
                     return lhs.localIndex < rhs.localIndex
@@ -5550,6 +5583,27 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var accessibilityBoundaryRecenterInProgress = false
     private var accessibilityLastBoundaryRecenterTimestamp: CFTimeInterval = 0.0
     private var accessibilityIgnoreOffscreenUntil: CFTimeInterval = 0.0
+    // Баг 1: список чатов переиспользует VO-машинерию повёрнутой истории
+    // (scroll-to-focused + boundary-page-scroll), и она порождает каскады
+    // авто-прокруток, зачитывающие случайные чаты (при появлении экрана и при
+    // свайпе у края). Для ПЛОСКОГО списка чатов это вредно: ручная навигация —
+    // всегда ±1, а любые нелинейные перескоки VO — это re-anchor/каскад, к
+    // которому НЕ нужно подскролливать (нативный VO сам прокрутит). Когда флаг
+    // включён (только ChatListNode, не история): (1) scroll-to-focused только
+    // для линейных ±1 переходов, (2) boundary-page-scroll полностью отключён.
+    public var accessibilityUsesNativeScrollForNonSequentialFocus: Bool = false
+    // Баг 2: история выставляет true, когда в самый низ дописаны trailing-кнопки
+    // («Написать сообщение»/«Отменить ответ»). Тогда boundary-page-scroll при
+    // движении вперёд (к новейшему) отключается, чтобы VO дошёл до кнопки.
+    public var accessibilitySuppressTrailingBoundaryScroll: Bool = false
+    // Баг 2: реальные VO-элементы (того же пулового типа, что и сообщения),
+    // дописываемые ПОСЛЕ новейшего сообщения — кнопки «Написать сообщение»/
+    // «Отменить ответ». Подкласс (история) поставляет их через провайдер; они
+    // получают синтетический localIndex ниже минимального, поэтому после
+    // reverse встают последними swipe-стопами. Активация делегируется в
+    // `sourceView.accessibilityActivate()`.
+    public var accessibilityTrailingPooledElementsProvider: (() -> [ListViewAccessibilityTrailingElement])?
+    private var accessibilitySyntheticTrailingIndices: Set<Int> = []
     private var accessibilityLastLoggedArraySnapshot: [String] = []
     private var accessibilityLastLoggedGlobalPosition: Int?
     // Element pool keyed by the list item's stable *local index* rather than
@@ -5580,6 +5634,42 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
     /// When set, a 3-finger VoiceOver scroll announces this string (e.g. the date of the top visible row) via `.pageScrolled` instead of reading a row, and suppresses the post-scroll focus re-centring. Chat history sets this; other lists leave it nil.
     public var accessibilityScrollPositionAnnouncement: (() -> String?)?
+
+    /// Returns true if the given (now-focused) accessibility object is a
+    /// legitimate place for the VoiceOver cursor to land *outside* this list —
+    /// e.g. the chat's text input field, which VoiceOver reaches naturally when
+    /// the user swipes past the last message. When it returns true the
+    /// focus-containment machinery does NOT drag the cursor back into the list,
+    /// so the user can move from the last message onto the input (and the input
+    /// raises the keyboard itself). Leave nil to always recover focus.
+    public var accessibilityIsLegitimateFocusEscape: ((Any) -> Bool)?
+
+    /// Host-provided handler invoked when the VoiceOver cursor escapes the list
+    /// going FORWARD (past the newest message) but iOS sends it to the wrong
+    /// place (the navigation-bar title) instead of the bottom input area. The
+    /// host moves focus onto the input itself — e.g. raising the keyboard via
+    /// `ensureFocused()` for the text field, or posting focus to the "Join
+    /// group" button — and returns true if it handled the redirect. When it
+    /// returns true the containment machinery does NOT yank the cursor back
+    /// into the list. The trailing pooled compose element lives in the array
+    /// but VoiceOver sometimes skips it straight to the navbar; this redirect
+    /// makes the "swipe past last message → input" transition deterministic
+    /// and (for the text field) raises the keyboard.
+    public var accessibilityForwardEscapeHandler: (() -> Bool)?
+
+    /// Screen-space vertical centre of the most recently focused in-list
+    /// element. Used to gate the forward-escape redirect: only redirect to the
+    /// bottom input when the last focused message was in the BOTTOM portion of
+    /// the list (i.e. near the newest message) and focus escaped upward to the
+    /// navbar. Swiping backward off the OLDEST (top) message reaches the navbar
+    /// legitimately and must be left untouched.
+    private var accessibilityLastFocusedScreenMidY: CGFloat?
+
+    /// When true, this list ignores VoiceOver focus notifications entirely.
+    /// Set by a controller that is leaving the screen (e.g. the chat list while
+    /// pushing into a chat) so its still-in-window list doesn't fight the
+    /// incoming screen for the cursor. Cleared when it becomes topmost again.
+    public var accessibilityFocusHandlingSuspended: Bool = false
 
     /// Subclass hook for vetoing the off-screen-uiview scroll path in
     /// `handleSystemAccessibilityFocusNotification`. Default: allow.
@@ -5703,13 +5793,42 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         guard self.accessibilityDirectionalAnnouncement != nil else {
-            print("[VO-STATE] focus-handler-skip reason=no-directional-announcement")
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=no-directional-announcement")
             return
+        }
+        // The owning controller is leaving the screen (e.g. chat list pushing
+        // into a chat). Don't react to focus changes — otherwise this list
+        // chases the cursor while the new screen is still loading.
+        if self.accessibilityFocusHandlingSuspended {
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=suspended")
+            return
+        }
+        // This is a *global* NotificationCenter handler — every materialised
+        // ListView receives it, including a chat history node that is leaving
+        // the screen during a push/pop. An off-screen node must not react to
+        // focus changes: otherwise the outgoing chat's list fights the
+        // incoming one for the cursor (the "cursor jumps to a random message
+        // before the new screen finishes loading" symptom). Bail out unless
+        // this list is actually on screen.
+        if self.view.window == nil || self.isHidden || self.alpha <= 0.01 {
+            return
+        }
+        // During a push/pop both the outgoing and incoming chat lists are
+        // briefly in the window at once. The outgoing one is slid off-screen
+        // (or covered), so additionally require that the list's content frame
+        // still meaningfully intersects its own window before reacting.
+        if let window = self.view.window,
+           let clipFrame = self.accessibilityClippingFrameInScreenCoordinates() {
+            let windowFrame = window.convert(window.bounds, to: nil)
+            let intersection = clipFrame.intersection(windowFrame)
+            if intersection.isNull || intersection.width < 1.0 || intersection.height < 1.0 {
+                return
+            }
         }
 
         let focusedAny = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey]
         if focusedAny == nil {
-            print("[VO-STATE] focus-handler-skip reason=nil-focused-element")
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=nil-focused-element")
             return
         }
         if let focusedAny, !self.isAccessibilityObjectInsideListView(focusedAny) {
@@ -5729,7 +5848,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // when opening the menu via deep-press. Every in-sequence element's
             // source view is a descendant of the list, so checking the view
             // hierarchy first never misclassifies a real list item.
-            print("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
             self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
             return
         }
@@ -5739,7 +5858,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             let focusedScreenFrame = UIAccessibility.convertToScreenCoordinates(focusedView.bounds, in: focusedView)
             if !focusedScreenFrame.isNull && !focusedScreenFrame.intersects(clipFrame) {
                 if CACurrentMediaTime() < self.accessibilityIgnoreOffscreenUntil || self.accessibilityBoundaryRecenterInProgress {
-                    print("[VO-STATE] focus-handler-skip reason=offscreen-ignored ttl=\(String(format: "%.0f", (self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()) * 1000))ms")
+                    voAccessibilityLog("[VO-STATE] focus-handler-skip reason=offscreen-ignored ttl=\(String(format: "%.0f", (self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()) * 1000))ms")
                     return
                 }
                 // Variant Y: when the focused UIView is one of our
@@ -5800,18 +5919,18 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     // other line of defence.
                     let viewHidden = itemNode.view.accessibilityElementsHidden
                     if viewHidden {
-                        print("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden)")
+                        voAccessibilityLog("[VO-STATE] focus-scroll-skip reason=hidden-item localIndex=\(localIndex) viewHidden=\(viewHidden)")
                         return
                     }
                     if !self.accessibilityShouldAllowScrollToItem(at: localIndex) {
-                        print("[VO-STATE] focus-scroll-skip reason=subclass-veto localIndex=\(localIndex)")
+                        voAccessibilityLog("[VO-STATE] focus-scroll-skip reason=subclass-veto localIndex=\(localIndex)")
                         return
                     }
-                    print("[VO-STATE] focus-scroll-triggered-by-uiview localIndex=\(localIndex) type=\(type(of: focusedView))")
+                    voAccessibilityLog("[VO-STATE] focus-scroll-triggered-by-uiview localIndex=\(localIndex) type=\(type(of: focusedView))")
                     self.scrollVoiceOverFocusToItem(at: localIndex)
                     return
                 }
-                print("[VO-STATE] focus-handler-skip reason=offscreen-uiview-ignored type=\(type(of: focusedView))")
+                voAccessibilityLog("[VO-STATE] focus-handler-skip reason=offscreen-uiview-ignored type=\(type(of: focusedView))")
                 return
             }
         }
@@ -5819,7 +5938,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if let focusedAny {
                 voDebugLog("[VO-SWIPE-DEBUG] system-focus unsupported-focused-type=\(type(of: focusedAny))")
             } else {
-                print("[VO-STATE] focus-handler-skip reason=nil-focused-after-checks")
+                voAccessibilityLog("[VO-STATE] focus-handler-skip reason=nil-focused-after-checks")
             }
             return
         }
@@ -5827,7 +5946,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let elementsAny = self.customAccessibilityElements() ?? []
         let elements = elementsAny.compactMap { $0 as? UIAccessibilityElement }
         guard !elements.isEmpty else {
-            print("[VO-STATE] focus-handler-skip reason=empty-elements")
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=empty-elements")
             return
         }
 
@@ -5838,7 +5957,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return (index, element, data)
         }
         guard !elementData.isEmpty else {
-            print("[VO-STATE] focus-handler-skip reason=empty-element-data visibleCount=\(elements.count)")
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=empty-element-data visibleCount=\(elements.count)")
             return
         }
         let focusedSourceViewIdentifier: ObjectIdentifier?
@@ -5899,9 +6018,13 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
         guard let toIndex else {
-            print("[VO-STATE] focus-handler-skip reason=nil-toIndex match=\(matchKind) visibleCount=\(elements.count)")
+            voAccessibilityLog("[VO-STATE] focus-handler-skip reason=nil-toIndex match=\(matchKind) visibleCount=\(elements.count)")
             return
         }
+        // Remember where (vertically, on screen) the focused element sits so
+        // the forward-escape redirect can tell a "swipe past the newest
+        // message" (bottom) from a "swipe before the oldest message" (top).
+        self.accessibilityLastFocusedScreenMidY = focusedData.frame.isNull ? nil : focusedData.frame.midY
         self.accessibilityLastSystemFocusedIndex = toIndex
         self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
         self.accessibilityFocusLeftListFailureCount = 0
@@ -5957,12 +6080,22 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // Falls back to the geometric path for non-pooled elements.
             if let trackedElement = focusedElement as? FocusTrackingAccessibilityElement,
                let pinnedLocalIndex = trackedElement.pinnedLocalIndex {
-                self.scrollVoiceOverFocusToItem(at: pinnedLocalIndex)
-                print("[VO-STATE] focus-scroll-triggered-by-index toIndex=\(toIndex) localIndex=\(pinnedLocalIndex) visibleCount=\(elements.count) match=\(matchKind)")
+                // Баг 1 (список чатов): скроллим к фокусу только при линейных ±1
+                // переходах (ручная навигация свайпами). Нелинейные перескоки VO
+                // (re-anchor при появлении экрана, после boundary-scroll, rotor)
+                // НЕ подскролливаем — иначе запускается каскад с зачитыванием
+                // случайных чатов. Нативный VO сам прокрутит при необходимости.
+                let isNonSequential = (fromIndex == nil) || abs(toIndex - (fromIndex ?? toIndex)) > 1
+                if self.accessibilityUsesNativeScrollForNonSequentialFocus && isNonSequential {
+                    voAccessibilityLog("[VO-STATE] focus-scroll-suppressed-nonsequential toIndex=\(toIndex) localIndex=\(pinnedLocalIndex) from=\(String(describing: fromIndex))")
+                } else {
+                    self.scrollVoiceOverFocusToItem(at: pinnedLocalIndex)
+                    voAccessibilityLog("[VO-STATE] focus-scroll-triggered-by-index toIndex=\(toIndex) localIndex=\(pinnedLocalIndex) visibleCount=\(elements.count) match=\(matchKind)")
+                }
             } else {
                 let scrollFrame = focusedElement.accessibilityFrame
                 if self.scrollAccessibilityFocusIntoViewIfNeeded(screenFrame: scrollFrame) {
-                    print("[VO-STATE] focus-scroll-triggered toIndex=\(toIndex) visibleCount=\(elements.count) match=\(matchKind)")
+                    voAccessibilityLog("[VO-STATE] focus-scroll-triggered toIndex=\(toIndex) visibleCount=\(elements.count) match=\(matchKind)")
                 }
             }
         }
@@ -5996,7 +6129,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 visibleElementsCount: elements.count,
                 cursorDescription: cursorDescription
             )
-                    print("[VO-STATE] cursor-log-source=system-step from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
+                    voAccessibilityLog("[VO-STATE] cursor-log-source=system-step from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
             // VoiceOver always walks the accessibilityElements array in ascending index
             // order regardless of our accessibilityNavigationOrder flag (that flag only
             // controls the order we *expose* elements in). So the direction of VO motion
@@ -6035,7 +6168,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     let visibleHeight = edgeItem.data.frame.intersection(clipFrame).height
                     visibleHeightForBoundary = visibleHeight
                 }
-                print("[VO-STATE] boundary-page-scroll step=1-detected toIndex=\(toIndex) edgeIndex=\(edgeIndex) atEdge=\(atEdge) voDirection=\(voDirection) edgeVisH=\(Int(visibleHeightForBoundary.isFinite ? visibleHeightForBoundary : -1)) visibleCount=\(elements.count) globalPos=\(self.accessibilityLastLoggedGlobalPosition ?? -1)")
+                voAccessibilityLog("[VO-STATE] boundary-page-scroll step=1-detected toIndex=\(toIndex) edgeIndex=\(edgeIndex) atEdge=\(atEdge) voDirection=\(voDirection) edgeVisH=\(Int(visibleHeightForBoundary.isFinite ? visibleHeightForBoundary : -1)) visibleCount=\(elements.count) globalPos=\(self.accessibilityLastLoggedGlobalPosition ?? -1)")
                 // Capture the identity of the element the user is focused on *right now*
                 // so that after the silent scroll we can deterministically re-anchor
                 // VoiceOver focus onto the "next" element in the user's traversal
@@ -6060,7 +6193,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             let summary = self.accessibilityDebugSummary(data: focusedData)
             voDebugLog("[VO-SWIPE-DEBUG] system-focus kind=\(focusedData.kind) match=\(matchKind) to=\(toIndex) summary=\(summary)")
             if let fromIndex, fromIndex == toIndex {
-                print("[VO-STATE] cursor-log-source=system-nonstep-skipped-same-index from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
+                voAccessibilityLog("[VO-STATE] cursor-log-source=system-nonstep-skipped-same-index from=\(fromIndex) to=\(toIndex) visibleCount=\(elements.count)")
                 return
             }
             let cursorDescription = elementData.first(where: { $0.index == toIndex })?.data.label ?? ""
@@ -6070,7 +6203,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 visibleElementsCount: elements.count,
                 cursorDescription: cursorDescription
             )
-            print("[VO-STATE] cursor-log-source=system-nonstep from=\(String(describing: fromIndex)) to=\(toIndex) visibleCount=\(elements.count)")
+            voAccessibilityLog("[VO-STATE] cursor-log-source=system-nonstep from=\(String(describing: fromIndex)) to=\(toIndex) visibleCount=\(elements.count)")
         }
     }
 
@@ -6102,7 +6235,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             sanitized = String(sanitized.prefix(120)) + "..."
         }
         self.accessibilityLastLoggedGlobalPosition = behind
-        print("[VO-CURSOR] position=\(behind) behind=\(behind) ahead=\(ahead) total=\(totalChats) cursor='\(sanitized)'")
+        voAccessibilityLog("[VO-CURSOR] position=\(behind) behind=\(behind) ahead=\(ahead) total=\(totalChats) cursor='\(sanitized)'")
     }
 
     private func logAccessibilityArrayDiffIfNeeded(_ elements: [Any]) {
@@ -6140,8 +6273,8 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let totalChats = self.accessibilityAbsoluteScrollInfo?(rangeIndices)?.total ?? self.items.count
         let uiElements = elements.compactMap { $0 as? UIAccessibilityElement }
         let oldCount = self.accessibilityLastLoggedArraySnapshot.count
-        print("[VO-STATE] array-changed old=\(oldCount) new=\(snapshot.count) total=\(totalChats)")
-        print("[VO-ARRAY] changed old=\(oldCount) new=\(snapshot.count) totalChats=\(totalChats) added=\(addedLabels) removed=\(removedLabels)")
+        voAccessibilityLog("[VO-STATE] array-changed old=\(oldCount) new=\(snapshot.count) total=\(totalChats)")
+        voAccessibilityLog("[VO-ARRAY] changed old=\(oldCount) new=\(snapshot.count) totalChats=\(totalChats) added=\(addedLabels) removed=\(removedLabels)")
         self.accessibilityLastLoggedArraySnapshot = snapshot
         self.logCursorAfterArrayChangeIfNeeded(totalChats: totalChats, oldCount: oldCount, newCount: snapshot.count, elements: uiElements)
     }
@@ -6178,7 +6311,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                         visibleElementsCount: elements.count,
                         cursorDescription: cursorDescription
                     )
-                    print("[VO-STATE] cursor-log-source=array-system-focus to=\(toIndex) visibleCount=\(elements.count)")
+                    voAccessibilityLog("[VO-STATE] cursor-log-source=array-system-focus to=\(toIndex) visibleCount=\(elements.count)")
                 }
             }
         }
@@ -6195,8 +6328,28 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     ) -> Bool {
         // #region agent log
         print("[AGENT-DBG][H4] boundary-check toIndex=\(toIndex) voDir=\(voDirection) atEdge=\(atEdge) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) pending=\(self.accessibilityEdgeScrollPending)")
-        print("[VO-STATE] boundary-check toIndex=\(toIndex) voDir=\(voDirection) atEdge=\(atEdge) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) pending=\(self.accessibilityEdgeScrollPending)")
+        voAccessibilityLog("[VO-STATE] boundary-check toIndex=\(toIndex) voDir=\(voDirection) atEdge=\(atEdge) visibleHeight=\(Int(visibleHeight.rounded())) visibleCount=\(visibleCount) pending=\(self.accessibilityEdgeScrollPending)")
         // #endregion
+
+        // Баг 1: для плоского списка чатов boundary-page-scroll (подгрузка по
+        // краю — нужна повёрнутой истории) вреден: свайп у края прокручивает
+        // список и запускает каскад re-anchor'ов с зачитыванием случайных чатов.
+        // Списку это не нужно — отключаем.
+        if self.accessibilityUsesNativeScrollForNonSequentialFocus {
+            return false
+        }
+
+        // Баг 2 (история): когда в самом низу истории есть наши trailing-кнопки
+        // («Написать сообщение»/«Отменить ответ»), boundary-page-scroll при
+        // движении ВПЕРЁД (к новейшему сообщению) мешает VO дойти до них: он
+        // делает silent-scroll у новейшего сообщения, дёргает курсор и VO
+        // уходит в навбар, минуя кнопку. Новее новейшего ничего нет — скролл
+        // там бесполезен. Отключаем его при voDirection > 0, чтобы VO спокойно
+        // перешёл с последнего сообщения на кнопку (следующий элемент массива).
+        if self.accessibilitySuppressTrailingBoundaryScroll, voDirection > 0 {
+            voAccessibilityLog("[VO-STATE] boundary-skip reason=trailing-button voDir=\(voDirection)")
+            return false
+        }
 
         // Gating is purely event-/state-based — no time thresholds:
         //   • `pendingOk` is a *proper* mutex that remains held through the
@@ -6214,17 +6367,18 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let countOk = visibleCount >= minCount
         let voStep = voDirection >= 0 ? 1 : -1
         guard voDirection != 0 else {
-            print("[VO-STATE] boundary-skip reason=voDirection-zero")
+            voAccessibilityLog("[VO-STATE] boundary-skip reason=voDirection-zero")
             return false
         }
+
         if !(pendingOk && countOk) {
-            print("[VO-STATE] boundary-skip pendingOk=\(pendingOk) countOk=\(countOk) atEdge=\(atEdge)")
+            voAccessibilityLog("[VO-STATE] boundary-skip pendingOk=\(pendingOk) countOk=\(countOk) atEdge=\(atEdge)")
             return false
         }
 
         self.accessibilityEdgeScrollPending = true
         self.accessibilityIgnoreOffscreenUntil = CACurrentMediaTime() + 0.2
-        print("[VO-STATE] boundary-page-scroll step=2-scroll-triggered edgeIndex=\(toIndex) voDir=\(voDirection)")
+        voAccessibilityLog("[VO-STATE] boundary-page-scroll step=2-scroll-triggered edgeIndex=\(toIndex) voDir=\(voDirection)")
 
         // Buffer-extension pass. The scroll is executed *synchronously*
         // here — we do NOT defer it through DispatchQueue.main.async as
@@ -6246,7 +6400,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let scrolled = self.performAccessibilityEdgeScroll(voDirection: voStep)
         _ = focusedStableKey
         _ = focusedFrame
-        print("[VO-STATE] boundary-page-scroll step=3-buffer-extended scrolled=\(scrolled)")
+        voAccessibilityLog("[VO-STATE] boundary-page-scroll step=3-buffer-extended scrolled=\(scrolled)")
 
         // Release the mutex after two run-loop ticks. The subsequent
         // focus notifications (which VoiceOver emits in response to the
@@ -6284,7 +6438,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         let approxRowHeight: CGFloat = 76.0
         let maxStep: CGFloat = max(approxRowHeight, visibleArea * 0.18)
         let distance = floor(min(maxStep, approxRowHeight))
-        print("[VO-STATE] boundary-page-scroll silent-scroll direction=\(scrollDirection) distance=\(Int(distance)) visibleArea=\(Int(visibleArea)) voDirection=\(voDirection)")
+        voAccessibilityLog("[VO-STATE] boundary-page-scroll silent-scroll direction=\(scrollDirection) distance=\(Int(distance)) visibleArea=\(Int(visibleArea)) voDirection=\(voDirection)")
         let result = self.scrollWithDirection(scrollDirection, distance: distance, centerVoiceOverFocus: false, postScrollStatus: false)
         self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
         // Force a *synchronous* materialisation pass so that brand-new item
@@ -6395,7 +6549,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         let wasCapped = cappedDistance < rawDistance - 0.5
 
-        print("[VO-STATE] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance))\(wasCapped ? " (capped from \(Int(rawDistance)))" : "") elementY=[\(Int(screenFrame.minY))..\(Int(screenFrame.maxY))] elementH=\(Int(screenFrame.height)) clipY=[\(Int(clipFrame.minY))..\(Int(clipFrame.maxY))] clipH=\(Int(clipHeight)) tallerThanClip=\(elementTallerThanClip)")
+        voAccessibilityLog("[VO-STATE] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance))\(wasCapped ? " (capped from \(Int(rawDistance)))" : "") elementY=[\(Int(screenFrame.minY))..\(Int(screenFrame.maxY))] elementH=\(Int(screenFrame.height)) clipY=[\(Int(clipFrame.minY))..\(Int(clipFrame.maxY))] clipH=\(Int(clipHeight)) tallerThanClip=\(elementTallerThanClip)")
 
         self.accessibilityEdgeScrollPending = true
         // Suppress the "focus is offscreen" hot-path for a short window: the
@@ -6543,7 +6697,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         if self.accessibilityBoundaryRecenterInProgress || CACurrentMediaTime() < self.accessibilityIgnoreOffscreenUntil {
             return
         }
-        
+
         self.accessibilityFocusContainmentCheckToken &+= 1
         let checkToken = self.accessibilityFocusContainmentCheckToken
         
@@ -6557,11 +6711,27 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             guard UIAccessibility.isVoiceOverRunning else {
                 return
             }
+            // Re-check the ignore window *inside* the deferred block: it may
+            // have opened (edge-scroll / off-screen handling) after this check
+            // was scheduled. Without this re-check an already-queued recovery
+            // still fires and yanks the cursor back into the list.
+            if CACurrentMediaTime() < self.accessibilityIgnoreOffscreenUntil {
+                return
+            }
             guard let focusedObject = UIAccessibility.focusedElement(using: nil) else {
                 return
             }
-            
+
             if self.isAccessibilityObjectInsideCurrentListSequence(focusedObject) && self.isAccessibilityObjectVisibleInsideCurrentListSequence(focusedObject) {
+                self.accessibilityFocusLeftListFailureCount = 0
+                return
+            }
+            // The cursor legitimately moved to an allowed element outside the
+            // list — typically the chat's text input field, which VoiceOver
+            // reaches when the user swipes past the last message. Do NOT drag
+            // it back: that was the previous symptom (cursor bounced from the
+            // input to the title bar). Let it stay on the input.
+            if self.accessibilityIsLegitimateFocusEscape?(focusedObject) == true {
                 self.accessibilityFocusLeftListFailureCount = 0
                 return
             }
@@ -6570,6 +6740,38 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if CACurrentMediaTime() - self.accessibilityLastProgrammaticEdgeScrollTimestamp < 0.15 {
                 self.accessibilityFocusLeftListFailureCount = 0
                 return
+            }
+            // Forward-escape redirect. The user swiped FORWARD past the newest
+            // message; iOS sent the cursor to the navbar title (ChatTitleView)
+            // instead of the bottom input area, because the trailing pooled
+            // compose element — though present in the array — is sometimes
+            // skipped. If the host gave us an input target, move focus onto the
+            // input instead of yanking it back into the list.
+            //
+            // Gate geometrically so a BACKWARD swipe off the oldest (top)
+            // message still reaches the navbar: only redirect when (a) the last
+            // focused message was in the BOTTOM portion of the list (near the
+            // newest message) and (b) focus escaped UPWARD (above the list
+            // centre — i.e. to the navbar), with the input target sitting at
+            // the bottom.
+            if let clip = self.accessibilityClippingFrameInScreenCoordinates(),
+               let lastFocusedMidY = self.accessibilityLastFocusedScreenMidY,
+               lastFocusedMidY > clip.midY,
+               let handler = self.accessibilityForwardEscapeHandler {
+                let escapedFrame: CGRect
+                if let focusedView = focusedObject as? UIView {
+                    escapedFrame = UIAccessibility.convertToScreenCoordinates(focusedView.bounds, in: focusedView)
+                } else if let focusedNSObject = focusedObject as? NSObject {
+                    escapedFrame = focusedNSObject.accessibilityFrame
+                } else {
+                    escapedFrame = .null
+                }
+                let escapedAbove = escapedFrame.isNull || escapedFrame.midY < clip.midY
+                if escapedAbove, handler() {
+                    self.accessibilityFocusLeftListFailureCount = 0
+                    voAccessibilityLog("[VO-STATE] forward-escape-redirect-to-input lastFocusedMidY=\(Int(lastFocusedMidY)) clipMidY=\(Int(clip.midY))")
+                    return
+                }
             }
             
             // Recover only when focus was in this list very recently to avoid stealing
@@ -6580,7 +6782,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 return
             }
             self.accessibilityFocusLeftListFailureCount = 0
-            print("[VO-STATE] recover-focus-triggered reason=\(reason) lastFocusedIndex=\(String(describing: self.accessibilityLastSystemFocusedIndex))")
+            voAccessibilityLog("[VO-STATE] recover-focus-triggered reason=\(reason) lastFocusedIndex=\(String(describing: self.accessibilityLastSystemFocusedIndex))")
             self.recoverAccessibilityFocusToList(aroundIndex: self.accessibilityLastSystemFocusedIndex, reason: reason)
         }
     }
@@ -6647,6 +6849,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// VoiceOver naturally redraws the focus indicator at the right
     /// place — matching what the user just selected.
     public func scrollVoiceOverFocusToItem(at localIndex: Int) {
+        // Баг 2: синтетические trailing-кнопки не соответствуют реальной ячейке —
+        // скроллить к ним некуда (и transaction(scrollToItem:) с таким индексом
+        // был бы некорректен). Просто ничего не делаем: их фрейм фиксирован внизу.
+        if self.accessibilitySyntheticTrailingIndices.contains(localIndex) {
+            return
+        }
         guard !self.accessibilityEdgeScrollPending,
               !self.accessibilityBoundaryRecenterInProgress else {
             return

@@ -1477,6 +1477,11 @@ public final class ChatListNode: ListView {
         ) { _ in
             updateFullMaterialization()
         }
+        // Баг 1: список чатов — плоский, ему не нужна VO-машинерия повёрнутой
+        // истории (boundary-page-scroll + scroll к нелинейному фокусу), которая
+        // порождает каскады с зачитыванием случайных чатов. Включаем нативное
+        // поведение для нелинейных перескоков (только для списка, не история).
+        self.accessibilityUsesNativeScrollForNonSequentialFocus = true
         self.accessibilityDirectionalAnnouncement = { [weak self] fromIndex, toIndex in
             guard let self, abs(toIndex - fromIndex) == 1 else { return nil }
             let strings = self.currentState.presentationData.strings

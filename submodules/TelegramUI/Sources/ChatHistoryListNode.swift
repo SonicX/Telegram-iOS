@@ -480,6 +480,17 @@ private struct ChatHistoryAnimatedEmojiConfiguration {
 
 private var nextClientId: Int32 = 1
 
+// VoiceOver: невидимая вьюшка-источник для trailing-кнопок истории. Её
+// `accessibilityActivate()` дёргается из пулового FocusTrackingAccessibilityElement
+// (см. ListView), выполняя действие кнопки.
+private final class ChatHistoryTrailingActionView: UIView {
+    var onActivate: (() -> Bool)?
+
+    override func accessibilityActivate() -> Bool {
+        return self.onActivate?() ?? false
+    }
+}
+
 public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHistoryListNode {
     static let fixedAdMessageStableId: UInt32 = UInt32.max - 5000
     
@@ -706,7 +717,41 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     // seeing the granular tree.  Dead entries are dropped by
     // `NSHashTable.weakObjects()` automatically.
     private var voPromotedItemNodes: NSHashTable<ListViewItemNode> = NSHashTable.weakObjects()
-    
+
+    // VoiceOver trailing-кнопки в ленте (Баг 2). Заполняются из ChatControllerNode:
+    // *Info возвращает подпись если кнопку надо показать (иначе nil), *Activate —
+    // действие. Сами элементы — реальные пуловые (см. провайдер ниже).
+    public var accessibilityComposeButtonInfo: (() -> String?)?
+    public var accessibilityComposeButtonActivate: (() -> Void)?
+    public var accessibilityCancelReplyForwardButtonInfo: (() -> String?)?
+    public var accessibilityCancelReplyForwardActivate: (() -> Void)?
+    private lazy var voComposeActionView: ChatHistoryTrailingActionView = {
+        let view = ChatHistoryTrailingActionView()
+        view.frame = .zero
+        view.alpha = 0.0
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.onActivate = { [weak self] in
+            self?.accessibilityComposeButtonActivate?()
+            return true
+        }
+        self.view.addSubview(view)
+        return view
+    }()
+    private lazy var voCancelActionView: ChatHistoryTrailingActionView = {
+        let view = ChatHistoryTrailingActionView()
+        view.frame = .zero
+        view.alpha = 0.0
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.onActivate = { [weak self] in
+            self?.accessibilityCancelReplyForwardActivate?()
+            return true
+        }
+        self.view.addSubview(view)
+        return view
+    }()
+
     private let historyAppearsClearedPromise = ValuePromise<Bool>(false)
     var historyAppearsCleared: Bool = false {
         didSet {
@@ -984,7 +1029,32 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         nextClientId += 1
         
         super.init()
-        
+
+        // VoiceOver (Баг 2): реальные trailing-кнопки внизу ленты. Провайдер
+        // отдаёт пуловые элементы «Написать сообщение»/«Отменить ответ» с
+        // фреймом-полоской у нижней кромки списка; ListView ставит им
+        // синтетический localIndex ниже новейшего сообщения, и VO ведёт на них
+        // как на обычные ячейки. Порядок: compose первым (сразу после
+        // новейшего), затем cancel.
+        //
+        // ОТКЛЮЧЕНО. Попытка сделать кнопки «Написать сообщение»/«Отменить
+        // ответ» trailing-элементами в самой ленте провалилась: пуловая
+        // directional-машинерия истории НЕ озвучивает эфемерный элемент,
+        // дописанный после новейшего сообщения (VO молча ставит на его
+        // невидимую strip-вьюшку фокус и застревает) — см. заметку
+        // voiceover-chat-history-focus-machinery. Хуже того, ненулевой
+        // trailing-набор взводил `accessibilitySuppressTrailingBoundaryScroll`
+        // и фокус, осев на in-list strip, не «покидал список» → рабочий
+        // forward-escape-редирект тоже не срабатывал. Поэтому кнопка «Написать
+        // сообщение» теперь живёт в самой панели ввода (composeAccessibilityArea
+        // в ChatTextInputPanelNode), куда курсор гарантированно ведёт
+        // forward-escape (см. ChatControllerNode.accessibilityForwardEscapeHandler).
+        // Провайдер возвращает пусто, чтобы не вмешиваться.
+        self.accessibilityTrailingPooledElementsProvider = { [weak self] in
+            _ = self
+            return []
+        }
+
         self.rotated = rotated
         if rotated {
             self.transform = CATransform3DMakeRotation(CGFloat(Double.pi), 0.0, 0.0, 1.0)
@@ -1104,7 +1174,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             if self.accessibilityInvisibleInsetOverride != desired {
                 let previous = self.accessibilityInvisibleInsetOverride
                 self.accessibilityInvisibleInsetOverride = desired
-                print("[VO-CHAT] full-materialisation toggled: voRunning=\(shouldForce) override=\(previous.map { String(format: "%.0f", $0) } ?? "nil")->\(desired.map { String(format: "%.0f", $0) } ?? "nil")")
+                voAccessibilityLog("[VO-CHAT] full-materialisation toggled: voRunning=\(shouldForce) override=\(previous.map { String(format: "%.0f", $0) } ?? "nil")->\(desired.map { String(format: "%.0f", $0) } ?? "nil")")
             }
 
             // NOTE: tried `self.view.accessibilityElementsHidden =
@@ -1154,7 +1224,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             object: nil,
             queue: .main
         ) { _ in
-            print("[VO-CHAT] voiceOverStatusDidChange notification received: voRunning=\(UIAccessibility.isVoiceOverRunning)")
+            voAccessibilityLog("[VO-CHAT] voiceOverStatusDidChange notification received: voRunning=\(UIAccessibility.isVoiceOverRunning)")
             updateFullMaterialization()
         }
         self.elementFocusedObserver = NotificationCenter.default.addObserver(
@@ -2002,6 +2072,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private static let voUseBaseAccessibilityExperiment = true
 
     override public func customAccessibilityElements() -> [Any]? {
+        // While a message context menu is open (presented in the global overlay
+        // above the chat), VoiceOver keeps querying the history behind it on every
+        // swipe between menu items. Rebuilding the promoted-bubble array each time
+        // walks every materialised message (composeBubbleAccessibilityPayload +
+        // recursive suppressCompetingLeaves) and blocks the main thread — that was
+        // the lag when navigating the context menu. The suspend flag is already set
+        // on open (ChatControllerOpenMessageContextMenu.swift:319) and cleared on
+        // dismiss (:340); honour it here so the expensive pass is skipped entirely.
+        if self.accessibilityFocusHandlingSuspended {
+            voAccessibilityLog("[VO-LAG] customAccessibilityElements EARLY-RETURN suspended=true (menu open) — heavy pass skipped")
+            return nil
+        }
         if ChatHistoryListNodeImpl.voUseBaseAccessibilityExperiment {
             if UIAccessibility.isVoiceOverRunning {
                 // **Promote each materialised message bubble to a single
@@ -2056,8 +2138,11 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     self.voPromotedItemNodes.add(itemNode)
                     voPromotedCount += 1
                 }
+                // Кнопки «Написать сообщение»/«Отменить ответ» теперь живут в
+                // тулбаре панели ввода (ChatTextInputPanelNode), а не дописываются
+                // сюда: VO пропускал эфемерные элементы массива истории.
                 let elements = super.customAccessibilityElements()
-                print("[VO-CHAT] BASE-ENGINE-EXPERIMENT: promoted=\(voPromotedCount) super returned \(elements?.count ?? 0) elements")
+                voAccessibilityLog("[VO-CHAT] BASE-ENGINE-EXPERIMENT: promoted=\(voPromotedCount) super returned \(elements?.count ?? 0) elements")
                 return elements
             }
             return super.customAccessibilityElements()
@@ -2113,7 +2198,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     visibleScreenRect = visibleScreenRect.intersection(clippingFrame)
                     if visibleScreenRect.isNull || visibleScreenRect.width <= 1.0 || visibleScreenRect.height <= 1.0 {
                         if voIsRunning {
-                            print("[VO-CHAT] customAccessibilityElements: clipped-to-empty visibleScreenRect, returning nil")
+                            voAccessibilityLog("[VO-CHAT] customAccessibilityElements: clipped-to-empty visibleScreenRect, returning nil")
                         }
                         self.updateAccessibilityDirectionalElements([])
                         return nil
@@ -2123,7 +2208,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             }
         }
         if voIsRunning {
-            print("[VO-CHAT] customAccessibilityElements: enter rotated=\(self.rotated) fullMode=\(isFullMaterializationActive) trackDir=\(trackDirectionalFocus) contentOffsetY=\(Int(contentOffset.y)) visibleSize=\(Int(self.visibleSize.width))x\(Int(self.visibleSize.height)) windowY=[\(Int(visibleTop))..\(Int(visibleBottom))] navOrder=\(self.accessibilityNavigationOrder == .reversed ? "reversed" : "automatic")")
+            voAccessibilityLog("[VO-CHAT] customAccessibilityElements: enter rotated=\(self.rotated) fullMode=\(isFullMaterializationActive) trackDir=\(trackDirectionalFocus) contentOffsetY=\(Int(contentOffset.y)) visibleSize=\(Int(self.visibleSize.width))x\(Int(self.visibleSize.height)) windowY=[\(Int(visibleTop))..\(Int(visibleBottom))] navOrder=\(self.accessibilityNavigationOrder == .reversed ? "reversed" : "automatic")")
         }
         // **Narrow-window mode**: a `voForceScrollToItem` `transaction` is in
         // flight. Return only the anchor element so iOS's focus-recovery
@@ -2165,7 +2250,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let narrowList: [Any] = [anchorNode.view as Any]
             self.lastAccessibilityElements = narrowList
             self.updateAccessibilityDirectionalElements(narrowList)
-            print("[VO-CHAT] customAccessibilityElements: NARROW-WINDOW anchor=\(narrowAnchor) finalCount=1")
+            voAccessibilityLog("[VO-CHAT] customAccessibilityElements: NARROW-WINDOW anchor=\(narrowAnchor) finalCount=1")
             return narrowList
         }
         var voTotalNodesVisited = 0
@@ -2644,7 +2729,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             } else {
                 activeRange = "empty"
             }
-            print("[VO-CHAT] customAccessibilityElements: exit visited=\(voTotalNodesVisited) filteredByRect=\(voNodesFilteredByRect) noData=\(voNodesWithoutData) directionalCandidates=\(directionalCandidates.count) activeIndices=\(activeLocalIndices.count) activeRange=\(activeRange) firstSorted=\(firstIndex.map(String.init) ?? "nil") lastSorted=\(lastIndex.map(String.init) ?? "nil") finalCount=\(accessibilityElements.count)")
+            voAccessibilityLog("[VO-CHAT] customAccessibilityElements: exit visited=\(voTotalNodesVisited) filteredByRect=\(voNodesFilteredByRect) noData=\(voNodesWithoutData) directionalCandidates=\(directionalCandidates.count) activeIndices=\(activeLocalIndices.count) activeRange=\(activeRange) firstSorted=\(firstIndex.map(String.init) ?? "nil") lastSorted=\(lastIndex.map(String.init) ?? "nil") finalCount=\(accessibilityElements.count)")
             // Diagnostic: log content-Y of every materialised item so we can
             // see whether items spread across thousands of points or are
             // packed contiguously.
@@ -2654,7 +2739,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 let maxY = sortedFrames.map { $0.y + $0.h }.max() ?? 0
                 let summary = sortedFrames.prefix(6).map { "li=\($0.li) y=\(Int($0.y)) h=\(Int($0.h))" }.joined(separator: " | ")
                 let tail = sortedFrames.suffix(3).map { "li=\($0.li) y=\(Int($0.y)) h=\(Int($0.h))" }.joined(separator: " | ")
-                print("[VO-CHAT] item-frames: span=\(Int(minY))..\(Int(maxY)) (Δ=\(Int(maxY - minY))) head=[\(summary)] tail=[\(tail)]")
+                voAccessibilityLog("[VO-CHAT] item-frames: span=\(Int(minY))..\(Int(maxY)) (Δ=\(Int(maxY - minY))) head=[\(summary)] tail=[\(tail)]")
             }
         }
 
@@ -2828,10 +2913,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     pendingNode.isAccessibilityElement = true
                     pendingNode.view.accessibilityElementsHidden = false
                     pendingNode.view.isAccessibilityElement = true
-                    print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex), retry-anchor li=\(pending)")
+                    voAccessibilityLog("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex), retry-anchor li=\(pending)")
                     UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
                 } else {
-                    print("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
+                    voAccessibilityLog("[VO-CHAT] fly-away-suppress from-li=\(focusedLocalIndex) -> last-li=\(lastLocalIndex)")
                 }
                 self.voFocusLostTimestamp = 0
                 self.lastFocusedElementIdentity = nil
@@ -2856,7 +2941,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let absolute = absolutePosition.map(String.init) ?? "?"
             let total = totalChat.map(String.init) ?? "?"
             let prevPosition = unfocusedPosition.map { $0 + 1 }
-            print("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
+            voAccessibilityLog("[VO-CHAT] cursor: position=\(humanPosition)/\(totalLoaded) (chat=\(absolute)/\(total)) prev=\(prevPosition.map(String.init) ?? "outside") localOrderIndex=\(focusedPosition) label='\(labelSnippet)'")
 
             // Edge-extend scroll. When the user's focus lands on the
             // edge of the visible-localIndex range (or beyond, on a
@@ -2917,7 +3002,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     pendingNode.isAccessibilityElement = true
                     pendingNode.view.accessibilityElementsHidden = false
                     pendingNode.view.isAccessibilityElement = true
-                    print("[VO-CHAT] force-scroll-restore-focus-retry li=\(pending) (current=\(focusedLocalIndex ?? -1))")
+                    voAccessibilityLog("[VO-CHAT] force-scroll-restore-focus-retry li=\(pending) (current=\(focusedLocalIndex ?? -1))")
                     UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
                 } else {
                     self.voPendingRestoreAnchorLi = nil
@@ -2985,7 +3070,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 pendingNode.isAccessibilityElement = true
                 pendingNode.view.accessibilityElementsHidden = false
                 pendingNode.view.isAccessibilityElement = true
-                print("[VO-CHAT] focus-left-redirect-anchor li=\(pending)")
+                voAccessibilityLog("[VO-CHAT] focus-left-redirect-anchor li=\(pending)")
                 UIAccessibility.post(notification: .screenChanged, argument: pendingNode.view)
                 return
             }
@@ -3044,7 +3129,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
                 if let target = extendTarget, let next = intendedNext {
                     self.voLastEdgeScrollTimestamp = CACurrentMediaTime()
-                    print("[VO-CHAT] reactive-edge-extend left-from-li=\(lastLi) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
+                    voAccessibilityLog("[VO-CHAT] reactive-edge-extend left-from-li=\(lastLi) visible=\(visibleRange.top)..\(visibleRange.bottom) -> scroll-li=\(target) restore-li=\(next)")
                     // Pre-set the restore anchor *before* starting the
                     // scroll. The transaction's completion block also sets
                     // it, but iOS frequently delivers an intermediate
@@ -3086,7 +3171,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             } else {
                 focusedFrame = "<no-frame>"
             }
-            print("[VO-CHAT] cursor: focus-left-list from=\(unfocusedPosition + 1)/\(totalLoaded) -> kind=\(focusedKind) frame=\(focusedFrame) label='\(focusedLabel)'")
+            voAccessibilityLog("[VO-CHAT] cursor: focus-left-list from=\(unfocusedPosition + 1)/\(totalLoaded) -> kind=\(focusedKind) frame=\(focusedFrame) label='\(focusedLabel)'")
         }
     }
 
@@ -3150,7 +3235,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             targetLocalIndex = direction == .next ? entryCount - 1 : 0
         }
         guard targetLocalIndex >= 0, targetLocalIndex < entryCount else {
-            print("[VO-CHAT] rotor: out-of-range direction=\(direction == .next ? "next" : "previous") current=\(currentLocalIndex.map(String.init) ?? "nil") target=\(targetLocalIndex) entryCount=\(entryCount)")
+            voAccessibilityLog("[VO-CHAT] rotor: out-of-range direction=\(direction == .next ? "next" : "previous") current=\(currentLocalIndex.map(String.init) ?? "nil") target=\(targetLocalIndex) entryCount=\(entryCount)")
             return nil
         }
 
@@ -3169,10 +3254,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             targetView = itemNode.view
         }
         guard let target = targetView else {
-            print("[VO-CHAT] rotor: target-not-materialised target=\(targetLocalIndex)")
+            voAccessibilityLog("[VO-CHAT] rotor: target-not-materialised target=\(targetLocalIndex)")
             return nil
         }
-        print("[VO-CHAT] rotor: \(direction == .next ? "next" : "previous") current=\(currentLocalIndex.map(String.init) ?? "nil") target=\(targetLocalIndex)")
+        voAccessibilityLog("[VO-CHAT] rotor: \(direction == .next ? "next" : "previous") current=\(currentLocalIndex.map(String.init) ?? "nil") target=\(targetLocalIndex)")
         return UIAccessibilityCustomRotorItemResult(targetElement: target, targetRange: nil)
     }
 
@@ -3218,7 +3303,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // edge-extend scroll — vetoing it just kneecaps our own
         // pre-emptive lead and lets iOS auto-scroll drive the list to
         // wherever VoiceOver wanders. Always allow.
-        print("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
+        voAccessibilityLog("[VO-CHAT] force-scroll-transaction li=\(localIndex) restoreOn=\(anchorLocalIndex.map(String.init) ?? "nil")")
         // **Make our list view modal to accessibility for the duration of
         // the force-scroll.** Without this, when iOS loses focus on the
         // previously-focused edge bubble (because the scroll is about to
@@ -3268,7 +3353,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // li=44) — can only pick from the array we expose. With one
             // element in it, there is no wrong bubble to pick.
             self.voScrollWindowAnchorLi = anchor
-            print("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on modal=on")
+            voAccessibilityLog("[VO-CHAT] force-scroll-pre-post li=\(anchor) narrow-window=on modal=on")
             UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
         }
         // `.visible` scrolls minimally to bring the target into the
@@ -3343,7 +3428,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 // at the same focus position; the user just gets the
                 // full neighbour list back.
                 self.voScrollWindowAnchorLi = nil
-                print("[VO-CHAT] force-scroll-restore-focus li=\(anchor) narrow-window=off")
+                voAccessibilityLog("[VO-CHAT] force-scroll-restore-focus li=\(anchor) narrow-window=off")
                 self.voPendingRestoreAnchorLi = anchor
                 self.voPendingRestoreRetried = false
                 UIAccessibility.post(notification: .screenChanged, argument: anchorNode.view)
@@ -3371,7 +3456,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     guard let self else { return }
                     if self.voScrollWindowAnchorLi == nil {
                         self.view.accessibilityViewIsModal = false
-                        print("[VO-CHAT] force-scroll-release-modal")
+                        voAccessibilityLog("[VO-CHAT] force-scroll-release-modal")
                     }
                 }
             }

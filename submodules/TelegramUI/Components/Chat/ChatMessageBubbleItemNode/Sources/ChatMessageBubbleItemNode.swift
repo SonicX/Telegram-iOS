@@ -5276,10 +5276,56 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                         }
                         item.controllerInteraction.openMessageContextMenu(item.message, false, self, subFrame, nil, nil)
                     }
+                case .comments:
+                    // Повторяем ровно то, что делает футер «N комментариев»
+                    // (`ChatMessageCommentFooterContentNode.buttonPressed`):
+                    // в Replies-чате открываем исходное сообщение треда, иначе
+                    // открываем комментарии. shareButtonPressed здесь не годится —
+                    // он ведёт в меню «Отправить».
+                    if let item = self.item {
+                        if item.message.id.peerId.isReplies {
+                            item.controllerInteraction.openReplyThreadOriginalMessage(item.message)
+                        } else {
+                            // displayModalProgress: true — показывает индикатор
+                            // загрузки треда и открывает экран по завершении.
+                            // С false навигация откладывалась до загрузки без
+                            // визуальной реакции, и для VoiceOver выглядело
+                            // как «ничего не происходит».
+                            item.controllerInteraction.openMessageReplies(item.message.id, true, true)
+                        }
+                    }
+                case .reactions:
+                    // Открываем контекстное меню — у него сверху панель выбора
+                    // реакций. Это тот же путь, что и долгий тап, НО ставим
+                    // флаг намерения: меню не перехватит фокус на первый пункт,
+                    // и VoiceOver-курсор встанет сразу на панель реакций
+                    // (фокус ставит ReactionContextNode). Долгое нажатие флаг не
+                    // ставит — там фокус остаётся на первом пункте меню.
+                    if let item = self.item {
+                        ContextController.accessibilityFocusReactionsOnNextPresent = true
+                        var subFrame = self.backgroundNode.frame
+                        if case .group = item.content {
+                            for contentNode in self.contentNodes {
+                                if contentNode.item?.message.stableId == item.message.stableId {
+                                    subFrame = contentNode.frame.insetBy(dx: 0.0, dy: -4.0)
+                                    break
+                                }
+                            }
+                        }
+                        item.controllerInteraction.openMessageContextMenu(item.message, false, self, subFrame, nil, nil)
+                    }
+                case let .toggleReaction(value):
+                    // Пункт-реакция блока «Реакции и просмотры»: ставим/снимаем реакцию.
+                    if let item = self.item {
+                        item.controllerInteraction.updateMessageReaction(item.message, .reaction(value), false, nil)
+                    }
+                case .info:
+                    // Информационный пункт «Реакции и просмотры» — только озвучка.
+                    break
             }
         }
     }
-    
+
     override public func shouldAnimateHorizontalFrameTransition() -> Bool {
         return false
     }

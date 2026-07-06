@@ -21,6 +21,18 @@ import TelegramNotices
 import AppBundle
 import CompositeTextNode
 
+// VoiceOver: крестик плашки — node-кнопка, у которой accessibilityActivate НЕ
+// форвардит в touchUpInside, поэтому double-tap VO «ничего не делал». Подкласс
+// явно вызывает обработчик отмены.
+final class AccessoryCloseButtonNode: HighlightableButtonNode {
+    var onAccessibilityActivate: (() -> Void)?
+
+    override public func accessibilityActivate() -> Bool {
+        self.onAccessibilityActivate?()
+        return true
+    }
+}
+
 public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
     private let messageDisposable = MetaDisposable()
     public let chatPeerId: EnginePeer.Id
@@ -57,7 +69,7 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         self.theme = theme
         self.strings = strings
         
-        self.closeButton = HighlightableButtonNode()
+        self.closeButton = AccessoryCloseButtonNode()
         // `ASButtonNode` defaults `isAccessibilityElement` to false, so an
         // `accessibilityLabel` alone does NOT make the button focusable by
         // VoiceOver — it must be flagged explicitly (same as `attachmentButton`
@@ -112,6 +124,9 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         super.init()
         
         self.closeButton.addTarget(self, action: #selector(self.closePressed), forControlEvents: [.touchUpInside])
+        (self.closeButton as? AccessoryCloseButtonNode)?.onAccessibilityActivate = { [weak self] in
+            self?.closePressed()
+        }
         self.addSubnode(self.closeButton)
         
         self.addSubnode(self.lineNode)

@@ -85,6 +85,17 @@ func textStringForForwardedMessage(_ message: Message, strings: PresentationStri
     return (message.text, message.textEntitiesAttribute?.entities ?? [], false)
 }
 
+// VoiceOver: см. ReplyAccessoryPanelNode — крестик-нода не форвардит
+// accessibilityActivate в touchUpInside, поэтому double-tap VO «ничего не делал».
+final class AccessoryCloseButtonNode: HighlightableButtonNode {
+    var onAccessibilityActivate: (() -> Void)?
+
+    override public func accessibilityActivate() -> Bool {
+        self.onAccessibilityActivate?()
+        return true
+    }
+}
+
 public final class ForwardAccessoryPanelNode: AccessoryPanelNode {
     private let messageDisposable = MetaDisposable()
     public let messageIds: [MessageId]
@@ -117,7 +128,7 @@ public final class ForwardAccessoryPanelNode: AccessoryPanelNode {
         self.nameDisplayOrder = nameDisplayOrder
         self.forwardOptionsState = forwardOptionsState
         
-        self.closeButton = HighlightableButtonNode()
+        self.closeButton = AccessoryCloseButtonNode()
         self.closeButton.accessibilityLabel = strings.VoiceOver_DiscardPreparedContent
         self.closeButton.setImage(PresentationResourcesChat.chatInputPanelCloseIconImage(theme), for: [])
         self.closeButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
@@ -145,6 +156,9 @@ public final class ForwardAccessoryPanelNode: AccessoryPanelNode {
         super.init()
         
         self.closeButton.addTarget(self, action: #selector(self.closePressed), forControlEvents: [.touchUpInside])
+        (self.closeButton as? AccessoryCloseButtonNode)?.onAccessibilityActivate = { [weak self] in
+            self?.closePressed()
+        }
         self.addSubnode(self.closeButton)
         
         self.addSubnode(self.lineNode)

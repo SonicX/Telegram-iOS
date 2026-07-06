@@ -12,7 +12,7 @@ extension ChatControllerImpl {
         guard let navigationController = self.effectiveNavigationController else {
             return
         }
-        
+
         if let displayProgressInMessage = displayProgressInMessage, self.controllerInteraction?.currentMessageWithLoadingReplyThread == displayProgressInMessage {
             return
         }

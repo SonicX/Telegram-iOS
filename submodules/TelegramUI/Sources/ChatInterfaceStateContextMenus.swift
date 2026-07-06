@@ -1184,7 +1184,12 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             })))
             if !SGSimpleSettings.shared.contextShowReply { sgActions.append(actions.removeLast()) }
         }
-        
+
+        // (VoiceOver-пункт «Комментарии» для постов канала УБРАН: он дублировал
+        // штатный доступ к комментариям — кнопку-футер «N комментариев» под
+        // постом, которую VO и так достаёт. Количество комментариев озвучивается
+        // в самом сообщении, открыть тред можно футер-кнопкой.)
+
         if data.messageActions.options.contains(.sendScheduledNow) {
             actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.ScheduledMessages_SendNow, icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.actionSheet.primaryTextColor)
@@ -2121,7 +2126,11 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                         }
                     })
                 }))
-                if SGSimpleSettings.shared.contextShowSelectFromUser {
+                // VoiceOver: пункт «Выбрать от автора» убираем из меню (лишний
+                // при навигации свайпом). Зрячим — как было.
+                if UIAccessibility.isVoiceOverRunning {
+                    // не добавляем
+                } else if SGSimpleSettings.shared.contextShowSelectFromUser {
                     if !actions.isEmpty && !didAddSeparator {
                         didAddSeparator = true
                         actions.append(.separator)
@@ -2179,7 +2188,9 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         }
 
         // MARK: Swiftgram
-        if !sgActions.isEmpty {
+        // VoiceOver: подменю «Swiftgram» убираем (лишний пункт при навигации
+        // свайпом). Зрячим оставляем как есть.
+        if !sgActions.isEmpty, !UIAccessibility.isVoiceOverRunning {
             if !actions.isEmpty {
                 if let sgActionsIndex = sgActionsIndex {
                     actions.insert(.separator, at: sgActionsIndex)
@@ -2266,11 +2277,14 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 reactionCount = 0
             }
 
-            if hasReadReports || reactionCount != 0 {
+            // VoiceOver: пункт «кто прочитал / реакции» (ChatReadReportContextItem) VO
+            // зачитывает иконку как «Остановить запись» — ярлык бессмысленный. Под VO
+            // убираем этот пункт совсем.
+            if (hasReadReports || reactionCount != 0) && !UIAccessibility.isVoiceOverRunning {
                 if !actions.isEmpty {
                     actions.insert(.separator, at: 0)
                 }
-                
+
                 var readStats = readStats
                 if !(hasReadReports || reactionCount != 0) {
                     readStats = MessageReadStats(reactionCount: 0, peers: [], readTimestamps: [:])

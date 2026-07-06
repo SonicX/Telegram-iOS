@@ -167,7 +167,17 @@ public final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
     private let suggestedPostButtonIconView: UIImageView*/
     
     private var action: SubscriberAction?
-    
+
+    // VoiceOver: заголовок текущего центрального действия панели (например
+    // «Вступить в группу»), если такое действие есть. Используется только для
+    // настройки доступности.
+    private var accessibilityCenterActionTitle: String?
+
+    // VoiceOver: реальные кнопки панели (левые иконки, центральное действие,
+    // поиск) в порядке обхода. Возвращаются из accessibilityElements, чтобы
+    // панель была полноценным VoiceOver-контейнером.
+    private var accessibilityElementViews: [UIView] = []
+
     private let actionDisposable = MetaDisposable()
     private let badgeDisposable = MetaDisposable()
     private var isJoining: Bool = false
@@ -237,6 +247,65 @@ public final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
         return super.hitTest(point, with: event)
     }
     
+    // VoiceOver: рекурсивно ищем первую кнопку внутри view центральной
+    // группы — это PlainButtonComponent.View (подкласс UIButton) кнопки
+    // «Вступить в группу». В центральной группе ровно один элемент действия.
+    private func firstButton(in view: UIView) -> UIButton? {
+        if let button = view as? UIButton {
+            return button
+        }
+        for subview in view.subviews {
+            if let button = self.firstButton(in: subview) {
+                return button
+            }
+        }
+        return nil
+    }
+
+    // VoiceOver: все кнопки внутри view группы, в порядке слева направо
+    // (по x), чтобы порядок обхода совпадал с визуальным.
+    private func allButtons(in view: UIView) -> [UIButton] {
+        var result: [UIButton] = []
+        func collect(_ view: UIView) {
+            if let button = view as? UIButton {
+                result.append(button)
+            }
+            for subview in view.subviews {
+                collect(subview)
+            }
+        }
+        collect(view)
+        return result.sorted(by: { lhs, rhs in
+            return lhs.convert(lhs.bounds, to: view).minX < rhs.convert(rhs.bounds, to: view).minX
+        })
+    }
+
+    // VoiceOver: панель — полноценный контейнер. Возвращаем видимые кнопки,
+    // чтобы при свайпе за последнее сообщение курсор вставал на «Вступить в
+    // группу» (а не улетал в заголовок чата). Зеркалит ChatTextInputPanelNode.
+    override public var accessibilityElements: [Any]? {
+        get {
+            let visible = self.accessibilityElementViews.filter { !$0.isHidden && $0.alpha > 0.01 && $0.isAccessibilityElement }
+            return visible.isEmpty ? nil : visible
+        }
+        set {
+        }
+    }
+
+    // VoiceOver: считается ли сфокусированный элемент частью этой панели.
+    // Нужно, чтобы focus-recovery в истории чата не тащил курсор обратно в
+    // список, когда VO переходит на кнопку «Вступить» под последним
+    // сообщением (легитимный «уход» из списка).
+    public func isAccessibilityFocusWithinPanel(_ view: UIView) -> Bool {
+        guard self.accessibilityCenterActionTitle != nil else {
+            return false
+        }
+        if self.isNodeLoaded, view.isDescendant(of: self.view) {
+            return true
+        }
+        return false
+    }
+
     @objc private func giftPressed() {
         self.interfaceInteraction?.openPremiumGift()
     }
@@ -539,6 +608,39 @@ public final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
             transition.updateFrame(view: self.panelContainer, frame: panelFrame)
             transition.updateFrame(view: panelView, frame: CGRect(origin: CGPoint(), size: panelFrame.size))
         }
+
+        // VoiceOver: панель построена на компонентах (PlainButtonComponent
+        // внутри GlassControlGroup) — у кнопок нет UILabel-заголовка, поэтому
+        // VoiceOver их пропускал, и при свайпе за последнее сообщение курсор
+        // улетал в заголовок чата вместо панели «Вступить в группу». Делаем
+        // панель полноценным VoiceOver-контейнером (override accessibilityElements
+        // ниже), как это сделано у ChatTextInputPanelNode: собираем реальные
+        // кнопки и проставляем им подписи. Активация (двойной тап) идёт через
+        // штатный touchUpInside → buttonPressed()/действие компонента.
+        self.accessibilityCenterActionTitle = centerAction?.title
+        var accessibilityViews: [UIView] = []
+        if let panelView = self.panel.view as? GlassControlPanelComponent.View {
+            if let leftView = panelView.leftItemView {
+                accessibilityViews.append(contentsOf: self.allButtons(in: leftView))
+            }
+            if let centerView = panelView.centerItemView, let button = self.firstButton(in: centerView) {
+                if let title = centerAction?.title {
+                    button.accessibilityLabel = title
+                }
+                button.accessibilityTraits = .button
+                accessibilityViews.append(button)
+            }
+            if let rightView = panelView.rightItemView {
+                for button in self.allButtons(in: rightView) {
+                    if (button.accessibilityLabel ?? "").isEmpty {
+                        button.accessibilityLabel = interfaceState.strings.Common_Search
+                    }
+                    button.accessibilityTraits = .button
+                    accessibilityViews.append(button)
+                }
+            }
+        }
+        self.accessibilityElementViews = accessibilityViews
         
         /*if self.presentationInterfaceState != interfaceState || force {
             let previousState = self.presentationInterfaceState

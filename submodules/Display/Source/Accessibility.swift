@@ -3,6 +3,46 @@ import UIKit
 import AsyncDisplayKit
 import SwiftSignalKit
 
+/// Включает подробное VoiceOver-логирование (`[VO-…]`). По умолчанию ВЫКЛЮЧЕНО.
+///
+/// Эти `print`-логи вызываются на КАЖДОЕ событие фокуса VO во всех материализованных
+/// `ListView`. `print()` на устройстве под отладчиком — синхронный и медленный, на
+/// главном потоке, поэтому шторм таких вызовов вешает UI (долгий отклик при свайпе по
+/// пунктам контекстного меню и т.п.). Держим выключенным в обычных сборках; включать
+/// только точечно при отладке доступности.
+public var voVerboseAccessibilityLogging = false
+
+/// No-op-обёртка над `print` для VO-диагностики. Аргумент — `@autoclosure`, поэтому
+/// при выключенном логировании интерполяция строки (часто с дорогими вычислениями)
+/// вообще не выполняется.
+@inline(__always)
+public func voAccessibilityLog(_ message: @autoclosure () -> String) {
+    if voVerboseAccessibilityLogging {
+        print(message())
+    }
+}
+
+/// Описание реального VO-элемента, который `ListView` дописывает ПОСЛЕ
+/// новейшего элемента (trailing pooled element). Используется историей чата для
+/// кнопок «Написать сообщение»/«Отменить ответ» — они становятся пуловыми
+/// `FocusTrackingAccessibilityElement` того же типа, что и сообщения, поэтому VO
+/// ведёт на них штатно. Активация делегируется в `sourceView.accessibilityActivate()`.
+public struct ListViewAccessibilityTrailingElement {
+    public let sourceView: UIView
+    public let label: String
+    public let value: String?
+    public let traits: UIAccessibilityTraits
+    public let frame: CGRect
+
+    public init(sourceView: UIView, label: String, value: String?, traits: UIAccessibilityTraits, frame: CGRect) {
+        self.sourceView = sourceView
+        self.label = label
+        self.value = value
+        self.traits = traits
+        self.frame = frame
+    }
+}
+
 public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
     public var directionalFocusIndex: Int?
     public var directionalSnapshotId: Int?

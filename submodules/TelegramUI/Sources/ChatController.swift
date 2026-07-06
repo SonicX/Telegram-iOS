@@ -2082,6 +2082,10 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                             })
                         }
                         
+                        // VoiceOver: озвучиваем результат («Реакция ❤️ проставлена/снята»).
+                        // Общий путь для быстрой реакции и пункта-реакции из блока
+                        // «Реакции и просмотры» (ротор сообщения).
+                        voAnnounceReactionUpdate(reaction: chosenReaction, message: message, removed: removedReaction != nil, languageCode: strongSelf.presentationData.strings.baseLanguageCode)
                         let _ = updateMessageReactionsInteractively(account: strongSelf.context.account, messageIds: [message.id], reactions: mappedUpdatedReactions, isLarge: false, storeAsRecentlyUsed: false).startStandalone()
                     }
                 }
@@ -6891,7 +6895,23 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         if shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: UIAccessibility.isVoiceOverRunning) {
             self.chatDisplayNode.historyNode.postAccessibilityFocusOnAppear(preferredIdentifier: "chat.unreadMessages")
         }
-        
+
+        // VoiceOver: при переходе в чат с подготовленной пересылкой (forward-
+        // панель над полем ввода) сразу фокусируем поле ввода и поднимаем
+        // клавиатуру — иначе пользователь оказывается в истории без явного
+        // фокуса на вводе. То же поведение, что у reply (см.
+        // setupReplyMessage → ensureInputViewFocused).
+        if UIAccessibility.isVoiceOverRunning,
+           self.presentationInterfaceState.interfaceState.forwardMessageIds != nil,
+           canSendMessagesToChat(self.presentationInterfaceState) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
+                self.chatDisplayNode.ensureInputViewFocused()
+            }
+        }
+
         self.didAppear = true
         
         self.chatDisplayNode.historyNode.experimentalSnapScrollToItem = false
