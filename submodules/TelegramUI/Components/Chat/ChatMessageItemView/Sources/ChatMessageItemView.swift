@@ -79,6 +79,11 @@ public enum ChatMessageAccessibilityCustomActionType {
     /// эту реакцию на сообщении (через updateMessageReaction — тот же путь,
     /// что и выбор в контекстном меню).
     case toggleReaction(MessageReaction.Reaction)
+    /// Быстрое действие сообщения («Ответить», «Скопировать», «Закрепить»,
+    /// «Переслать», «Выделить», «Удалить») — замыкание сформировано
+    /// чат-контроллером (accessibilityMessageQuickActions), активация
+    /// просто выполняет его.
+    case perform(() -> Void)
 }
 
 public final class ChatMessageAccessibilityCustomAction: UIAccessibilityCustomAction {
@@ -623,13 +628,12 @@ public final class ChatMessageAccessibilityData {
             // сообщения счётчик НЕ добавляем — иначе дубль: «N комментариев» на
             // сообщении и на футере.
 
-            // VoiceOver: блок «Реакции и просмотры» в цепочке свайпа вниз —
-            // между «Комментарии» (синтезируется из футера при промоуте баббла)
-            // и «Открыть меню». Заголовок, затем каждая реакция со счётчиком,
-            // затем количество просмотров. Пункты информационные (.info):
-            // активация — no-op, только озвучка (свайпы влево/вправо в роторе
-            // действий iOS всегда уводит на соседний элемент — перехватить их
-            // нельзя, поэтому перебор реакций сделан свайпами вниз/вверх).
+            // VoiceOver: цепочка свайпа вниз на сообщении — быстрые действия
+            // («Ответить» … «Удалить»), затем каждая реакция со счётчиком,
+            // затем количество просмотров (.info: активация — no-op, только
+            // озвучка), в конце «Открыть меню». Свайпы влево/вправо в роторе
+            // действий iOS всегда уводят на соседний элемент — перехватить их
+            // нельзя, поэтому перебор сделан свайпами вниз/вверх.
             var voReactionEntries: [(title: String, value: MessageReaction.Reaction)] = []
             if let reactionsAttribute = item.message.reactionsAttribute {
                 for reaction in reactionsAttribute.reactions {
@@ -661,9 +665,22 @@ public final class ChatMessageAccessibilityData {
                     break
                 }
             }
+            // VoiceOver: основные действия контекстного меню («Ответить»,
+            // «Скопировать», «Закрепить», «Переслать», «Выделить»,
+            // «Удалить») — прямо в цепочке свайпа вниз, тем же способом, что
+            // и реакции. Список и замыкания формирует чат-контроллер
+            // (accessibilityMessageQuickActions), он же решает доступность
+            // каждого действия по правам и состоянию чата.
+            if let quickActions = item.controllerInteraction.accessibilityMessageQuickActions?(item.message) {
+                for quickAction in quickActions {
+                    customActions.append(ChatMessageAccessibilityCustomAction(name: quickAction.title, target: nil, selector: #selector(self.noop), action: .perform(quickAction.action)))
+                }
+            }
+
             if !voReactionEntries.isEmpty || voViewCount != nil {
+                // Заголовок «Реакции и просмотры» убран по просьбе незрячих
+                // пользователей — лишний информационный стоп в цепочке.
                 let isRu = isRussianBaseLanguage(item: item)
-                customActions.append(ChatMessageAccessibilityCustomAction(name: isRu ? "Реакции и просмотры" : "Reactions and views", target: nil, selector: #selector(self.noop), action: .info))
                 for entry in voReactionEntries {
                     // Двойной тап по пункту-реакции ставит/снимает её (обработка
                     // в performLocalAccessibilityCustomAction нод сообщений).

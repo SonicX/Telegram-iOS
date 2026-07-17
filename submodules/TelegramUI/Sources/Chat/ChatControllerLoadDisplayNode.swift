@@ -4490,7 +4490,85 @@ extension ChatControllerImpl {
         }
         
         self.chatDisplayNode.interfaceInteraction = interfaceInteraction
-        
+
+        // VoiceOver: быстрые действия сообщения для цепочки свайпа вниз —
+        // основные пункты контекстного меню без открытия самого меню.
+        // Замыкание вызывается при построении accessibility-данных каждого
+        // сообщения; доступность действий считаем синхронно по состоянию
+        // чата (право закреплять, защита от копирования и т.п.), а
+        // подтверждения (удаление, открепление) показывают те же
+        // interfaceInteraction-обработчики, что и контекстное меню.
+        self.controllerInteraction?.accessibilityMessageQuickActions = { [weak self] message in
+            guard let strongSelf = self, UIAccessibility.isVoiceOverRunning else {
+                return []
+            }
+            var isAction = false
+            for media in message.media {
+                if media is TelegramMediaAction || media is TelegramMediaExpiredContent {
+                    isAction = true
+                }
+            }
+            let strings = strongSelf.presentationData.strings
+            let copyProtected = strongSelf.presentationInterfaceState.copyProtectionEnabled || message.isCopyProtected()
+            let isSendFailedOrUnsent = !message.flags.intersection([.Failed, .Unsent]).isEmpty
+            var result: [(title: String, action: () -> Void)] = []
+
+            if strongSelf.controllerInteraction?.canSetupReply(message) == .reply {
+                result.append((strings.Conversation_ContextMenuReply, { [weak self] in
+                    self?.controllerInteraction?.setupReply(message.id)
+                }))
+            }
+
+            if !message.text.isEmpty, !copyProtected, !isAction {
+                result.append((strings.Conversation_ContextMenuCopy, { [weak self] in
+                    guard let strongSelf = self else {
+                        return
+                    }
+                    var messageEntities: [MessageTextEntity]?
+                    for attribute in message.attributes {
+                        if let attribute = attribute as? TextEntitiesMessageAttribute {
+                            messageEntities = attribute.entities
+                        }
+                    }
+                    storeMessageTextInPasteboard(message.text, entities: messageEntities)
+                    strongSelf.controllerInteraction?.displayUndo(.copy(text: strongSelf.presentationData.strings.Conversation_MessageCopied))
+                }))
+            }
+
+            if !isAction, !isSendFailedOrUnsent, message.id.namespace == Namespaces.Message.Cloud, strongSelf.canManagePin() {
+                if message.tags.contains(.pinned) {
+                    result.append((strings.Conversation_Unpin, { [weak self] in
+                        self?.interfaceInteraction?.unpinMessage(message.id, true, nil)
+                    }))
+                } else {
+                    result.append((strings.Conversation_Pin, { [weak self] in
+                        self?.interfaceInteraction?.pinMessage(message.id, nil)
+                    }))
+                }
+            }
+
+            if !isAction, !isSendFailedOrUnsent, message.id.namespace == Namespaces.Message.Cloud, message.id.peerId.namespace != Namespaces.Peer.SecretChat, !copyProtected {
+                result.append((strings.Conversation_ContextMenuForward, { [weak self] in
+                    self?.interfaceInteraction?.forwardMessages([message], nil)
+                }))
+            }
+
+            if !isAction {
+                result.append((strings.Conversation_ContextMenuSelect, { [weak self] in
+                    self?.interfaceInteraction?.beginMessageSelection([message.id], { _ in })
+                }))
+            }
+
+            // deleteMessages сам проверяет права (chatAvailableMessageActions)
+            // и показывает лист подтверждения — небезопасного мгновенного
+            // удаления тут нет.
+            result.append((strings.Conversation_ContextMenuDelete, { [weak self] in
+                self?.interfaceInteraction?.deleteMessages([message], nil, { _ in })
+            }))
+
+            return result
+        }
+
         self.context.sharedContext.mediaManager.galleryHiddenMediaManager.addTarget(self)
         self.galleryHiddenMesageAndMediaDisposable.set(self.context.sharedContext.mediaManager.galleryHiddenMediaManager.hiddenIds().startStrict(next: { [weak self] ids in
             if let strongSelf = self, let controllerInteraction = strongSelf.controllerInteraction {

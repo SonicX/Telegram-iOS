@@ -832,6 +832,10 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 case .info:
                     // Информационный пункт «Реакции и просмотры» — только озвучка.
                     break
+                case let .perform(f):
+                    // Быстрое действие («Ответить», «Скопировать», …) —
+                    // замыкание сформировано чат-контроллером.
+                    f()
             }
         }
     }

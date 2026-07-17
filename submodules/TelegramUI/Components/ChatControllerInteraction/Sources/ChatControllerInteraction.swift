@@ -316,6 +316,12 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public var enableFullTranslucency: Bool = true
     public var chatIsRotated: Bool = true
     public var canReadHistory: Bool = false
+    // VoiceOver: быстрые действия сообщения для цепочки свайпа вниз
+    // («Ответить», «Скопировать», «Закрепить», «Переслать», «Выделить»,
+    // «Удалить»). Список формирует чат-контроллер — только у него есть
+    // состояние чата и права; в остальных хостах (превью, лог действий,
+    // плеер) остаётся nil, и быстрых действий у сообщений нет.
+    public var accessibilityMessageQuickActions: ((Message) -> [(title: String, action: () -> Void)])?
     
     private var isOpeningMediaValue: Bool = false
     public var isOpeningMedia: Bool {
