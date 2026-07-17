@@ -397,6 +397,34 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 didAppendSendButton = true
             }
 
+            // VoiceOver: во время записи голосового/видео поле ввода лишь
+            // прячется (alpha = 0), но остаётся first responder — раньше оно
+            // попадало первым элементом в дерево VO, и когда кнопка микрофона
+            // исчезала из дерева, фокус перескакивал на невидимое поле: VO
+            // забалтывал запись («Текст сообщения…» и чтение клавиатуры).
+            // Пока идёт запись, отдаём только элементы записи: «Отмена» (когда
+            // запись залочена), «Отправить». Возвращаем список даже пустым —
+            // nil включил бы стандартный обход всех сабвью, включая поле.
+            if self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState != nil {
+                if let audioRecordingCancelIndicator = self.audioRecordingCancelIndicator, audioRecordingCancelIndicator.isDisplayingCancel, !audioRecordingCancelIndicator.isHidden, audioRecordingCancelIndicator.alpha > 0.01 {
+                    elements.append(audioRecordingCancelIndicator)
+                }
+                appendNode(self.viewOnceButton)
+                appendNode(self.recordMoreButton)
+                appendNode(self.mediaRecordingAccessibilityArea)
+                return elements
+            }
+            // VoiceOver: то же для предпрослушивания записи (mediaDraftState) —
+            // поле скрыто, работает встроенная панель предпрослушивания; отдаём
+            // её контейнером (VO сам обойдёт её кнопки) и кнопку отправки.
+            if self.presentationInterfaceState?.interfaceState.mediaDraftState != nil, let mediaPreviewPanelNode = self.mediaPreviewPanelNode {
+                elements.append(mediaPreviewPanelNode.view)
+                appendNode(self.viewOnceButton)
+                appendNode(self.recordMoreButton)
+                appendSendButtonIfNeeded()
+                return elements
+            }
+
             // VoiceOver: кнопки «Написать сообщение»/«Отменить ответ» теперь
             // живут в ленте истории как реальные пуловые элементы (см.
             // ChatHistoryListNode), а не в тулбаре — до тулбар-зон VO не доходил.
