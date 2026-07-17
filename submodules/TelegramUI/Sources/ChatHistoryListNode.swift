@@ -890,7 +890,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         return self._isReady.get()
     }
     private var didSetReady: Bool = false
-    
+    // VoiceOver: одноразовый «прайм» дерева доступности после первой
+    // применённой транзакции истории (см. комментарий у места установки).
+    private var didPostInitialAccessibilityPrime: Bool = false
+
     private let initTimestamp: Double
     
     public init(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>), chatLocation: ChatLocation, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>, adMessagesContext: AdMessagesHistoryContext?, tag: HistoryViewInputTag?, source: ChatHistoryListSource, subject: ChatControllerSubject?, controllerInteraction: ChatControllerInteraction, selectedMessages: Signal<Set<MessageId>?, NoError>, mode: ChatHistoryListMode = .bubbles, rotated: Bool = false, isChatPreview: Bool, messageTransitionNode: @escaping () -> ChatMessageTransitionNodeImpl?) {
@@ -6588,15 +6591,34 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 }
                 
                 strongSelf.dequeueHistoryViewTransitions()
-                
+
                 strongSelf._isReady.set(true)
-                
+
                 if !strongSelf.didSetReady {
                     strongSelf.didSetReady = true
                     #if DEBUG
                     let deltaTime = (CFAbsoluteTimeGetCurrent() - strongSelf.initTimestamp) * 1000.0
                     print("Chat init to dequeue time: \(deltaTime) ms")
                     #endif
+                }
+
+                // VoiceOver: прайм дерева доступности при входе в чат. VO
+                // снимает снапшот экрана в момент push, когда история ещё не
+                // материализована, и до следующей инвалидации не видит ленту:
+                // свайп от заголовка «застревает» в навбаре, пока пользователь
+                // не тапнет по списку (тап заставляет iOS перечитать дерево).
+                // После первой применённой транзакции с реальными строками
+                // постим .layoutChanged(nil) — фокус остаётся где был, но iOS
+                // перечитывает контейнеры и свайпы начинают входить в ленту.
+                if !strongSelf.didPostInitialAccessibilityPrime, UIAccessibility.isVoiceOverRunning, !transition.insertItems.isEmpty {
+                    strongSelf.didPostInitialAccessibilityPrime = true
+                    DispatchQueue.main.async { [weak strongSelf] in
+                        guard strongSelf != nil else {
+                            return
+                        }
+                        voAccessibilityLog("[VO-CHAT] initial-history-prime: posting layoutChanged(nil) after first transition")
+                        UIAccessibility.post(notification: .layoutChanged, argument: nil)
+                    }
                 }
             }
         }

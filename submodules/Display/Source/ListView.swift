@@ -6735,6 +6735,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 self.accessibilityFocusLeftListFailureCount = 0
                 return
             }
+            // Уход фокуса на таб-бар — всегда осознанное действие пользователя
+            // (свайп за последний элемент списка или прямое касание вкладки).
+            // Ошибочные ре-анкоры iOS, ради которых существует recovery, ведут
+            // в центр списка или в навбар, но не в таб-бар. Без этого гейта
+            // recovery в течение 1.5 с после ухода из списка утаскивал курсор
+            // обратно — вкладки нельзя было пройти свайпом, только ощупыванием.
+            if self.isAccessibilityObjectInsideTabBar(focusedObject) {
+                self.accessibilityFocusLeftListFailureCount = 0
+                voAccessibilityLog("[VO-STATE] focus-escape-to-tabbar — recovery skipped")
+                return
+            }
             // Right after our own edge scroll, give VoiceOver a short window
             // to land on the next row before attempting recovery.
             if CACurrentMediaTime() - self.accessibilityLastProgrammaticEdgeScrollTimestamp < 0.15 {
@@ -6785,6 +6796,29 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             voAccessibilityLog("[VO-STATE] recover-focus-triggered reason=\(reason) lastFocusedIndex=\(String(describing: self.accessibilityLastSystemFocusedIndex))")
             self.recoverAccessibilityFocusToList(aroundIndex: self.accessibilityLastSystemFocusedIndex, reason: reason)
         }
+    }
+
+    // Ищем таб-бар вверх по цепочке superview от сфокусированного объекта:
+    // TabBarNode помечает себя accessibilityTraits = [.tabBar], а фокус
+    // обычно стоит на его дочернем узле-вкладке.
+    private func isAccessibilityObjectInsideTabBar(_ object: Any) -> Bool {
+        var currentView: UIView?
+        if let view = object as? UIView {
+            currentView = view
+        } else if let element = object as? UIAccessibilityElement {
+            if let containerView = element.accessibilityContainer as? UIView {
+                currentView = containerView
+            } else if let containerNode = element.accessibilityContainer as? ASDisplayNode {
+                currentView = containerNode.view
+            }
+        }
+        while let view = currentView {
+            if view.accessibilityTraits.contains(.tabBar) {
+                return true
+            }
+            currentView = view.superview
+        }
+        return false
     }
 
     private func isAccessibilityObjectVisibleInsideCurrentListSequence(_ object: Any) -> Bool {
