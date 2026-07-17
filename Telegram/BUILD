@@ -1827,11 +1827,34 @@ plist_fragment(
     )
 )
 
+# MARK: Swiftgram — без app group расширение не может открыть общий
+# контейнер (containerURL → nil), мгновенно выходит и пуш остаётся с
+# системной заглушкой вместо текста сообщения. Требует профиля с
+# включённой capability App Groups у App ID …NotificationService.
+plist_fragment(
+    name = "NotificationServiceEntitlements",
+    extension = "entitlements",
+    template = "".join([
+        """
+        <key>com.apple.security.application-groups</key>
+        <array>
+            <string>group.{telegram_bundle_id}</string>
+        </array>
+        <key>application-identifier</key>
+        <string>{telegram_team_id}.{telegram_bundle_id}.NotificationService</string>
+        """.format(
+            telegram_bundle_id = telegram_bundle_id,
+            telegram_team_id = telegram_team_id
+        )
+    ])
+)
+
 ios_extension(
     name = "NotificationServiceExtension" + notificationServiceExtensionVersion,
     bundle_id = "{telegram_bundle_id}.NotificationService".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
+    entitlements = ":NotificationServiceEntitlements.entitlements",
     families = [
         "iphone",
         "ipad",
