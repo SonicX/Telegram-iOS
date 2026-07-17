@@ -85,3 +85,7 @@ spm-files
 # Профили (.mobileprovision) остаются в репозитории, ключи и сертификаты — нет.
 build-system/codesigning/certs/
 build-system/codesigning-dev/certs/
+# Артефакты TestFlight-сборок (IPA, dSYM, логи) — сотни МБ, не для git.
+testflight-build/
+# Локальный клон bazel-central-registry (отдельный git-репозиторий).
+build-system/bazel-central-registry/
