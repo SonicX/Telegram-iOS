@@ -340,17 +340,66 @@ extension ChatControllerImpl {
                 }
                 
                 let isSecret = self.presentationInterfaceState.copyProtectionEnabled || self.chatLocation.peerId?.namespace == Namespaces.Peer.SecretChat
-                let controller = ContextController(presentationData: self.presentationData, source: source, items: actionsSignal, recognizer: recognizer, gesture: gesture, disableScreenshots: isSecret, hideReactionPanelTail: hideReactionPanelTail)
-                // VoiceOver: выставляется в reactionSelected — после закрытия
-                // меню курсор нужно вернуть на сообщение (выбрать программно
-                // пункт ротора «Реакции» iOS не позволяет — при возврате
-                // фокуса ротор действий сбрасывается на первый пункт).
+                // VoiceOver: пункт «Реакции» из свайпа вниз — показываем ТОЛЬКО
+                // панель выбора реакций, без пунктов контекстного меню: лишние
+                // пункты сбивают при свайп-обходе. Флаг ставится нодой
+                // сообщения непосредственно перед вызовом, читаем его до
+                // потребления в animateIn.
+                var effectiveActionsSignal = actionsSignal
+                var voReactionsOnlyMode = false
+                if ContextController.accessibilityFocusReactionsOnNextPresent, UIAccessibility.isVoiceOverRunning {
+                    voReactionsOnlyMode = true
+                    effectiveActionsSignal = actionsSignal
+                    |> map { items -> ContextController.Items in
+                        var items = items
+                        items.content = .list([])
+                        items.tip = nil
+                        items.tipSignal = nil
+                        return items
+                    }
+                }
+                let controller = ContextController(presentationData: self.presentationData, source: source, items: effectiveActionsSignal, recognizer: recognizer, gesture: gesture, disableScreenshots: isSecret, hideReactionPanelTail: hideReactionPanelTail)
+                // VoiceOver: возврат курсора на сообщение после закрытия меню.
+                // В режиме «только реакции» ставим сразу — закрытие БЕЗ выбора
+                // (зона «Закрыть меню», тап по фону) возвращает курсор на
+                // сообщение. При ВЫБОРЕ реакции reactionSelected сбрасывает
+                // возврат: явный фокус заставлял VO зачитывать всё сообщение
+                // заново поверх подтверждения — остаётся только озвучка
+                // «Реакция проставлена». (Выбрать программно пункт ротора
+                // «Реакции» iOS не позволяет — ротор сбрасывается на начало.)
                 var voReturnFocusToMessageId: MessageId?
+                if voReactionsOnlyMode {
+                    voReturnFocusToMessageId = message.id
+                }
+                // VoiceOver: текст подтверждения выбора реакции — постится в
+                // dismissed, обрывая системное перечитывание сообщения.
+                var voReactionAnnouncement: String?
                 controller.dismissed = { [weak self] in
                     self?.canReadHistory.set(true)
+                    // Страховка: в режиме «только реакции» стек пунктов меню
+                    // (штатный потребитель one-shot флага) может не создаться —
+                    // не даём флагу протечь в следующее открытие меню.
+                    ContextController.accessibilityFocusReactionsOnNextPresent = false
                     // Возвращаем focus-обработку истории после закрытия меню.
                     self?.chatDisplayNode.historyNode.accessibilityFocusHandlingSuspended = false
                     self?.chatDisplayNode.historyNode.view.accessibilityElementsHidden = false
+                    // VoiceOver: подтверждение выбора реакции — после закрытия
+                    // панели iOS восстанавливает фокус на сообщение и начинает
+                    // зачитывать его заново; анонс через 0.8 с ОБРЫВАЕТ это
+                    // перечитывание. На iOS 17+ анонс дополнительно помечен
+                    // высоким приоритетом — его не перебьёт другая речь.
+                    if let announcement = voReactionAnnouncement {
+                        voReactionAnnouncement = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                            let argument: Any
+                            if #available(iOS 17.0, *) {
+                                argument = NSAttributedString(string: announcement, attributes: [.accessibilitySpeechAnnouncementPriority: UIAccessibilityPriority.high])
+                            } else {
+                                argument = announcement
+                            }
+                            UIAccessibility.post(notification: .announcement, argument: argument)
+                        }
+                    }
                     if let self, let messageId = voReturnFocusToMessageId, UIAccessibility.isVoiceOverRunning {
                         voReturnFocusToMessageId = nil
                         var targetView: UIView?
@@ -400,23 +449,25 @@ extension ChatControllerImpl {
                         return
                     }
 
-                    // VoiceOver: подтверждаем результат голосом сразу при
-                    // выборе (пока идёт анимация закрытия — другой речи нет),
-                    // а в dismissed возвращаем курсор на сообщение.
+                    // VoiceOver: запоминаем текст подтверждения — прозвучит он
+                    // в dismissed, ПОСЛЕ закрытия панели. Порядок важен: iOS
+                    // при закрытии оверлея сама восстанавливает фокус на
+                    // сообщение и начинает зачитывать его заново; анонс,
+                    // запощенный здесь (до закрытия), этим чтением перебивался.
+                    // Отложенный анонс наоборот ОБРЫВАЕТ начатое перечитывание.
                     if UIAccessibility.isVoiceOverRunning {
                         var isRemoval = false
                         if let reactionsAttribute = message.reactionsAttribute {
                             isRemoval = reactionsAttribute.reactions.contains(where: { $0.value == chosenUpdatedReaction.reaction && $0.isSelected })
                         }
                         let isRu = self.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
-                        let announcement: String
                         if isRemoval {
-                            announcement = isRu ? "Реакция снята" : "Reaction removed"
+                            voReactionAnnouncement = isRu ? "Реакция снята" : "Reaction removed"
                         } else {
-                            announcement = isRu ? "Реакция проставлена" : "Reaction set"
+                            voReactionAnnouncement = isRu ? "Реакция проставлена" : "Reaction set"
                         }
-                        UIAccessibility.post(notification: .announcement, argument: announcement)
-                        voReturnFocusToMessageId = message.id
+                        // Выбор состоялся — курсор на сообщение не возвращаем.
+                        voReturnFocusToMessageId = nil
                     }
 
                     controller?.view.endEditing(true)
