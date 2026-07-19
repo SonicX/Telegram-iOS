@@ -113,9 +113,32 @@ private final class TabBarItemNode: ASDisplayNode {
     }
     
     var swiped: ((TabBarItemSwipeDirection) -> Void)?
-    
+
     var pointerInteraction: PointerInteraction?
-    
+
+    // VoiceOver: горизонтальный запас зоны доступности вкладки (половина
+    // расстояния между вкладками минус половина иконки) — задаётся из layout.
+    var accessibilityHitTestInset: CGFloat = 0.0
+
+    // VoiceOver: фрейм вкладки считаем из фактической геометрии на момент
+    // запроса и конвертируем в экранные координаты. Раньше он задавался
+    // вручную в ЛОКАЛЬНЫХ координатах таб-бара с ручным смещением
+    // (`size.height - nodeSize.height - bottomInset`), а UIKit трактует
+    // заданный accessibilityFrame как ЭКРАННЫЙ — на устройствах без
+    // home-индикатора (iPhone SE) зона уезжала мимо реального положения
+    // вкладок, и VO-свайпы по табам не работали.
+    override var accessibilityFrame: CGRect {
+        get {
+            guard self.isNodeLoaded, self.view.window != nil else {
+                return super.accessibilityFrame
+            }
+            let rect = self.view.bounds.insetBy(dx: -self.accessibilityHitTestInset, dy: -3.0)
+            return UIAccessibility.convertToScreenCoordinates(rect, in: self.view)
+        }
+        set {
+        }
+    }
+
     override init() {
         self.extractedContainerNode = ContextExtractedContentContainingNode()
         self.containerNode = ContextControllerSourceNode()
@@ -713,7 +736,10 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 node.containerNode.frame = CGRect(origin: CGPoint(), size: nodeFrame.size)
                 node.hitTestSlop = UIEdgeInsets(top: -3.0, left: -horizontalHitTestInset, bottom: -3.0, right: -horizontalHitTestInset)
                 node.containerNode.hitTestSlop = UIEdgeInsets(top: -3.0, left: -horizontalHitTestInset, bottom: -3.0, right: -horizontalHitTestInset)
-                node.accessibilityFrame = nodeFrame.insetBy(dx: -horizontalHitTestInset, dy: 0.0).offsetBy(dx: 0.0, dy: size.height - nodeSize.height - bottomInset)
+                // VoiceOver: фрейм считается в override accessibilityFrame
+                // (TabBarItemNode) из фактической геометрии — здесь только
+                // передаём горизонтальный запас зоны.
+                node.accessibilityHitTestInset = horizontalHitTestInset
                 if node.ringColor == nil {
                     node.imageNode.frame = CGRect(origin: CGPoint(), size: nodeFrame.size)
                 }

@@ -341,11 +341,35 @@ extension ChatControllerImpl {
                 
                 let isSecret = self.presentationInterfaceState.copyProtectionEnabled || self.chatLocation.peerId?.namespace == Namespaces.Peer.SecretChat
                 let controller = ContextController(presentationData: self.presentationData, source: source, items: actionsSignal, recognizer: recognizer, gesture: gesture, disableScreenshots: isSecret, hideReactionPanelTail: hideReactionPanelTail)
+                // VoiceOver: выставляется в reactionSelected — после закрытия
+                // меню курсор нужно вернуть на сообщение (выбрать программно
+                // пункт ротора «Реакции» iOS не позволяет — при возврате
+                // фокуса ротор действий сбрасывается на первый пункт).
+                var voReturnFocusToMessageId: MessageId?
                 controller.dismissed = { [weak self] in
                     self?.canReadHistory.set(true)
                     // Возвращаем focus-обработку истории после закрытия меню.
                     self?.chatDisplayNode.historyNode.accessibilityFocusHandlingSuspended = false
                     self?.chatDisplayNode.historyNode.view.accessibilityElementsHidden = false
+                    if let self, let messageId = voReturnFocusToMessageId, UIAccessibility.isVoiceOverRunning {
+                        voReturnFocusToMessageId = nil
+                        var targetView: UIView?
+                        self.chatDisplayNode.historyNode.forEachItemNode { itemNode in
+                            if targetView == nil, let itemNode = itemNode as? ChatMessageItemView, itemNode.item?.message.id == messageId {
+                                targetView = itemNode.view
+                            }
+                        }
+                        if let targetView {
+                            // Даём дереву доступности восстановиться после
+                            // accessibilityElementsHidden = false, затем ставим
+                            // курсор обратно на сообщение.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak targetView] in
+                                if let targetView {
+                                    UIAccessibility.post(notification: .layoutChanged, argument: targetView)
+                                }
+                            }
+                        }
+                    }
                 }
                 controller.immediateItemsTransitionAnimation = disableTransitionAnimations
                 self.currentContextController = controller
@@ -375,7 +399,26 @@ extension ChatControllerImpl {
                     guard let message = messages.first else {
                         return
                     }
-                    
+
+                    // VoiceOver: подтверждаем результат голосом сразу при
+                    // выборе (пока идёт анимация закрытия — другой речи нет),
+                    // а в dismissed возвращаем курсор на сообщение.
+                    if UIAccessibility.isVoiceOverRunning {
+                        var isRemoval = false
+                        if let reactionsAttribute = message.reactionsAttribute {
+                            isRemoval = reactionsAttribute.reactions.contains(where: { $0.value == chosenUpdatedReaction.reaction && $0.isSelected })
+                        }
+                        let isRu = self.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                        let announcement: String
+                        if isRemoval {
+                            announcement = isRu ? "Реакция снята" : "Reaction removed"
+                        } else {
+                            announcement = isRu ? "Реакция проставлена" : "Reaction set"
+                        }
+                        UIAccessibility.post(notification: .announcement, argument: announcement)
+                        voReturnFocusToMessageId = message.id
+                    }
+
                     controller?.view.endEditing(true)
                     
                     if case .stars = chosenUpdatedReaction.reaction {

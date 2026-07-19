@@ -436,7 +436,10 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                         }
                     }
                 case .reactions:
+                    // VoiceOver: курсор сразу на панель реакций, а не на первый
+                    // пункт меню (см. accessibilityFocusReactionsOnNextPresent).
                     if let item = self.item {
+                        ContextController.accessibilityFocusReactionsOnNextPresent = true
                         item.controllerInteraction.openMessageContextMenu(item.message, false, self, self.imageNode.frame, nil, nil)
                     }
                 case let .toggleReaction(value):

@@ -283,7 +283,10 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
                         }
                     }
                 case .reactions:
+                    // VoiceOver: курсор сразу на панель реакций, а не на первый
+                    // пункт меню (см. accessibilityFocusReactionsOnNextPresent).
                     if let item = self.item {
+                        ContextController.accessibilityFocusReactionsOnNextPresent = true
                         item.controllerInteraction.openMessageContextMenu(item.message, false, self, self.interactiveVideoNode.frame, nil, nil)
                     }
                 case let .toggleReaction(value):

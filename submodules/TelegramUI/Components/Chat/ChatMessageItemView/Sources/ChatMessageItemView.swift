@@ -697,6 +697,16 @@ public final class ChatMessageAccessibilityData {
                 }
             }
 
+            // VoiceOver: пункт «Реакции» перед «Открыть меню» — двойной тап
+            // открывает панель выбора реакций с курсором сразу на первой
+            // реакции (флаг accessibilityFocusReactionsOnNextPresent в
+            // обработчиках .reactions); дальше свайпы влево/вправо ходят по
+            // реакциям, двойной тап ставит выбранную. После выбора звучит
+            // подтверждение и курсор возвращается на сообщение (см.
+            // ChatControllerOpenMessageContextMenu).
+            if canAddMessageReactions(message: item.message) {
+                customActions.append(ChatMessageAccessibilityCustomAction(name: isRussianBaseLanguage(item: item) ? "Реакции" : "Reactions", target: nil, selector: #selector(self.noop), action: .reactions))
+            }
             customActions.append(ChatMessageAccessibilityCustomAction(name: item.presentationData.strings.VoiceOver_MessageContextOpenMessageMenu, target: nil, selector: #selector(self.noop), action: .options))
         }
         
