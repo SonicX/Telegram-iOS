@@ -52,7 +52,14 @@ SUBCOMMAND_ARGS=(
   generateProject
   --configurationPath="$CONFIGURATION_PATH"
   --codesigningInformationPath="$CODESIGNING_PATH"
-  --disableExtensions
 )
+
+# По умолчанию расширения отключены (быстрее индексация Xcode), но тогда в
+# дебаг-сборке НЕТ NotificationService — пуши приходят без текста. Для отладки
+# пушей генерируй с WITH_EXTENSIONS=1.
+case "$(echo "${WITH_EXTENSIONS:-0}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|y) ;;
+  *) SUBCOMMAND_ARGS+=(--disableExtensions) ;;
+esac
 
 python3 -u build-system/Make/Make.py "${GLOBAL_ARGS[@]}" "${SUBCOMMAND_ARGS[@]}"
