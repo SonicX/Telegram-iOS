@@ -1417,7 +1417,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         self.visibleContentOffsetChanged = { [weak self] offset in
             if let strongSelf = self {
                 strongSelf.contentPositionChanged(offset)
-                strongSelf.maybePostAccessibilityLayoutChangedOnScroll()
+                // Инвалидацию VO-дерева постим только когда фреймы реально
+                // сдвинулись — безусловный пост каждые 100мс держал VoiceOver
+                // в вечном перечитывании (нагрев, потеря фокуса, ре-анкоры).
+                if strongSelf.voRefreshPromotedAccessibilityFrames() {
+                    strongSelf.maybePostAccessibilityLayoutChangedOnScroll()
+                }
                 
                 if strongSelf.tag == nil {
                     var atBottom = false
@@ -1820,6 +1825,70 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     ///
     /// Throttled to 100 ms because `visibleContentOffsetChanged`
     /// fires on every display-link tick during a flick scroll.
+    /// Освежает ОБРЕЗАННЫЕ accessibility-фреймы, проштампованные на вьюшки
+    /// промоутнутых сообщений в `customAccessibilityElements`. Штамп статичен
+    /// в экранных координатах: после любого скролла (авто-подскролл к фокусу,
+    /// инерция, 3-пальцевый жест) он протухает — в логах виднелись фреймы
+    /// (0,664 375x3) и (0,0 0x0) у полностью видимых сообщений, и касания по
+    /// ним «проваливались». Вызывается из `visibleContentOffsetChanged`
+    /// (каждый тик скролла); стоимость — десяток convert'ов, только при
+    /// включённом VoiceOver.
+    /// Возвращает true, если хоть один фрейм реально изменился. ВАЖНО:
+    /// запись только при изменении — безусловная запись accessibilityFrame
+    /// десяткам вьюшек на каждом тике layout'а провоцировала шторм
+    /// инвалидаций у VoiceOver: постоянное перечитывание дерева (нагрев
+    /// телефона), потеря фокуса и ошибочные ре-анкоры курсора в навбар.
+    @discardableResult
+    private func voRefreshPromotedAccessibilityFrames() -> Bool {
+        guard UIAccessibility.isVoiceOverRunning else { return false }
+        guard let clip = self.accessibilityClippingFrameInScreenCoordinates() else { return false }
+        var anyFrameChanged = false
+        self.forEachItemNode { node in
+            guard let itemNode = node as? ListViewItemNode, itemNode.isAccessibilityElement, itemNode.isNodeLoaded else { return }
+            let rawFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            let newFrame = ChatHistoryListNodeImpl.voClipFrameTopOnly(rawFrame, clip: clip)
+            if ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, newFrame) {
+                anyFrameChanged = true
+            }
+        }
+        return anyFrameChanged
+    }
+
+    /// Обрезка VO-фрейма сообщения ТОЛЬКО СВЕРХУ (по кромке навбара).
+    /// Сверху обрезаем — иначе сообщения под навбаром перехватывают касания
+    /// «Назад»/заголовка. Снизу НЕ обрезаем: реальные фреймы ниже вьюпорта —
+    /// цели свайпа вперёд (как в списке чатов, где свайп «бесконечен»);
+    /// симметричная обрезка ломала переход к следующему сообщению у нижнего
+    /// края (курсор выпадал в навбар). Целиком скрытое сверху — .zero.
+    fileprivate static func voClipFrameTopOnly(_ frame: CGRect, clip: CGRect) -> CGRect {
+        if frame.isNull || frame.width <= 1.0 || frame.height <= 1.0 {
+            return .zero
+        }
+        if frame.maxY <= clip.minY + 1.0 {
+            return .zero
+        }
+        if frame.minY < clip.minY {
+            return CGRect(x: frame.minX, y: clip.minY, width: frame.width, height: frame.maxY - clip.minY)
+        }
+        return frame
+    }
+
+    /// Пишет accessibilityFrame только при реальном изменении (>0.5pt).
+    /// См. комментарий у voRefreshPromotedAccessibilityFrames — безусловные
+    /// записи провоцируют шторм VO-инвалидаций.
+    @discardableResult
+    fileprivate static func voSetAccessibilityFrameIfChanged(_ view: UIView, _ newFrame: CGRect) -> Bool {
+        let currentFrame = view.accessibilityFrame
+        if abs(currentFrame.minX - newFrame.minX) > 0.5
+            || abs(currentFrame.minY - newFrame.minY) > 0.5
+            || abs(currentFrame.width - newFrame.width) > 0.5
+            || abs(currentFrame.height - newFrame.height) > 0.5 {
+            view.accessibilityFrame = newFrame
+            return true
+        }
+        return false
+    }
+
     private func maybePostAccessibilityLayoutChangedOnScroll() {
         guard UIAccessibility.isVoiceOverRunning else { return }
         let now = CACurrentMediaTime()
@@ -2137,6 +2206,16 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     itemNode.accessibilityIdentifier = payload.identifier
                     itemNode.accessibilityTraits = payload.traits
                     itemNode.view.accessibilityCustomActions = payload.customActions
+                    // VO-фрейм штампуем ОБРЕЗАННЫМ прямо на вьюшку: VoiceOver
+                    // читает accessibilityFrame у _ASDisplayView, а мост
+                    // AsyncDisplayKit не заглядывает в override ноды. Без этого
+                    // сообщения, уехавшие под навбар, накрывали его фреймами
+                    // ((0,-270 375x464) в логах) и касание «Назад»/заголовка
+                    // доставалось сообщению. Полностью скрытый элемент получает
+                    // .zero и для касаний невидим (как и обрезанные пуловые
+                    // элементы массива).
+                    let voRawScreenFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+                    ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameTopOnly(voRawScreenFrame, clip: visibleScreenRect))
                     ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
                     self.voPromotedItemNodes.add(itemNode)
                     voPromotedCount += 1
@@ -2414,6 +2493,9 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     itemNode.accessibilityIdentifier = payload.identifier
                     itemNode.accessibilityTraits = payload.traits
                     itemNode.view.accessibilityCustomActions = payload.customActions
+                    // См. комментарий в experiment-ветке: обрезка только сверху
+                    // (навбар), снизу фрейм остаётся реальным — цель свайпа.
+                    ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameTopOnly(realFrame, clip: synthClip))
                     ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
                     self.voPromotedItemNodes.add(itemNode)
                 }

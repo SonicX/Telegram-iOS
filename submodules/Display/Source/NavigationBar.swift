@@ -764,10 +764,71 @@ open class NavigationBar: ASDisplayNode {
         }
     }
 
+    // Рекурсивно собирает VO-листья поддерева (для additionalContentNode —
+    // плашки закрепа/тем над чатом). Без включения их в массив навбара цепочка
+    // контейнеров у VoiceOver рвётся («Went all the way up the container
+    // chain…») и плашка становится тупиком для свайпов.
+    private func collectAccessibilityLeaves(of node: ASDisplayNode, to list: inout [Any]) {
+        // КРИТИЧНО: у layer-backed нод НЕЛЬЗЯ читать accessibility-свойства —
+        // мост AsyncDisplayKit дёргает .view и падает ассертом «Call to -view
+        // undefined on layer-backed nodes» (краш на входе в чат 2026-08-03).
+        // Layer-backed поддерево не может содержать view-backed нод и
+        // VO-элементов — пропускаем целиком.
+        if node.isLayerBacked {
+            return
+        }
+        if node.isHidden || node.alpha <= 0.01 {
+            return
+        }
+        if node.isAccessibilityElement {
+            list.append(node)
+            return
+        }
+        // node.accessibilityElements НЕЛЬЗЯ брать как есть: мост AsyncDisplayKit
+        // подставляет туда АВТО-вычисленные элементы (_ASDisplayView-контейнеры
+        // с isAccessibilityElement=false) — в массив навбара попадал сырой
+        // контейнер плашек (0,88 375x200). Берём только настоящие листья;
+        // если таких нет — идём глубже по субнодам.
+        if let elements = node.accessibilityElements, !elements.isEmpty {
+            var appendedCount = 0
+            for element in elements {
+                if element is UIAccessibilityElement {
+                    list.append(element)
+                    appendedCount += 1
+                } else if let nodeElement = element as? ASDisplayNode, !nodeElement.isLayerBacked, nodeElement.isAccessibilityElement {
+                    list.append(nodeElement)
+                    appendedCount += 1
+                }
+                // Сырые UIView из авто-моста НЕ берём: их superview-цепочка не
+                // проходит через «ordered children» навбара — VO рвёт контейнер
+                // («Went all the way up the container chain…») и элементы
+                // навбара могут выпадать из hit-test'а. Если тут вьюшки —
+                // идём глубже по субнодам и берём сами узлы.
+            }
+            if appendedCount > 0 {
+                return
+            }
+        }
+        for sub in node.subnodes ?? [] {
+            self.collectAccessibilityLeaves(of: sub, to: &list)
+        }
+    }
+
     @objc open func customAccessibilityElements() -> [Any]? {
         var accessibilityElements: [Any] = []
         if self.backButtonNode.supernode != nil {
-            addAccessibilityChildren(of: self.backButtonNode, container: self, to: &accessibilityElements)
+            if self.backButtonNode.isAccessibilityElement {
+                // ВАЖНО: НЕ через addAccessibilityChildren — та ветка создаёт
+                // НОВЫЙ UIAccessibilityElement-прокси на каждый запрос массива.
+                // VoiceOver держит старый экземпляр, не находит его среди
+                // «детей» контейнера (лог «Went all the way up the container
+                // chain…») — и свайп до «Назад» не доходил, хотя касание
+                // работало. Сам узел — стабильный объект с корректным
+                // экранным фреймом через мост AsyncDisplayKit.
+                accessibilityElements.append(self.backButtonNode)
+            } else {
+                addAccessibilityChildren(of: self.backButtonNode, container: self, to: &accessibilityElements)
+            }
         }
         if self.leftButtonNode.supernode != nil {
             addAccessibilityChildren(of: self.leftButtonNode, container: self, to: &accessibilityElements)
@@ -792,6 +853,9 @@ open class NavigationBar: ASDisplayNode {
         }
         if let secondaryContentNode = self.secondaryContentNode {
             addAccessibilityChildren(of: secondaryContentNode, container: self, to: &accessibilityElements)
+        }
+        if self.additionalContentNode.supernode === self {
+            self.collectAccessibilityLeaves(of: self.additionalContentNode, to: &accessibilityElements)
         }
         return accessibilityElements.isEmpty ? nil : accessibilityElements
     }

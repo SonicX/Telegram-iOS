@@ -94,6 +94,14 @@ private func clipAccessibilityFrame(_ frame: CGRect, for node: ASDisplayNode) ->
     return result
 }
 
+/// Публичная обёртка над обрезкой accessibility-фрейма по цепочке
+/// `AccessibilityClippingContainer` вверх от узла. Возвращает `.zero`, если
+/// видимая часть пуста (например, сообщение целиком уехало под навбар) —
+/// VoiceOver считает такой элемент невидимым и не отдаёт его касанию.
+public func clipAccessibilityFrameToContainers(_ frame: CGRect, for node: ASDisplayNode) -> CGRect {
+    return clipAccessibilityFrame(frame, for: node)
+}
+
 public func makeAccessibilityElement(of node: ASDisplayNode, container: Any, trackFocus: Bool) -> UIAccessibilityElement {
     let element: UIAccessibilityElement
     if trackFocus {

@@ -106,12 +106,21 @@ final class ChatPinnedMessageTitlePanelNode: ChatTitleAccessoryPanelNode {
         self.animationRenderer = animationRenderer
         
         self.tapButton = HighlightTrackingButtonNode()
-        
+        // VoiceOver: кнопка плашки — VO-элемент (через сборщик листьев
+        // навбара), без метки VO зачитывал бы описание класса.
+        self.tapButton.isAccessibilityElement = true
+        self.tapButton.accessibilityLabel = "Закреплённое сообщение"
+        self.tapButton.accessibilityHint = "Показать закреплённое сообщение"
+        self.tapButton.accessibilityTraits = .button
+
         self.buttonsContainer = ButtonsContainerNode()
         
         self.closeButton = HighlightableButtonNode()
         self.closeButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         self.closeButton.displaysAsynchronously = false
+        // VoiceOver: без метки крестик читался описанием класса.
+        self.closeButton.accessibilityLabel = "Скрыть закреплённое сообщение"
+        self.closeButton.accessibilityTraits = .button
         
         self.actionButton = HighlightableButtonNode()
         self.actionButton.isHidden = true

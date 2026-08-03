@@ -42,6 +42,7 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         didSet {
             if self.badge != oldValue {
                 self.layoutBadge()
+                self.accessibilityValue = self.badge
             }
         }
     }
@@ -79,7 +80,26 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         self.badgeTextNode.reverseAnimationDirection = true
         
         super.init()
-        
+
+        // VoiceOver: круглые кнопки навигации по истории (стрелка «в конец»,
+        // упоминания, реакции) не имели ни метки, ни трейтов — VO их вообще
+        // не видел. Элементом делаем внешний узел: его фрейм совпадает с
+        // видимой кнопкой, а isHidden/alpha при скрытии сами убирают его из
+        // дерева доступности. Активация — в override accessibilityActivate.
+        self.isAccessibilityElement = true
+        self.accessibilityTraits = .button
+        switch type {
+        case .down:
+            self.accessibilityLabel = "Перейти в конец"
+            self.accessibilityHint = "Последнее сообщение чата"
+        case .up:
+            self.accessibilityLabel = "Перейти к началу"
+        case .mentions:
+            self.accessibilityLabel = "Следующее упоминание"
+        case .reactions:
+            self.accessibilityLabel = "Следующая реакция"
+        }
+
         self.targetNodeForActivationProgress = self.buttonNode
         
         self.addSubnode(self.containerNode)
@@ -147,6 +167,14 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         if let tapped = self.tapped {
             tapped()
         }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard self.buttonNode.isEnabled, let tapped = self.tapped else {
+            return false
+        }
+        tapped()
+        return true
     }
     
     private var currentValue: Int = 0

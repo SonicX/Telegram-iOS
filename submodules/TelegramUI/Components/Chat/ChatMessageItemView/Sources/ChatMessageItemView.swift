@@ -806,9 +806,30 @@ open class ChatMessageItemView: ListViewItemNode, ChatMessageItemNodeProtocol {
     required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
     deinit {
         self.fetchEffectDisposable?.dispose()
+    }
+
+    // VoiceOver: в base-engine-режиме VO-элементом сообщения является сам
+    // узел (isAccessibilityElement = true, см. промоушен в
+    // ChatHistoryListNodeImpl.customAccessibilityElements), и его дефолтный
+    // accessibility-фрейм — ПОЛНЫЙ фрейм вьюшки. Сообщение, уехавшее под
+    // навбар (или под панель ввода), накрывало их своим фреймом, и касание
+    // кнопки «Назад» ставило курсор на сообщение. Обрезаем фрейм по цепочке
+    // AccessibilityClippingContainer (HistoryNodeContainer отдаёт видимую
+    // область ленты между навбаром и панелью ввода); полностью скрытое
+    // сообщение получает .zero и для касаний невидимо.
+    override open var accessibilityFrame: CGRect {
+        get {
+            guard self.isNodeLoaded, !self.isLayerBacked, self.view.window != nil else {
+                return super.accessibilityFrame
+            }
+            let rawFrame = UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view)
+            return clipAccessibilityFrameToContainers(rawFrame, for: self)
+        }
+        set {
+        }
     }
     
     override open func reuse() {

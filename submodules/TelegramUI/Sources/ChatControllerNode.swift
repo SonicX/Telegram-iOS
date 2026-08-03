@@ -862,7 +862,11 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
         
         self.navigateButtons = ChatHistoryNavigationButtons(theme: self.chatPresentationInterfaceState.theme, dateTimeFormat: self.chatPresentationInterfaceState.dateTimeFormat, backgroundNode: self.backgroundNode, isChatRotated: historyNodeRotated)
-        self.navigateButtons.accessibilityElementsHidden = true
+        // VoiceOver: раньше контейнер кнопок навигации прятался целиком
+        // (accessibilityElementsHidden = true) — у кнопок не было ни меток,
+        // ни трейтов, и VO читал их как безымянные элементы. Теперь кнопки —
+        // полноценные VO-элементы с метками («Перейти в конец» и др.,
+        // см. ChatHistoryNavigationButtonNode), скрывать контейнер нельзя.
 
         super.init()
 
@@ -870,7 +874,24 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             guard let self else {
                 return nil
             }
-            let rect = self.frameForVisibleArea()
+            var rect = self.frameForVisibleArea()
+            // Плавающие панели над чатом (закреп, перевод и т.п.) визуально
+            // накрывают верх ленты, но в инсеты видимой области не входят —
+            // без этой поправки VO-фреймы сообщений начинались сразу под
+            // навбаром и перехватывали касания плашки «Закреплённое
+            // сообщение». Опускаем верх клипа под видимые панели.
+            if self.titleAccessoryPanelContainer.isNodeLoaded {
+                for panel in self.titleAccessoryPanelContainer.subnodes ?? [] {
+                    guard !panel.isLayerBacked, panel.isNodeLoaded, !panel.isHidden, panel.alpha > 0.01 else {
+                        continue
+                    }
+                    let panelFrame = panel.view.convert(panel.view.bounds, to: self.view)
+                    if panelFrame.height > 1.0, panelFrame.maxY > rect.minY, panelFrame.minY < rect.minY + panelFrame.height {
+                        let newTop = min(max(rect.minY, panelFrame.maxY), rect.maxY)
+                        rect = CGRect(x: rect.minX, y: newTop, width: rect.width, height: max(0.0, rect.maxY - newTop))
+                    }
+                }
+            }
             guard rect.width > 1.0, rect.height > 1.0 else {
                 return nil
             }
@@ -995,8 +1016,44 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             guard let self else {
                 return false
             }
-            guard let focusedView = focusedObject as? UIView else {
+            let focusedView: UIView
+            if let view = focusedObject as? UIView {
+                focusedView = view
+            } else if let node = focusedObject as? ASDisplayNode, node.isNodeLoaded {
+                // Кнопки навбара попадают в accessibilityElements как сырые
+                // ноды — VoiceOver может отдать в фокус сам узел, не view.
+                focusedView = node.view
+            } else {
                 return false
+            }
+            // Навигационная панель (кнопка «Назад», аватар/кнопки справа) —
+            // осознанная цель пользователя: касание или свайп по навбару.
+            // Без этого гейта recovery в первые 1.5 с после ухода из ленты
+            // утаскивал курсор с «Назад» обратно на сообщение — как раньше
+            // с вкладками таб-бара. ЗАГОЛОВОК (titleView) сюда сознательно
+            // НЕ входит: на него iOS ошибочно бросает курсор при свайпе за
+            // новейшее сообщение, и forward-escape-редирект ниже должен
+            // по-прежнему уводить его на панель ввода.
+            if let navigationBar = self.navigationBar, focusedView.isDescendant(of: navigationBar.view) {
+                if let titleView = navigationBar.titleView, focusedView === titleView || focusedView.isDescendant(of: titleView) {
+                    // Заголовок — решают гейты ListView (редирект/recovery).
+                } else if !self.historyNode.accessibilityFocusWasRecentlyInList {
+                    // Осознанный уход в навбар (касание/свайпы по навбару спустя
+                    // паузу). ВАЖНО: если фокус был в ленте только что — это
+                    // iOS-овский «выпад» за нижний край при свайпе вперёд
+                    // (следующего элемента нет, VO заворачивает на «Назад») —
+                    // легитимным его считать НЕЛЬЗЯ, иначе forward-escape-
+                    // редирект на «Написать сообщение» и recovery не запустятся
+                    // и курсор застрянет в навбаре (регрессия 2026-08-03).
+                    return true
+                }
+            }
+            // Круглые кнопки навигации по истории («Перейти в конец»,
+            // упоминания, реакции) — теперь VoiceOver-элементы. Фокус на них
+            // легитимен: без этого recovery утаскивал бы курсор с кнопки
+            // обратно на сообщение в первые 1.5 с после ухода из ленты.
+            if self.navigateButtons.isNodeLoaded, focusedView.isDescendant(of: self.navigateButtons.view) {
+                return true
             }
             // Фокус на поле ввода или любом элементе тулбара (потомке панели)
             // считаем ЛЕГИТИМНЫМ — recovery не тащит курсор обратно в список.
@@ -1218,10 +1275,10 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.inlineSearchResultsReadyDisposable?.dispose()
         self.loadMoreSearchResultsDisposable?.dispose()
     }
-    
+
     override func didLoad() {
         super.didLoad()
-        
+
         let recognizer = WindowPanRecognizer(target: nil, action: nil)
         recognizer.cancelsTouchesInView = false
         recognizer.delaysTouchesBegan = false
