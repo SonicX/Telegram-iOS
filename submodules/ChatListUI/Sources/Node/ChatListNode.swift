@@ -1441,6 +1441,12 @@ public final class ChatListNode: ListView {
         
         self.keepMinimalScrollHeightWithTopInset = self.scrollHeightTopInset
 
+        // VoiceOver: список чатов лежит между навбаром и таббаром — выносим
+        // VO-фреймы строк из полос баров, иначе строки под полупрозрачным
+        // таббаром перехватывают касания вкладок и сбивают свайпы по табам
+        // (приоритет таббара в hit-test работает только на iOS 18+).
+        self.accessibilityShieldsBarBands = true
+
         self.accessibilityPageScrolledRangeString = { from, to, count in
             return "Переписки с \(from) по \(to) из \(count)"
         }

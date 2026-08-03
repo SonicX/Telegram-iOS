@@ -606,6 +606,27 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                             // Частично под навбаром — срезаем только верх.
                             frame = CGRect(x: frame.minX, y: poolClipFrame.minY, width: frame.width, height: frame.maxY - poolClipFrame.minY)
                         }
+                        // Нижняя кромка (панель ввода): частично скрытое —
+                        // срезаем, целиком лежащее под кромкой — выносим под
+                        // экран (реальный фрейм остаётся целью свайпа вперёд;
+                        // 2pt-полоски нельзя — VO их пропускает). Без этого
+                        // сообщения под панелью ввода перехватывали её
+                        // касания (приоритетный hit-test — только iOS 18+).
+                        if frame.minY >= poolClipFrame.maxY - 1.0 {
+                            let listScreenBottom = UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view).maxY
+                            frame = frame.offsetBy(dx: 0.0, dy: max(0.0, listScreenBottom - poolClipFrame.maxY))
+                        } else if frame.maxY > poolClipFrame.maxY + 1.0 {
+                            frame = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: poolClipFrame.maxY - frame.minY)
+                        }
+                    } else if self.accessibilityShieldsBarBands, !self.rotated {
+                        // Корневые списки (чаты/контакты): выносим фрейм из
+                        // полос навбара/таббара; заодно штампуем его на вьюшку
+                        // строки — VO хит-тестит и по сырым вьюшкам, их
+                        // неявные фреймы накрывали таббар.
+                        frame = self.accessibilityBarBandAdjustedFrame(frame)
+                        if itemNode.isNodeLoaded, !itemNode.isLayerBacked {
+                            ListView.accessibilitySetFrameIfChanged(itemNode.view, frame)
+                        }
                     }
                     element.accessibilityFrame = frame
                     element.accessibilityLabel = itemNode.accessibilityLabel
@@ -1699,6 +1720,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private func updateVisibleContentOffset() {
         self.visibleContentOffsetChanged(self.visibleContentOffset())
         self.visibleBottomContentOffsetChanged(self.visibleBottomContentOffset())
+        self.accessibilityRefreshBarBandFrames()
     }
     
     public func stopScrolling() {
@@ -5663,6 +5685,93 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// so the user can move from the last message onto the input (and the input
     /// raises the keyboard itself). Leave nil to always recover focus.
     public var accessibilityIsLegitimateFocusEscape: ((Any) -> Bool)?
+
+    /// Опт-ин для КОРНЕВЫХ списков (чаты/контакты), лежащих между навбаром и
+    /// таббаром: VO-фреймы строк выносятся из полос баров (частично
+    /// перекрывающие — обрезаются, целиком лежащие в полосе — сдвигаются за
+    /// экран, оставаясь целями свайпа), штампуются на вьюшки строк и
+    /// освежаются при каждом изменении оффсета. Без этого строки, уезжающие
+    /// под полупрозрачный таббар, перехватывали VO-касания вкладок (приоритет
+    /// таббара в accessibilityHitTest работает только на iOS 18+), а свайпы
+    /// по вкладкам сбивались на невидимые строки. Полосы берутся из insets
+    /// самого списка — на корневых экранах это навбар и таббар.
+    public var accessibilityShieldsBarBands: Bool = false
+    private var accessibilityLastBarBandPostTimestamp: CFTimeInterval = 0.0
+
+    private func accessibilityBarBandAdjustedFrame(_ frame: CGRect) -> CGRect {
+        guard !frame.isNull, frame.height > 0.0, frame.width > 0.0 else {
+            return frame
+        }
+        guard self.isNodeLoaded else {
+            return frame
+        }
+        let listScreenBounds = UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view)
+        guard !listScreenBounds.isNull, listScreenBounds.height > 1.0 else {
+            return frame
+        }
+        var result = frame
+        let topBandBottom = listScreenBounds.minY + self.insets.top
+        let bottomBandTop = listScreenBounds.maxY - self.insets.bottom
+        // Верхняя полоса (навбар).
+        if result.minY < topBandBottom {
+            if result.maxY > topBandBottom + 1.0 {
+                result = CGRect(x: result.minX, y: topBandBottom, width: result.width, height: result.maxY - topBandBottom)
+            } else {
+                // Целиком в полосе — вынести над экраном (цель обратного свайпа).
+                result = result.offsetBy(dx: 0.0, dy: listScreenBounds.minY - result.maxY)
+            }
+        }
+        // Нижняя полоса (таббар).
+        if result.maxY > bottomBandTop {
+            if result.minY < bottomBandTop - 1.0 {
+                result = CGRect(x: result.minX, y: result.minY, width: result.width, height: bottomBandTop - result.minY)
+            } else {
+                // Целиком в полосе — вынести под экран (цель свайпа вперёд).
+                result = result.offsetBy(dx: 0.0, dy: listScreenBounds.maxY - result.minY)
+            }
+        }
+        return result
+    }
+
+    @discardableResult
+    private static func accessibilitySetFrameIfChanged(_ view: UIView, _ newFrame: CGRect) -> Bool {
+        let currentFrame = view.accessibilityFrame
+        if abs(currentFrame.minX - newFrame.minX) > 0.5
+            || abs(currentFrame.minY - newFrame.minY) > 0.5
+            || abs(currentFrame.width - newFrame.width) > 0.5
+            || abs(currentFrame.height - newFrame.height) > 0.5 {
+            view.accessibilityFrame = newFrame
+            return true
+        }
+        return false
+    }
+
+    /// Рефреш проштампованных фреймов при скролле (для accessibilityShieldsBarBands):
+    /// без него штампы протухают и касания «проваливаются» — та же болезнь,
+    /// что была у истории чата. Инвалидация VO-дерева — только при реальном
+    /// изменении и не чаще раза в 100мс (анти-шторм).
+    private func accessibilityRefreshBarBandFrames() {
+        guard self.accessibilityShieldsBarBands, UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        var anyFrameChanged = false
+        self.forEachItemNode { node in
+            guard let itemNode = node as? ListViewItemNode, itemNode.isAccessibilityElement, itemNode.isNodeLoaded, !itemNode.isLayerBacked else {
+                return
+            }
+            let rawFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
+            if ListView.accessibilitySetFrameIfChanged(itemNode.view, self.accessibilityBarBandAdjustedFrame(rawFrame)) {
+                anyFrameChanged = true
+            }
+        }
+        if anyFrameChanged {
+            let now = CACurrentMediaTime()
+            if now - self.accessibilityLastBarBandPostTimestamp >= 0.1 {
+                self.accessibilityLastBarBandPostTimestamp = now
+                UIAccessibility.post(notification: .layoutChanged, argument: nil)
+            }
+        }
+    }
 
     /// Был ли VO-фокус внутри списка в последние 1.5 с (тот же порог, что у
     /// recovery). Нужен хосту (ChatControllerNode) в классификаторе

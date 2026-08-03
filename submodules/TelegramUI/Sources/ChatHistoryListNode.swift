@@ -1842,11 +1842,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     private func voRefreshPromotedAccessibilityFrames() -> Bool {
         guard UIAccessibility.isVoiceOverRunning else { return false }
         guard let clip = self.accessibilityClippingFrameInScreenCoordinates() else { return false }
+        let listScreenBottom = UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view).maxY
         var anyFrameChanged = false
         self.forEachItemNode { node in
             guard let itemNode = node as? ListViewItemNode, itemNode.isAccessibilityElement, itemNode.isNodeLoaded else { return }
             let rawFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
-            let newFrame = ChatHistoryListNodeImpl.voClipFrameTopOnly(rawFrame, clip: clip)
+            let newFrame = ChatHistoryListNodeImpl.voClipFrameToVisibleBand(rawFrame, clip: clip, screenBottom: listScreenBottom)
             if ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, newFrame) {
                 anyFrameChanged = true
             }
@@ -1854,23 +1855,36 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         return anyFrameChanged
     }
 
-    /// Обрезка VO-фрейма сообщения ТОЛЬКО СВЕРХУ (по кромке навбара).
-    /// Сверху обрезаем — иначе сообщения под навбаром перехватывают касания
-    /// «Назад»/заголовка. Снизу НЕ обрезаем: реальные фреймы ниже вьюпорта —
-    /// цели свайпа вперёд (как в списке чатов, где свайп «бесконечен»);
-    /// симметричная обрезка ломала переход к следующему сообщению у нижнего
-    /// края (курсор выпадал в навбар). Целиком скрытое сверху — .zero.
-    fileprivate static func voClipFrameTopOnly(_ frame: CGRect, clip: CGRect) -> CGRect {
+    /// Обрезка/вынос VO-фрейма сообщения по кромкам видимой области.
+    /// СВЕРХУ — обрезка по навбару/плашкам (иначе сообщения перехватывают
+    /// касания «Назад»/заголовка); целиком скрытое сверху — .zero.
+    /// СНИЗУ — сообщения, частично скрытые панелью ввода, обрезаются по её
+    /// кромке, а целиком лежащие под ней СДВИГАЮТСЯ ПОД ЭКРАН (screenBottom):
+    /// фрейм остаётся реальным и целью свайпа вперёд (в 2pt-полоски
+    /// схлопывать нельзя — VO их пропускает и курсор выпадал в навбар), но
+    /// больше не накрывает панель ввода — её касания работали только на
+    /// iOS 18+ с приоритетным hit-test'ом.
+    fileprivate static func voClipFrameToVisibleBand(_ frame: CGRect, clip: CGRect, screenBottom: CGFloat) -> CGRect {
         if frame.isNull || frame.width <= 1.0 || frame.height <= 1.0 {
             return .zero
         }
         if frame.maxY <= clip.minY + 1.0 {
             return .zero
         }
-        if frame.minY < clip.minY {
-            return CGRect(x: frame.minX, y: clip.minY, width: frame.width, height: frame.maxY - clip.minY)
+        var result = frame
+        if result.minY < clip.minY {
+            result = CGRect(x: result.minX, y: clip.minY, width: result.width, height: result.maxY - clip.minY)
         }
-        return frame
+        if result.minY >= clip.maxY - 1.0 {
+            // Целиком под нижней кромкой (зона панели ввода) — вынести под
+            // экран, сохранив взаимный порядок фреймов.
+            let panelBandShift = max(0.0, screenBottom - clip.maxY)
+            result = result.offsetBy(dx: 0.0, dy: panelBandShift)
+        } else if result.maxY > clip.maxY + 1.0 {
+            // Частично под панелью ввода — срезаем низ.
+            result = CGRect(x: result.minX, y: result.minY, width: result.width, height: clip.maxY - result.minY)
+        }
+        return result
     }
 
     /// Пишет accessibilityFrame только при реальном изменении (>0.5pt).
@@ -2215,7 +2229,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     // .zero и для касаний невидим (как и обрезанные пуловые
                     // элементы массива).
                     let voRawScreenFrame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
-                    ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameTopOnly(voRawScreenFrame, clip: visibleScreenRect))
+                    ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameToVisibleBand(voRawScreenFrame, clip: visibleScreenRect, screenBottom: UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view).maxY))
                     ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
                     self.voPromotedItemNodes.add(itemNode)
                     voPromotedCount += 1
@@ -2495,7 +2509,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     itemNode.view.accessibilityCustomActions = payload.customActions
                     // См. комментарий в experiment-ветке: обрезка только сверху
                     // (навбар), снизу фрейм остаётся реальным — цель свайпа.
-                    ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameTopOnly(realFrame, clip: synthClip))
+                    ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameToVisibleBand(realFrame, clip: synthClip, screenBottom: UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view).maxY))
                     ChatHistoryListNodeImpl.suppressCompetingLeaves(in: itemNode, isRoot: true)
                     self.voPromotedItemNodes.add(itemNode)
                 }

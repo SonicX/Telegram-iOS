@@ -1256,6 +1256,9 @@ public final class ContactListNode: ASDisplayNode {
         
         self.listNode = ListView()
         self.listNode.dynamicBounceEnabled = false
+        // VoiceOver: корневой список контактов лежит под таббаром — выносим
+        // VO-фреймы строк из полос баров (см. accessibilityShieldsBarBands).
+        self.listNode.accessibilityShieldsBarBands = true
         self.listNode.accessibilityPageScrolledString = { row, count in
             return presentationData.strings.VoiceOver_ScrollStatus(row, count).string
         }
