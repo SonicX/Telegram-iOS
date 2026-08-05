@@ -1871,9 +1871,21 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         if frame.maxY <= clip.minY + 1.0 {
             return .zero
         }
+        // Минимальная шагабельная высота: VoiceOver пробует ровно ОДИН
+        // следующий элемент при свайпе; полоска тоньше ~16pt отвергается, и
+        // курсор выпадает из контейнера в навбар (урок band-обрезки списка
+        // чатов). После высокого сообщения следующее часто выглядывает из-под
+        // панели ввода на 10-20pt — гарантируем 24pt даже ценой захода фрейма
+        // в полосу панели/навбара на несколько pt.
+        let minTargetHeight: CGFloat = 24.0
         var result = frame
         if result.minY < clip.minY {
-            result = CGRect(x: result.minX, y: clip.minY, width: result.width, height: result.maxY - clip.minY)
+            let clippedTop = CGRect(x: result.minX, y: clip.minY, width: result.width, height: result.maxY - clip.minY)
+            if clippedTop.height < minTargetHeight {
+                result = CGRect(x: clippedTop.minX, y: clippedTop.maxY - minTargetHeight, width: clippedTop.width, height: minTargetHeight)
+            } else {
+                result = clippedTop
+            }
         }
         if result.minY >= clip.maxY - 1.0 {
             // Целиком под нижней кромкой (зона панели ввода) — вынести под
@@ -1881,8 +1893,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             let panelBandShift = max(0.0, screenBottom - clip.maxY)
             result = result.offsetBy(dx: 0.0, dy: panelBandShift)
         } else if result.maxY > clip.maxY + 1.0 {
-            // Частично под панелью ввода — срезаем низ.
-            result = CGRect(x: result.minX, y: result.minY, width: result.width, height: clip.maxY - result.minY)
+            // Частично под панелью ввода — срезаем низ (не тоньше 24pt).
+            // Пробовали НЕ обрезать низ высоких сообщений (смежность фреймов,
+            // раунд 9) — wrap при свайпе это не убрало, а гигантский фрейм
+            // (1869pt) давал «тонкую рамку» курсора на весь экран и накрывал
+            // панель ввода. Возвращена обрезка для всех.
+            result = CGRect(x: result.minX, y: result.minY, width: result.width, height: max(minTargetHeight, clip.maxY - result.minY))
         }
         return result
     }

@@ -603,8 +603,13 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                             // задаётся порядком массива).
                             frame = CGRect(x: poolClipFrame.minX, y: poolClipFrame.minY, width: poolClipFrame.width, height: 2.0)
                         } else if frame.minY < poolClipFrame.minY {
-                            // Частично под навбаром — срезаем только верх.
+                            // Частично под навбаром — срезаем только верх
+                            // (не тоньше 24pt: полоски VO отвергает, свайп
+                            // выпадает из контейнера).
                             frame = CGRect(x: frame.minX, y: poolClipFrame.minY, width: frame.width, height: frame.maxY - poolClipFrame.minY)
+                            if frame.height < 24.0 {
+                                frame = CGRect(x: frame.minX, y: frame.maxY - 24.0, width: frame.width, height: 24.0)
+                            }
                         }
                         // Нижняя кромка (панель ввода): частично скрытое —
                         // срезаем, целиком лежащее под кромкой — выносим под
@@ -616,7 +621,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                             let listScreenBottom = UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view).maxY
                             frame = frame.offsetBy(dx: 0.0, dy: max(0.0, listScreenBottom - poolClipFrame.maxY))
                         } else if frame.maxY > poolClipFrame.maxY + 1.0 {
-                            frame = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: poolClipFrame.maxY - frame.minY)
+                            // Не тоньше 24pt — после высокого сообщения
+                            // следующее выглядывает из-под панели на 10-20pt,
+                            // и VO отказывался на него шагать (см. урок
+                            // band-обрезки списка чатов). Отказ от обрезки
+                            // высоких (раунд 9) wrap не убрал — откатили.
+                            frame = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: max(24.0, poolClipFrame.maxY - frame.minY))
                         }
                     } else if self.accessibilityShieldsBarBands, !self.rotated {
                         // Корневые списки (чаты/контакты): выносим фрейм из
@@ -734,17 +744,20 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
 
     override public init() {
+        // ВРЕМЕННО: установка глобального принтера VO-фокуса (one-shot).
+        _ = ListView.voDiagInstallGlobalFocusPrinter
+
         class DisplayLinkProxy: NSObject {
             weak var target: ListView?
             init(target: ListView) {
                 self.target = target
             }
-            
+
             @objc func displayLinkEvent() {
                 self.target?.displayLinkEvent()
             }
         }
-        
+
         self.transactionQueue = ListViewTransactionQueue()
         
         self.scroller = ListViewScroller()
@@ -776,6 +789,16 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.view.addSubview(self.scroller)
         self.scroller.panGestureRecognizer.cancelsTouchesInView = true
         self.view.addGestureRecognizer(self.scroller.panGestureRecognizer)
+        // Нативный «подскролл к сфокусированному» глушим только там, где
+        // скроллом при VoiceOver управляет наша машинерия: список чатов с
+        // band-полосами и история чата (directional-пул). Обычные списки
+        // (настройки и т.п.) не трогаем.
+        self.scroller.voSuppressScrollRectToVisible = { [weak self] in
+            guard let self, UIAccessibility.isVoiceOverRunning else {
+                return false
+            }
+            return self.accessibilityShieldsBarBands || self.accessibilityDirectionalAnnouncement != nil
+        }
                 
         let trackingRecognizer = UIPanGestureRecognizer(target: self, action: #selector(self.trackingGesture(_:)))
         trackingRecognizer.delegate = self.wrappedGestureRecognizerDelegate
@@ -1717,8 +1740,44 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return offset
     }
     
+    private var voDiagLastKnownOffset: CGFloat?
+    private var accessibilityCorrectiveScrollInProgress = false
+
     private func updateVisibleContentOffset() {
-        self.visibleContentOffsetChanged(self.visibleContentOffset())
+        let offset = self.visibleContentOffset()
+        // ВРЕМЕННАЯ диагностика: резкие прыжки оффсета корневого списка
+        // (поиск виновника сдвига скролла при возврате из чата).
+        if self.accessibilityShieldsBarBands, UIAccessibility.isVoiceOverRunning {
+            if case let .known(value) = offset {
+                if let last = self.voDiagLastKnownOffset, abs(value - last) > 50.0 {
+                    print("[VO-DIAG][SCROLL] offset-jump from=\(Int(last)) to=\(Int(value)) tracking=\(self.scroller.isTracking) decel=\(self.scroller.isDecelerating) suspended=\(self.accessibilityFocusHandlingSuspended)")
+                    // Snap-back: пока список «в отставке» (открывается чат),
+                    // резкий сдвиг не от пальца — это нативный AX-скролл iOS
+                    // к сфокусированной за-вьюпортной вьюшке (он идёт мимо
+                    // scrollRectToVisible — перехват его не ловит). Кто бы
+                    // ни сдвинул — откатываем на прежний оффсет, чтобы после
+                    // возврата из чата список стоял где стоял.
+                    if self.accessibilityFocusHandlingSuspended,
+                       !self.scroller.isTracking, !self.scroller.isDecelerating,
+                       !self.accessibilityCorrectiveScrollInProgress {
+                        let delta = last - value
+                        self.accessibilityCorrectiveScrollInProgress = true
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else {
+                                return
+                            }
+                            if self.accessibilityFocusHandlingSuspended {
+                                let _ = self.scrollWithDirection(delta > 0.0 ? .down : .up, distance: abs(delta), postScrollStatus: false)
+                                print("[VO-DIAG][SCROLL] corrective-snapback delta=\(Int(delta))")
+                            }
+                            self.accessibilityCorrectiveScrollInProgress = false
+                        }
+                    }
+                }
+                self.voDiagLastKnownOffset = value
+            }
+        }
+        self.visibleContentOffsetChanged(offset)
         self.visibleBottomContentOffsetChanged(self.visibleBottomContentOffset())
         self.accessibilityRefreshBarBandFrames()
     }
@@ -5686,6 +5745,34 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// raises the keyboard itself). Leave nil to always recover focus.
     public var accessibilityIsLegitimateFocusEscape: ((Any) -> Bool)?
 
+    // ВРЕМЕННАЯ VO-диагностика: печать каждого перехода фокуса (глобальный
+    // observer, ставится один раз при первом didLoad любого ListView).
+    // Убрать после стабилизации списка чатов.
+    static let voDiagInstallGlobalFocusPrinter: Void = {
+        NotificationCenter.default.addObserver(forName: UIAccessibility.elementFocusedNotification, object: nil, queue: .main) { notification in
+            let focused = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey]
+            let typeName = focused.map { String(describing: type(of: $0)) } ?? "nil"
+            var label = "-"
+            var frameString = "null"
+            if let nsObject = focused as? NSObject {
+                if let view = nsObject as? UIView {
+                    label = view.accessibilityLabel ?? "-"
+                    let frame = view.isAccessibilityElement ? view.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+                    if !frame.isNull {
+                        frameString = "(\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))"
+                    }
+                } else {
+                    label = nsObject.accessibilityLabel ?? "-"
+                    let frame = nsObject.accessibilityFrame
+                    if !frame.isNull {
+                        frameString = "(\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))"
+                    }
+                }
+            }
+            print("[VO-DIAG] focus → type=\(typeName) label=«\(String(label.prefix(48)))» frame=\(frameString)")
+        }
+    }()
+
     /// Опт-ин для КОРНЕВЫХ списков (чаты/контакты), лежащих между навбаром и
     /// таббаром: VO-фреймы строк выносятся из полос баров (частично
     /// перекрывающие — обрезаются, целиком лежащие в полосе — сдвигаются за
@@ -5696,7 +5783,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// по вкладкам сбивались на невидимые строки. Полосы берутся из insets
     /// самого списка — на корневых экранах это навбар и таббар.
     public var accessibilityShieldsBarBands: Bool = false
-    private var accessibilityLastBarBandPostTimestamp: CFTimeInterval = 0.0
+    private var accessibilityBarBandPostGeneration: UInt64 = 0
 
     private func accessibilityBarBandAdjustedFrame(_ frame: CGRect) -> CGRect {
         guard !frame.isNull, frame.height > 0.0, frame.width > 0.0 else {
@@ -5712,23 +5799,40 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         var result = frame
         let topBandBottom = listScreenBounds.minY + self.insets.top
         let bottomBandTop = listScreenBounds.maxY - self.insets.bottom
+        // Минимальная высота цели: VO пробует ровно ОДИН следующий элемент и,
+        // если тот слишком мал, не идёт дальше по массиву, а выпадает из
+        // контейнера в навбар (по логам: 19pt ещё шагабельно, 15pt — уже нет).
+        // Обрезка не должна порождать «огрызки» меньше этого порога, даже
+        // ценой захода фрейма на несколько пикселей в полосу бара.
+        let minTargetHeight: CGFloat = 24.0
         // Верхняя полоса (навбар).
         if result.minY < topBandBottom {
             if result.maxY > topBandBottom + 1.0 {
-                result = CGRect(x: result.minX, y: topBandBottom, width: result.width, height: result.maxY - topBandBottom)
-            } else {
-                // Целиком в полосе — вынести над экраном (цель обратного свайпа).
-                result = result.offsetBy(dx: 0.0, dy: listScreenBounds.minY - result.maxY)
+                let clippedHeight = max(result.maxY - topBandBottom, minTargetHeight)
+                result = CGRect(x: result.minX, y: result.maxY - clippedHeight, width: result.width, height: clippedHeight)
+            } else if result.maxY > listScreenBounds.minY {
+                // Целиком в полосе (на экране) — компактная полоса, заходящая
+                // в НИЗ полосы навбара: ВЫШЕ обрезанной частично-видимой
+                // строки (иначе инверсия порядка — VO «перепрыгивает» её),
+                // на экране и шагабельно. Вынос за экран ломал обратный свайп.
+                result = CGRect(x: result.minX, y: topBandBottom - minTargetHeight, width: result.width, height: minTargetHeight)
             }
+            // Целиком выше экрана — сырые координаты (шагабельно по массиву).
         }
         // Нижняя полоса (таббар).
         if result.maxY > bottomBandTop {
             if result.minY < bottomBandTop - 1.0 {
-                result = CGRect(x: result.minX, y: result.minY, width: result.width, height: bottomBandTop - result.minY)
-            } else {
-                // Целиком в полосе — вынести под экран (цель свайпа вперёд).
-                result = result.offsetBy(dx: 0.0, dy: listScreenBounds.maxY - result.minY)
+                let clippedHeight = max(bottomBandTop - result.minY, minTargetHeight)
+                result = CGRect(x: result.minX, y: result.minY, width: result.width, height: clippedHeight)
+            } else if result.minY < listScreenBounds.maxY {
+                // Целиком в полосе (на экране) — компактная полоса, заходящая
+                // в ВЕРХ полосы таббара: НИЖЕ обрезанной частично-видимой
+                // строки (полоса над баром давала инверсию порядка — VO
+                // «перепрыгивал» соседа), шагабельно, сами табы не накрывает.
+                // Вынос за экран ломал свайп вперёд (улёт в навбар).
+                result = CGRect(x: result.minX, y: bottomBandTop, width: result.width, height: minTargetHeight)
             }
+            // Целиком ниже экрана — сырые координаты (шагабельно по массиву).
         }
         return result
     }
@@ -5765,9 +5869,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
         if anyFrameChanged {
-            let now = CACurrentMediaTime()
-            if now - self.accessibilityLastBarBandPostTimestamp >= 0.1 {
-                self.accessibilityLastBarBandPostTimestamp = now
+            // ДЕБАУНС вместо троттлинга: инвалидация VO-дерева — только после
+            // успокоения скролла (250мс без изменений). Пост layoutChanged(nil)
+            // ВО ВРЕМЯ скролла заставлял VO перечитывать дерево посреди свайпа,
+            // терять фокус и ре-анкорить курсор в навбар (симптом «на списке
+            // чатов курсор улетел в навбар у края» — тот же механизм, что
+            // «нагрев+улёт» в чате на итерации 5).
+            self.accessibilityBarBandPostGeneration &+= 1
+            let generation = self.accessibilityBarBandPostGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self, self.accessibilityBarBandPostGeneration == generation else {
+                    return
+                }
+                guard UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
                 UIAccessibility.post(notification: .layoutChanged, argument: nil)
             }
         }
@@ -5804,12 +5920,89 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// legitimately and must be left untouched.
     private var accessibilityLastFocusedScreenMidY: CGFloat?
     private var accessibilityLastInListFocusAtTrailingEdge = false
+    private var accessibilityFocusIsCurrentlyInList = false
+    /// Экранная высота последнего сфокусированного В СПИСКЕ элемента.
+    /// Нужна для гейта «побег с высокого сообщения»: когда сообщение занимает
+    /// почти весь вьюпорт, VoiceOver при свайпе вперёд не находит следующего
+    /// шагабельного элемента и «выпадает» в навбар — такой уход нельзя
+    /// считать осознанным, сколько бы пользователь ни слушал сообщение.
+    private var accessibilityLastInListFocusHeight: CGFloat = 0.0
+    /// Пришёл ли последний уход фокуса из списка НАПРЯМУЮ с элемента списка
+    /// (а не после блужданий по навбару). Выставляется в момент ухода;
+    /// публично читается хостом (ChatControllerNode) в предикате
+    /// `accessibilityIsLegitimateFocusEscape`.
+    public private(set) var accessibilityLastEscapeCameDirectlyFromList = false
+    /// Был ли последний in-list фокус на ПОСЛЕДНЕМ элементе массива.
+    public var accessibilityLastInListFocusWasAtTrailingEdge: Bool {
+        return self.accessibilityLastInListFocusAtTrailingEdge
+    }
+    /// Последний in-list фокус стоял на элементе высотой ≥70% видимой области
+    /// (сообщение «не влазит на экран»). См. accessibilityLastInListFocusHeight.
+    public var accessibilityLastInListFocusWasTallAsScreen: Bool {
+        guard let clip = self.accessibilityClippingFrameInScreenCoordinates(), clip.height > 0.0 else {
+            return false
+        }
+        return self.accessibilityLastInListFocusHeight >= clip.height * 0.7
+    }
 
     /// When true, this list ignores VoiceOver focus notifications entirely.
     /// Set by a controller that is leaving the screen (e.g. the chat list while
     /// pushing into a chat) so its still-in-window list doesn't fight the
     /// incoming screen for the cursor. Cleared when it becomes topmost again.
-    public var accessibilityFocusHandlingSuspended: Bool = false
+    ///
+    /// Дополнительно прячем ВСЁ поддерево списка от VoiceOver
+    /// (`accessibilityElementsHidden`): одного отключения нашей машинерии
+    /// мало — VO находит «сырые» вьюшки строк со штампованными band-фреймами,
+    /// фокусирует их (лог: фокус на _ASDisplayView чужого чата, пока чат
+    /// грузится), и iOS нативно подкручивает список к сфокусированной
+    /// вьюшке — offset уезжал на сотни pt, и после возврата из чата курсор
+    /// вставал на другой чат. Страховка от «залипшего» флага (push сорвался
+    /// по guard'у — список остался бы глухим): через 10с скрытие снимается
+    /// само; подавление самой focus-машинерии остаётся под флагом.
+    public var accessibilityFocusHandlingSuspended: Bool = false {
+        didSet {
+            guard self.accessibilityFocusHandlingSuspended != oldValue, self.isNodeLoaded else {
+                return
+            }
+            self.accessibilitySuspendHideGeneration &+= 1
+            if self.accessibilityFocusHandlingSuspended {
+                self.view.accessibilityElementsHidden = true
+                // Одного скрытия МАЛО: VoiceOver ходит по КЭШу дерева и
+                // спокойно фокусирует спрятанные строки (repro-лог: фокус на
+                // строке при suspended=true и нативный сдвиг списка следом).
+                // Инвалидируем снапшот, чтобы скрытие вступило в силу сразу.
+                // Только для shields-списков (список чатов/контактов): у
+                // истории чата suspend ставится при открытии контекстного
+                // меню, и layoutChanged(nil) там гонял бы курсор наперекор
+                // тонко настроенным фокус-постам самого меню.
+                if self.accessibilityShieldsBarBands, UIAccessibility.isVoiceOverRunning {
+                    UIAccessibility.post(notification: .layoutChanged, argument: nil)
+                }
+                let generation = self.accessibilitySuspendHideGeneration
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+                    guard let self, self.accessibilitySuspendHideGeneration == generation else {
+                        return
+                    }
+                    if self.isNodeLoaded, self.view.accessibilityElementsHidden {
+                        self.view.accessibilityElementsHidden = false
+                        print("[VO-DIAG] suspend-hide-timeout-unhide")
+                    }
+                }
+            } else {
+                self.view.accessibilityElementsHidden = false
+                // Симметричная инвалидация: к моменту восстановления курсора
+                // после pop строки снова должны быть в дереве VoiceOver.
+                if self.accessibilityShieldsBarBands, UIAccessibility.isVoiceOverRunning {
+                    UIAccessibility.post(notification: .layoutChanged, argument: nil)
+                }
+            }
+        }
+    }
+    private var accessibilitySuspendHideGeneration: UInt64 = 0
+    // Рефрактерный учёт scrollVoiceOverFocusToItem: последний индекс и время,
+    // когда к нему реально скроллили (см. гейт в самом методе).
+    private var accessibilityLastFocusScrollIndex: Int?
+    private var accessibilityLastFocusScrollTimestamp: CFTimeInterval = 0.0
 
     /// Subclass hook for vetoing the off-screen-uiview scroll path in
     /// `handleSystemAccessibilityFocusNotification`. Default: allow.
@@ -5989,7 +6182,37 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // source view is a descendant of the list, so checking the view
             // hierarchy first never misclassifies a real list item.
             voAccessibilityLog("[VO-STATE] focus-handler-skip reason=focus-left-list type=\(type(of: focusedAny))")
-            self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list")
+            // Пришёл ли этот побег НАПРЯМУЮ из списка (предыдущий фокус был на
+            // элементе списка). Отличает wrap/выпад при свайпе от блужданий по
+            // навбару: во втором случае предыдущий фокус уже был вне списка.
+            let escapeCameDirectlyFromList = self.accessibilityFocusIsCurrentlyInList
+            self.accessibilityFocusIsCurrentlyInList = false
+            self.accessibilityLastEscapeCameDirectlyFromList = escapeCameDirectlyFromList
+            // Быстрый «досвайп» за высокое сообщение БЕЗ дебаунса: wrap в
+            // навбар с элемента выше вьюпорта неизбежен и однозначен, а
+            // отложенная на 0.12с проверка + 0.25с пост давали слышимый
+            // «транзит» через «Назад». Легитимные цели (панель ввода, плашки,
+            // таб-бар) пропускаем вперёд — ими займётся обычная проверка.
+            if escapeCameDirectlyFromList,
+               self.accessibilityLastInListFocusWasTallAsScreen,
+               !self.accessibilityLastInListFocusAtTrailingEdge,
+               self.accessibilityIsLegitimateFocusEscape?(focusedAny) != true,
+               !self.isAccessibilityObjectInsideTabBar(focusedAny),
+               let lastIndex = self.accessibilityLastSystemFocusedIndex {
+                // Отменяем висящие отложенные проверки: иначе через 0.12с
+                // они запустили бы ВТОРОЙ advance (перескок через сообщение).
+                self.accessibilityFocusContainmentCheckToken &+= 1
+                print("[VO-DIAG][CC] fast-tall-advance from=\(lastIndex)")
+                // Озвучку «Назад» при транзите глушили двумя способами —
+                // обычное announcement встаёт в очередь и произносится
+                // буквально («пробел»), прерывающее (queueAnnouncement=false,
+                // невидимый символ) на iOS 16 речь не оборвало и добавляло
+                // лишний звук. Оба убраны: короткий транзит через «Назад»
+                // принят как цена перехода (решение пользователя 2026-08-05).
+                self.advanceAccessibilityFocusPastTallItem(fromArrayIndex: lastIndex, reason: "fast-tall-wrap")
+                return
+            }
+            self.scheduleAccessibilityFocusContainmentCheck(reason: "system-focus-left-list", cameDirectlyFromList: escapeCameDirectlyFromList)
             return
         }
         // Фокус ВНУТРИ списка: обновляем признаки «фокус был в ленте» СРАЗУ,
@@ -6001,6 +6224,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // курсор застревал на «Назад».
         if let focusedAny {
             self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
+            self.accessibilityFocusIsCurrentlyInList = true
             var earlyFocusedFrame = CGRect.null
             if let focusedView = focusedAny as? UIView {
                 earlyFocusedFrame = UIAccessibility.convertToScreenCoordinates(focusedView.bounds, in: focusedView)
@@ -6009,6 +6233,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             if !earlyFocusedFrame.isNull {
                 self.accessibilityLastFocusedScreenMidY = earlyFocusedFrame.midY
+                self.accessibilityLastInListFocusHeight = earlyFocusedFrame.height
             }
         }
         if let focusedView = focusedAny as? UIView,
@@ -6579,6 +6804,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // forward without the user swiping. Letting VoiceOver follow
         // its own focused instance keeps one swipe == one item, which
         // is what the user expects.
+        print("[VO-DIAG][SCROLL] boundary-edge-scroll dir=\(voStep)")
         let scrolled = self.performAccessibilityEdgeScroll(voDirection: voStep)
         _ = focusedStableKey
         _ = focusedFrame
@@ -6734,6 +6960,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         voAccessibilityLog("[VO-STATE] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance))\(wasCapped ? " (capped from \(Int(rawDistance)))" : "") elementY=[\(Int(screenFrame.minY))..\(Int(screenFrame.maxY))] elementH=\(Int(screenFrame.height)) clipY=[\(Int(clipFrame.minY))..\(Int(clipFrame.maxY))] clipH=\(Int(clipHeight)) tallerThanClip=\(elementTallerThanClip)")
 
         self.accessibilityEdgeScrollPending = true
+        print("[VO-DIAG][SCROLL] scroll-focus-into-view direction=\(scrollDirection) distance=\(Int(distance))")
         // Suppress the "focus is offscreen" hot-path for a short window: the
         // programmatic scroll we are about to issue will itself generate a
         // focus notification (VoiceOver re-reports the element at its new
@@ -6807,6 +7034,92 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return false
     }
 
+    /// «Досвайп» за высокое сообщение: VoiceOver при свайпе вперёд с элемента
+    /// выше вьюпорта не находит смежного следующего (тот за мёртвым разрывом
+    /// обрезанного клипом фрейма) и выпадает в навбар. Здесь мы доделываем
+    /// работу свайпа: скроллим СЛЕДУЮЩИЙ элемент в видимость (тем же
+    /// механизмом, что в списке чатов) и после оседания транзакции ставим на
+    /// него курсор. Пул FocusTrackingAccessibilityElement сохраняет
+    /// идентичность элемента через скролл — фокус-пост попадает в цель.
+    private var accessibilityLastTallAdvanceTimestamp: CFTimeInterval = 0.0
+
+    private func advanceAccessibilityFocusPastTallItem(fromArrayIndex: Int, reason: String) {
+        guard !self.accessibilityRecoveryInProgress else {
+            return
+        }
+        // VoiceOver шлёт фокус-уведомления пачками (вьюшка + прокси) — без
+        // гейта один свайп давал бы ДВА advance и перескок через сообщение.
+        guard CACurrentMediaTime() - self.accessibilityLastTallAdvanceTimestamp > 0.5 else {
+            return
+        }
+        self.accessibilityLastTallAdvanceTimestamp = CACurrentMediaTime()
+        guard let elementsAny = self.customAccessibilityElements(), !elementsAny.isEmpty else {
+            self.recoverAccessibilityFocusToList(aroundIndex: fromArrayIndex, reason: reason)
+            return
+        }
+        let nextIndex = fromArrayIndex + 1
+        guard nextIndex < elementsAny.count, let targetElement = elementsAny[nextIndex] as? NSObject else {
+            // Следующего нет (край буфера) — обычное восстановление.
+            self.recoverAccessibilityFocusToList(aroundIndex: fromArrayIndex, reason: reason)
+            return
+        }
+        if let trackedElement = targetElement as? FocusTrackingAccessibilityElement, let pinned = trackedElement.pinnedLocalIndex {
+            self.scrollVoiceOverFocusToItem(at: pinned)
+        }
+        print("[VO-DIAG][CC] tall-advance-post next=\(nextIndex) label=«\(String((targetElement.accessibilityLabel ?? "-").prefix(24)))»")
+        // Пост через 0.1с — после оседания транзакции подскролла и ВНЕ
+        // обработчика фокус-уведомления (синхронный пост и пост следующим
+        // тиком ломали жестовое состояние VO: цель объявлялась, но свайпы
+        // «умирали» до тапа; 0.1с из раундов 7-8 жесты не ломал).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak targetElement] in
+            guard let self, let targetElement, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            // Рефреш пула: после подскролла фреймы протухают (лог: пост в
+            // элемент на y=1175 за экраном).
+            let _ = self.customAccessibilityElements()
+            // Букинг индекса/сигнатуры КАК В RECOVERY. Без него учёт в
+            // handleSystemAccessibilityFocusNotification срывался на churn'е,
+            // индекс протухал, и следующий wrap вёл на то же сообщение.
+            self.accessibilityLastSystemFocusedIndex = nextIndex
+            if let element = targetElement as? UIAccessibilityElement {
+                self.accessibilityLastSystemFocusedSignature = self.accessibilityDebugStableKey(
+                    from: (
+                        identifier: element.accessibilityIdentifier ?? "",
+                        label: element.accessibilityLabel ?? "",
+                        value: element.accessibilityValue ?? "",
+                        traits: UInt64(element.accessibilityTraits.rawValue),
+                        frame: element.accessibilityFrame,
+                        kind: "UIAccessibilityElement"
+                    )
+                )
+            }
+            // Пост — в САМУ ВЬЮШКУ сообщения, не в пуловый прокси. Улика
+            // пользователя: после поста в прокси рамка курсора ТОНКАЯ и
+            // свайпы мертвы, а после тапа (фокус на _ASDisplayView) рамка
+            // жирная и свайпы живут. Делаем то же, что делает тап.
+            let postTarget: NSObject
+            if let focusTarget = targetElement as? FocusTrackingAccessibilityElement, let sourceView = focusTarget.sourceView {
+                self.accessibilityLastSystemFocusedSourceViewIdentifier = ObjectIdentifier(sourceView)
+                postTarget = sourceView
+            } else {
+                self.accessibilityLastSystemFocusedSourceViewIdentifier = nil
+                postTarget = targetElement
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: postTarget)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak postTarget] in
+                guard let self, let postTarget, UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
+                if let focused = UIAccessibility.focusedElement(using: nil), self.isAccessibilityObjectInsideCurrentListSequence(focused) {
+                    return
+                }
+                print("[VO-DIAG][CC] tall-advance-repost")
+                UIAccessibility.post(notification: .layoutChanged, argument: postTarget)
+            }
+        }
+    }
+
     private func recoverAccessibilityFocusToList(aroundIndex: Int?, reason: String) {
         guard !self.accessibilityRecoveryInProgress else {
             return
@@ -6846,6 +7159,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 aroundIndex: aroundIndex,
                 candidateStableKeys: candidateStableKeys
             ) else {
+                print("[VO-DIAG][CC] recover-skip=no-target aroundIndex=\(String(describing: aroundIndex)) candidates=\(candidateStableKeys.count)")
                 return
             }
             let targetElement = elements[targetIndex]
@@ -6865,11 +7179,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 self.accessibilityLastSystemFocusedSourceViewIdentifier = nil
             }
             voDebugLog("[VO-SWIPE-DEBUG] recover-focus reason=\(reason) targetIndex=\(targetIndex)")
+            print("[VO-DIAG][CC] recover-post targetIndex=\(targetIndex) label=«\(targetElement.accessibilityLabel ?? "-")»")
             UIAccessibility.post(notification: .layoutChanged, argument: targetElement)
         }
     }
 
-    private func scheduleAccessibilityFocusContainmentCheck(reason: String) {
+    private func scheduleAccessibilityFocusContainmentCheck(reason: String, cameDirectlyFromList: Bool = false) {
         guard UIAccessibility.isVoiceOverRunning else {
             return
         }
@@ -6893,6 +7208,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
         self.accessibilityFocusContainmentCheckToken &+= 1
         let checkToken = self.accessibilityFocusContainmentCheckToken
+        print("[VO-DIAG][CC] scheduled reason=\(reason) delay=\(String(format: "%.2f", checkDelay))")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + checkDelay) { [weak self] in
             guard let self else {
@@ -6910,7 +7226,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // навбаре курсор оставался навсегда; теперь перепланируем проверку
             // за пределы нового окна (токен защищает от дублей).
             if CACurrentMediaTime() < self.accessibilityIgnoreOffscreenUntil {
-                self.scheduleAccessibilityFocusContainmentCheck(reason: reason)
+                // ВАЖНО: прокидываем cameDirectlyFromList — раньше он терялся
+                // при перепланировании, и гейт trailing-wrap не срабатывал.
+                self.scheduleAccessibilityFocusContainmentCheck(reason: reason, cameDirectlyFromList: cameDirectlyFromList)
                 return
             }
             guard let focusedObject = UIAccessibility.focusedElement(using: nil) else {
@@ -6919,6 +7237,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
             if self.isAccessibilityObjectInsideCurrentListSequence(focusedObject) && self.isAccessibilityObjectVisibleInsideCurrentListSequence(focusedObject) {
                 self.accessibilityFocusLeftListFailureCount = 0
+                print("[VO-DIAG][CC] exit=focus-back-in-list")
                 return
             }
             // The cursor legitimately moved to an allowed element outside the
@@ -6926,8 +7245,41 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // reaches when the user swipes past the last message. Do NOT drag
             // it back: that was the previous symptom (cursor bounced from the
             // input to the title bar). Let it stay on the input.
+            // ВРЕМЕННАЯ диагностика wrap-кейса: побег НАПРЯМУЮ из списка —
+            // печатаем геометрию соседей последнего сфокусированного элемента,
+            // чтобы увидеть, на что VoiceOver отказался шагать (тонкая полоска,
+            // .zero-фрейм, конец массива и т.п.).
+            if cameDirectlyFromList, let lastIndex = self.accessibilityLastSystemFocusedIndex {
+                // ВАЖНО: массив читаем через customAccessibilityElements(), а
+                // не view.accessibilityElements — backing view ListView'а это
+                // обычный UIView, его property не роутится в наш пересчёт, и
+                // прошлые repro-логи показывали count=0 АРТЕФАКТНО. Заодно
+                // одноразово включаем подробный лог ровно на один пересчёт.
+                let previousVerboseLogging = voVerboseAccessibilityLogging
+                voVerboseAccessibilityLogging = true
+                let elements = self.customAccessibilityElements() ?? []
+                voVerboseAccessibilityLogging = previousVerboseLogging
+                var materializedCount = 0
+                for itemNode in self.itemNodes where itemNode.index != nil {
+                    materializedCount += 1
+                }
+                print("[VO-DIAG][WRAP] itemNodes=\(self.itemNodes.count) materialized=\(materializedCount)")
+                var neighborInfo = ""
+                for offset in -2...2 {
+                    let index = lastIndex + offset
+                    if index >= 0 && index < elements.count, let element = elements[index] as? NSObject {
+                        let frame = element.accessibilityFrame
+                        let label = (element.accessibilityLabel ?? "-").replacingOccurrences(of: "\n", with: " ")
+                        neighborInfo += " [\(index)]«\(String(label.prefix(14)))»y=(\(Int(frame.minY))..\(Int(frame.maxY)))h=\(Int(frame.height))"
+                    } else {
+                        neighborInfo += " [\(index)]=out-of-array"
+                    }
+                }
+                print("[VO-DIAG][WRAP] lastIndex=\(lastIndex) count=\(elements.count) tall=\(self.accessibilityLastInListFocusWasTallAsScreen) trailing=\(self.accessibilityLastInListFocusAtTrailingEdge)\(neighborInfo)")
+            }
             if self.accessibilityIsLegitimateFocusEscape?(focusedObject) == true {
                 self.accessibilityFocusLeftListFailureCount = 0
+                print("[VO-DIAG][CC] exit=legitimate-escape type=\(type(of: focusedObject)) direct=\(cameDirectlyFromList) trailing=\(self.accessibilityLastInListFocusAtTrailingEdge) tall=\(self.accessibilityLastInListFocusWasTallAsScreen) sinceInList=\(String(format: "%.2f", CACurrentMediaTime() - self.accessibilityLastInListFocusTimestamp))")
                 return
             }
             // Уход фокуса на таб-бар — всегда осознанное действие пользователя
@@ -6938,6 +7290,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // обратно — вкладки нельзя было пройти свайпом, только ощупыванием.
             if self.isAccessibilityObjectInsideTabBar(focusedObject) {
                 self.accessibilityFocusLeftListFailureCount = 0
+                print("[VO-DIAG][CC] exit=escape-to-tabbar")
                 voAccessibilityLog("[VO-STATE] focus-escape-to-tabbar — recovery skipped")
                 return
             }
@@ -6945,6 +7298,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // to land on the next row before attempting recovery.
             if CACurrentMediaTime() - self.accessibilityLastProgrammaticEdgeScrollTimestamp < 0.15 {
                 self.accessibilityFocusLeftListFailureCount = 0
+                print("[VO-DIAG][CC] exit=recent-programmatic-scroll")
                 return
             }
             // Forward-escape redirect. The user swiped FORWARD past the newest
@@ -6997,11 +7351,36 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // Recover only when focus was in this list very recently to avoid stealing
             // focus from intentional navigation to other controls.
             let recentlyFocusedList = CACurrentMediaTime() - self.accessibilityLastInListFocusTimestamp < 1.5
-            guard recentlyFocusedList else {
+            // «Дыра прослушивания»: VO может читать элемент дольше 1.5с, и wrap
+            // после свайпа выглядит «осознанным» уходом. Но wrap возможен ТОЛЬКО
+            // с ПОСЛЕДНЕГО элемента массива (в середине всегда есть следующий) и
+            // приходит НАПРЯМУЮ из списка. Такие побеги восстанавливаем
+            // независимо от времени. Блуждания по навбару (предыдущий фокус вне
+            // списка) под это не попадают.
+            let escapedByTrailingWrap = cameDirectlyFromList && self.accessibilityLastInListFocusAtTrailingEdge
+            // «Высокое сообщение»: элемент занимал ≥70% вьюпорта, VoiceOver при
+            // свайпе не нашёл следующей шагабельной цели и выпал в навбар.
+            // Пользователь мог слушать сообщение сколь угодно долго — recency
+            // тут не критерий, восстанавливаем по факту прямого побега.
+            let escapedFromTallItem = cameDirectlyFromList && self.accessibilityLastInListFocusWasTallAsScreen
+            guard recentlyFocusedList || escapedByTrailingWrap || escapedFromTallItem else {
                 self.accessibilityFocusLeftListFailureCount = 0
+                print("[VO-DIAG][CC] exit=stale-not-recovering sinceInList=\(String(format: "%.2f", CACurrentMediaTime() - self.accessibilityLastInListFocusTimestamp)) direct=\(cameDirectlyFromList) trailing=\(self.accessibilityLastInListFocusAtTrailingEdge) focusedType=\(type(of: focusedObject))")
                 return
             }
             self.accessibilityFocusLeftListFailureCount = 0
+            // Высокое сообщение: wrap при свайпе ВПЕРЁД неизбежен (следующий
+            // элемент за мёртвым разрывом клипа, а предраскрытие низа iOS
+            // откатывает). Вместо возврата курсора на то же сообщение делаем
+            // то, что должен был сделать свайп: подскролл к СЛЕДУЮЩЕМУ
+            // элементу и перенос курсора на него.
+            if escapedFromTallItem, !self.accessibilityLastInListFocusAtTrailingEdge,
+               let lastIndex = self.accessibilityLastSystemFocusedIndex {
+                print("[VO-DIAG][CC] exit=tall-advance from=\(lastIndex)")
+                self.advanceAccessibilityFocusPastTallItem(fromArrayIndex: lastIndex, reason: reason)
+                return
+            }
+            print("[VO-DIAG][CC] exit=recover-to-list index=\(String(describing: self.accessibilityLastSystemFocusedIndex)) direct=\(cameDirectlyFromList) trailingWrap=\(escapedByTrailingWrap) focusedType=\(type(of: focusedObject))")
             voAccessibilityLog("[VO-STATE] recover-focus-triggered reason=\(reason) lastFocusedIndex=\(String(describing: self.accessibilityLastSystemFocusedIndex))")
             self.recoverAccessibilityFocusToList(aroundIndex: self.accessibilityLastSystemFocusedIndex, reason: reason)
         }
@@ -7140,23 +7519,45 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if !itemScreenFrame.isNull, !listClipFrame.isNull {
                 let intersection = itemScreenFrame.intersection(listClipFrame)
                 let intersectionHeight = intersection.isNull ? 0.0 : intersection.height
-                let alreadyOnScreen: Bool
                 if itemScreenFrame.height >= listClipFrame.height {
-                    // Taller-than-clip row: a large overlap is enough —
-                    // the user can already read its start.
-                    alreadyOnScreen = intersectionHeight >= listClipFrame.height * 0.9
-                } else {
+                    // Сообщение ВЫШЕ вьюпорта. Предраскрытие его низа (раунды
+                    // 4-5) НЕ работает: iOS-овская AX-машинерия тут же
+                    // возвращает top-align «показывая» сфокусированный элемент,
+                    // который целиком не помещается в принципе, — наш скролл
+                    // откатывался (лог: после tall-reveal фрейм (93..687), а к
+                    // свайпу снова (116..718)). Поэтому высокое сообщение НЕ
+                    // трогаем, пока оно хоть наполовину видно; переход вперёд
+                    // делает tall-advance в containment-check (свайп → wrap →
+                    // подскролл к СЛЕДУЮЩЕМУ + перенос курсора).
+                    if intersectionHeight >= listClipFrame.height * 0.5 {
+                        return
+                    }
+                } else if intersectionHeight >= itemScreenFrame.height - 1.0 {
                     // Short row: must be (almost) fully visible.
-                    alreadyOnScreen = intersectionHeight >= itemScreenFrame.height - 1.0
-                }
-                if alreadyOnScreen {
                     return
                 }
             }
         }
 
+        // Рефрактерный период: не скроллить к ОДНОМУ И ТОМУ ЖЕ элементу чаще
+        // раза в секунду. VoiceOver шлёт фокус-уведомления пачками (вьюшка +
+        // прокси-элемент), а для сообщения ВЫШЕ вьюпорта гейт «уже на экране»
+        // не достижим в принципе (с плашкой закрепа видимая доля всегда чуть
+        // меньше порога) — каждый фокус запускал transaction(scrollToItem:),
+        // массив элементов на время churn'а ПУСТЕЛ (лог [WRAP] count=0), и
+        // свайп вперёд вываливался в навбар вместо шага на следующее сообщение.
+        if let lastScrollIndex = self.accessibilityLastFocusScrollIndex,
+           lastScrollIndex == localIndex,
+           CACurrentMediaTime() - self.accessibilityLastFocusScrollTimestamp < 1.0 {
+            print("[VO-DIAG][SCROLL] focus-scroll-skip reason=refractory index=\(localIndex)")
+            return
+        }
+        self.accessibilityLastFocusScrollIndex = localIndex
+        self.accessibilityLastFocusScrollTimestamp = CACurrentMediaTime()
+
         self.accessibilityEdgeScrollPending = true
         self.accessibilityIgnoreOffscreenUntil = CACurrentMediaTime() + 0.2
+        print("[VO-DIAG][SCROLL] focus-scroll-to-item index=\(localIndex)")
 
         // `.center(.bottom)` with `additionalScrollDistance=0` mirrors how
         // `scrollToMessage(...)` brings the target message into the

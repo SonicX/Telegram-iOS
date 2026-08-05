@@ -128,6 +128,9 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     private var didAppear = false
     private var dismissSearchOnDisappear = false
+    // VoiceOver: peerId чата, открытого из этого списка; при возврате курсор
+    // детерминированно ставится на его строку (см. viewDidAppear).
+    private var voReturnFocusToPeerId: EnginePeer.Id?
     public var onDidAppear: (() -> Void)?
         
     private var passcodeLockTooltipDisposable = MetaDisposable()
@@ -1078,6 +1081,12 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             if let self, let layout = self.validLayout, case .compact = layout.metrics.widthClass {
                 self.chatListDisplayNode.effectiveContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = true
                 voAccessibilityLog("[VO-STATE] chatlist-suspend-set-on-peerSelected node=\(ObjectIdentifier(self.chatListDisplayNode.effectiveContainerNode.currentItemNode))")
+                // Запоминаем, в какой чат уходим: при возврате поставим курсор
+                // VoiceOver на его строку детерминированно (iOS-восстановление
+                // после pop ненадёжно — курсор вставал на соседний чат).
+                if UIAccessibility.isVoiceOverRunning {
+                    self.voReturnFocusToPeerId = peer.id
+                }
             }
             Task { @MainActor [weak self] in
                 guard let self else {
@@ -2434,12 +2443,66 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     public static var sharedPreviousPowerSavingEnabled: Bool?
     
+    override public func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        // VoiceOver: снимаем suspend уже на СТАРТЕ pop-транзишена, не дожидаясь
+        // viewDidAppear — к моменту, когда iOS восстанавливает курсор на этом
+        // экране, строки списка снова должны быть видимы для VoiceOver
+        // (suspend теперь прячет поддерево через accessibilityElementsHidden).
+        // Чистим оба контейнера: suspend мог быть выставлен на inline-списке
+        // (effectiveContainerNode) в peerSelected.
+        self.chatListDisplayNode.mainContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
+        self.chatListDisplayNode.effectiveContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
+    }
+
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
         // VoiceOver: снова топовый экран — разрешаем списку реагировать на
         // фокус (был приостановлен при уходе в чат, см. viewWillDisappear).
         self.chatListDisplayNode.mainContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
+
+        // VoiceOver: вернулись из чата — ставим курсор на строку ИМЕННО того
+        // чата, в который заходили. Штатное восстановление iOS после pop
+        // ненадёжно: список мог сдвинуться/перестроиться, и курсор вставал на
+        // соседний чат.
+        if let peerId = self.voReturnFocusToPeerId {
+            self.voReturnFocusToPeerId = nil
+            if UIAccessibility.isVoiceOverRunning {
+                let listNode = self.chatListDisplayNode.effectiveContainerNode.currentItemNode
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak listNode] in
+                    guard let listNode, UIAccessibility.isVoiceOverRunning else {
+                        return
+                    }
+                    var targetNode: ChatListItemNode?
+                    listNode.forEachItemNode { itemNode in
+                        guard targetNode == nil, let itemNode = itemNode as? ChatListItemNode, let item = itemNode.item else {
+                            return
+                        }
+                        if case let .peer(peerData) = item.content, peerData.peer.peerId == peerId, itemNode.isNodeLoaded {
+                            targetNode = itemNode
+                        }
+                    }
+                    guard let targetNode else {
+                        print("[VO-DIAG] return-focus-to-opened-chat row-not-found")
+                        return
+                    }
+                    // Строка могла остаться за экраном (band-полоса) — VoiceOver
+                    // отказывается фокусировать невидимую цель и падает на
+                    // соседний чат. Сначала показываем строку, потом ставим
+                    // курсор.
+                    listNode.ensureItemNodeVisible(targetNode, animated: false)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak targetNode] in
+                        guard let targetNode, targetNode.isNodeLoaded else {
+                            return
+                        }
+                        print("[VO-DIAG] return-focus-to-opened-chat posted")
+                        UIAccessibility.post(notification: .layoutChanged, argument: targetNode.view)
+                    }
+                }
+            }
+        }
 
         if self.powerSavingMonitoringDisposable == nil {
             self.powerSavingMonitoringDisposable = (self.context.sharedContext.automaticMediaDownloadSettings

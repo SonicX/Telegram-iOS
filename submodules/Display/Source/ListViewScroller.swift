@@ -45,4 +45,22 @@ public final class ListViewScroller: UIScrollView, UIGestureRecognizerDelegate {
     public override var isDecelerating: Bool {
         return self.forceDecelerating || super.isDecelerating
     }
+
+    // VoiceOver: когда фокус попадает на элемент, чья реальная вьюшка вне
+    // вьюпорта (band-полосы у кромок, за-экранные цели свайпа), UIKit сам
+    // подкручивает scroll view, чтобы «показать» сфокусированное — мимо всей
+    // нашей focus-машинерии. Для списков, где скроллом управляем мы
+    // (focus-scroll-to-item / boundary-edge-scroll), такой нативный подскролл —
+    // чистый вред: он сдвигал список чатов на сотни pt, пока пользователь ждал
+    // открытия чата. ListView ставит замыкание-гейт; сам ListView
+    // scrollRectToVisible никогда не вызывает, так что подавление ничего
+    // своего не ломает.
+    var voSuppressScrollRectToVisible: (() -> Bool)?
+    override public func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
+        if self.voSuppressScrollRectToVisible?() == true {
+            print("[VO-DIAG][SCROLL] native-scroll-to-visible-suppressed rect=(\(Int(rect.minY))..\(Int(rect.maxY)))")
+            return
+        }
+        super.scrollRectToVisible(rect, animated: animated)
+    }
 }
