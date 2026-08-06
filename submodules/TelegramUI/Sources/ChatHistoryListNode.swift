@@ -1869,7 +1869,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             return .zero
         }
         if frame.maxY <= clip.minY + 1.0 {
-            return .zero
+            // НЕ .zero! Нулевой accessibilityFrame для UIView означает
+            // «значение по умолчанию» — VoiceOver хит-тестит такую вьюшку по
+            // её РЕАЛЬНОМУ положению, и сообщение, целиком скрытое под
+            // навбаром, ловило касания навбара. Полоска 2pt у кромки (первая
+            // попытка) тоже ловила тапы: нижняя кромка навбара элементами не
+            // покрыта, и VO nearest-резолюцией выбирал ближайший элемент —
+            // полоску на y=93. Поэтому выносим фрейм ЦЕЛИКОМ ЗА ВЕРХ ЭКРАНА:
+            // вьюшки в порядке свайпов не участвуют (обход идёт по пуловому
+            // массиву), фрейм нужен только чтобы НЕ ловить касания.
+            // Сдвиг сырых координат сохраняет взаимный порядок фреймов.
+            return frame.offsetBy(dx: 0.0, dy: -2000.0)
         }
         // Минимальная шагабельная высота: VoiceOver пробует ровно ОДИН
         // следующий элемент при свайпе; полоска тоньше ~16pt отвергается, и
@@ -1882,7 +1892,11 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         if result.minY < clip.minY {
             let clippedTop = CGRect(x: result.minX, y: clip.minY, width: result.width, height: result.maxY - clip.minY)
             if clippedTop.height < minTargetHeight {
-                result = CGRect(x: clippedTop.minX, y: clippedTop.maxY - minTargetHeight, width: clippedTop.width, height: minTargetHeight)
+                // Минимум добираем ВНИЗ, в область контента. Задирать фрейм
+                // ВВЕРХ (maxY - 24) нельзя: он залезал в полосу навбара до
+                // 23pt и перекрывал низ кнопки «Назад» — касания навбара
+                // снова доставались сообщению (жалоба 2026-08-05).
+                result = CGRect(x: clippedTop.minX, y: clip.minY, width: clippedTop.width, height: minTargetHeight)
             } else {
                 result = clippedTop
             }
@@ -1897,8 +1911,15 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             // Пробовали НЕ обрезать низ высоких сообщений (смежность фреймов,
             // раунд 9) — wrap при свайпе это не убрало, а гигантский фрейм
             // (1869pt) давал «тонкую рамку» курсора на весь экран и накрывал
-            // панель ввода. Возвращена обрезка для всех.
-            result = CGRect(x: result.minX, y: result.minY, width: result.width, height: max(minTargetHeight, clip.maxY - result.minY))
+            // панель ввода. Возвращена обрезка для всех. Минимум добираем
+            // ВВЕРХ (фиксированный maxY = кромка панели), чтобы фрейм не
+            // залезал в полосу панели ввода и не крал её касания.
+            let clippedHeight = clip.maxY - result.minY
+            if clippedHeight < minTargetHeight {
+                result = CGRect(x: result.minX, y: clip.maxY - minTargetHeight, width: result.width, height: minTargetHeight)
+            } else {
+                result = CGRect(x: result.minX, y: result.minY, width: result.width, height: clippedHeight)
+            }
         }
         return result
     }

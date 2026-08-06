@@ -1012,6 +1012,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         // курсор обратно на сообщение (потом он срывался в заголовок). Здесь
         // мы помечаем поле ввода как ЛЕГИТИМНЫЙ выход — курсор остаётся на нём,
         // и сам же ввод поднимает клавиатуру.
+        self.voInstallNavbarDumpDiagnostics()
+
         self.historyNode.accessibilityIsLegitimateFocusEscape = { [weak self] focusedObject in
             guard let self else {
                 return false
@@ -1036,7 +1038,17 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             // по-прежнему уводить его на панель ввода.
             if let navigationBar = self.navigationBar, focusedView.isDescendant(of: navigationBar.view) {
                 if let titleView = navigationBar.titleView, focusedView === titleView || focusedView.isDescendant(of: titleView) {
-                    // Заголовок — решают гейты ListView (редирект/recovery).
+                    // Заголовок ЛЕГИТИМЕН, кроме единственного случая: свайп
+                    // вперёд ЗА НОВЕЙШЕЕ сообщение (trailing+recent), когда
+                    // iOS ошибочно бросает курсор на заголовок — там должен
+                    // сработать forward-escape-редирект на поле ввода.
+                    // Раньше заголовок был исключён из вайтлиста целиком, и
+                    // recovery по recency-гейту утаскивал курсор при ЛЮБОМ
+                    // касании заголовка в первые 1.5с после чтения ленты
+                    // (жалоба: «навбар один раз кликается, курсор уходит»).
+                    if !(self.historyNode.accessibilityLastInListFocusWasAtTrailingEdge && self.historyNode.accessibilityFocusWasRecentlyInList) {
+                        return true
+                    }
                 } else if !self.historyNode.accessibilityFocusWasRecentlyInList {
                     // Осознанный уход в навбар (касание/свайпы по навбару спустя
                     // паузу). ВАЖНО: если фокус был в ленте только что — это
@@ -1050,11 +1062,11 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     // работает, когда пользователь слушал сообщение дольше
                     // 1.5 с — выпад при свайпе с сообщения, занимающего почти
                     // весь экран, выглядел «осознанным» и курсор застревал в
-                    // навбаре. Побег НАПРЯМУЮ с такого высокого сообщения
-                    // легитимным не считаем — им займётся recovery (вернёт
-                    // курсор на сообщение). Цена: касание навбара, когда курсор
-                    // стоит на полноэкранном сообщении, даст один отскок.
-                    if self.historyNode.accessibilityLastEscapeCameDirectlyFromList && self.historyNode.accessibilityLastInListFocusWasTallAsScreen {
+                    // навбаре. Побег НАПРЯМУЮ с такого высокого сообщения на
+                    // кнопку «Назад» (ТОЛЬКО туда приземляется wrap; более
+                    // широкий вариант делал навбар недостижимым) легитимным
+                    // не считаем — им займётся tall-advance/recovery.
+                    if focusedObject is NavigationButtonNode, self.historyNode.accessibilityLastEscapeCameDirectlyFromList && self.historyNode.accessibilityLastInListFocusWasTallAsScreen {
                         return false
                     }
                     return true
@@ -1286,6 +1298,49 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.inputMediaNodeDataDisposable?.dispose()
         self.inlineSearchResultsReadyDisposable?.dispose()
         self.loadMoreSearchResultsDisposable?.dispose()
+        if let voNavbarDumpObserver = self.voNavbarDumpObserver {
+            NotificationCenter.default.removeObserver(voNavbarDumpObserver)
+        }
+    }
+
+    // ВРЕМЕННАЯ диагностика (2026-08-06): тап по навбару в чате падает в
+    // сообщение. На фокус-ивенты (не чаще раза в 2с) печатаем состав навбара —
+    // какие элементы и с какими фреймами видит VoiceOver. Убрать после фикса.
+    private var voNavbarDumpObserver: Any?
+    private var voNavbarDumpLastTime: Double = 0.0
+
+    private func voInstallNavbarDumpDiagnostics() {
+        guard self.voNavbarDumpObserver == nil else {
+            return
+        }
+        self.voNavbarDumpObserver = NotificationCenter.default.addObserver(forName: UIAccessibility.elementFocusedNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, let navigationBar = self.navigationBar else {
+                return
+            }
+            let now = CACurrentMediaTime()
+            if now - self.voNavbarDumpLastTime < 2.0 {
+                return
+            }
+            self.voNavbarDumpLastTime = now
+            let elements = navigationBar.accessibilityElements ?? []
+            var summary = ""
+            for element in elements.prefix(8) {
+                guard let object = element as? NSObject else {
+                    continue
+                }
+                let frame: CGRect
+                if let view = object as? UIView {
+                    frame = UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+                } else if let node = object as? ASDisplayNode, node.isNodeLoaded, !node.isLayerBacked {
+                    frame = UIAccessibility.convertToScreenCoordinates(node.view.bounds, in: node.view)
+                } else {
+                    frame = object.accessibilityFrame
+                }
+                let label = (object.accessibilityLabel ?? "-").replacingOccurrences(of: "\n", with: " ")
+                summary += " «\(String(label.prefix(12)))»(\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))"
+            }
+            print("[VO-DIAG][NAVBAR] count=\(elements.count)\(summary)")
+        }
     }
 
     override func didLoad() {

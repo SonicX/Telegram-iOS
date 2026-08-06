@@ -1673,7 +1673,14 @@ public final class StoryPeerListComponent: Component {
             
             self.component = component
             self.state = state
-            
+
+            // VoiceOver: collapsedButton накрывает заголовок списка чатов с
+            // мини-аватарками сторис («панель со статусами»). Без метки VO
+            // объявлял просто «кнопка» — пользователь не слышал, что выбрано.
+            self.collapsedButton.isAccessibilityElement = true
+            self.collapsedButton.accessibilityLabel = component.title
+            self.collapsedButton.accessibilityTraits = .header
+
             let updatedTitleState = TitleState(text: component.title, color: component.theme.rootController.navigationBar.primaryTextColor)
             if self.titleState != updatedTitleState {
                 self.titleState = updatedTitleState
