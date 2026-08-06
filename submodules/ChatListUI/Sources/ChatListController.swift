@@ -2485,7 +2485,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         }
                     }
                     guard let targetNode else {
-                        print("[VO-DIAG] return-focus-to-opened-chat row-not-found")
+                        voDiagLog("[VO-DIAG] return-focus-to-opened-chat row-not-found")
                         return
                     }
                     // Строка могла остаться за экраном (band-полоса) — VoiceOver
@@ -2497,7 +2497,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         guard let targetNode, targetNode.isNodeLoaded else {
                             return
                         }
-                        print("[VO-DIAG] return-focus-to-opened-chat posted")
+                        voDiagLog("[VO-DIAG] return-focus-to-opened-chat posted")
                         UIAccessibility.post(notification: .layoutChanged, argument: targetNode.view)
                     }
                 }

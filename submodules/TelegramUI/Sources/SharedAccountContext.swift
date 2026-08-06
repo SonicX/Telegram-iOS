@@ -299,6 +299,15 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.appDelegate = appDelegate
         self.mainWindow = mainWindow
         self.applicationBindings = applicationBindings
+
+        // VoiceOver-диагностика ([VO-DIAG]) — в файловый лог: тестировщики
+        // отправляют его штатным путём Настройки → 10 тапов по вкладке →
+        // Debug → Send Logs. Пишется только при активной VO-навигации
+        // (сами принты стреляют лишь в VO-потоках), у обычных пользователей
+        // накладных расходов нет.
+        voDiagnosticsSink = { message in
+            Logger.shared.log("VO", message)
+        }
         self.sharedContainerPath = sharedContainerPath
         self.basePath = basePath
         self.networkArguments = networkArguments

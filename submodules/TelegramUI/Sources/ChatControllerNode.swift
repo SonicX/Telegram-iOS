@@ -1014,6 +1014,21 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         // и сам же ввод поднимает клавиатуру.
         self.voInstallNavbarDumpDiagnostics()
 
+        // VoiceOver: при ОТКРЫТОЙ клавиатуре авто-подскроллы фокуса в ленте
+        // запрещены. Видимая полоса истории крошечная, «выровнять» сообщение
+        // в ней невозможно, и тап по сообщению запускал каскад
+        // scroll→re-anchor→scroll, после которого тапы по клавиатуре
+        // переставали доходить (перехватывались элементами ленты).
+        self.historyNode.accessibilityFocusScrollsInhibited = { [weak self] in
+            guard let self else {
+                return false
+            }
+            if let inputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode, inputPanelNode.isFocused {
+                return true
+            }
+            return false
+        }
+
         self.historyNode.accessibilityIsLegitimateFocusEscape = { [weak self] focusedObject in
             guard let self else {
                 return false
@@ -1339,7 +1354,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 let label = (object.accessibilityLabel ?? "-").replacingOccurrences(of: "\n", with: " ")
                 summary += " «\(String(label.prefix(12)))»(\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))"
             }
-            print("[VO-DIAG][NAVBAR] count=\(elements.count)\(summary)")
+            voDiagLog("[VO-DIAG][NAVBAR] count=\(elements.count)\(summary)")
         }
     }
 

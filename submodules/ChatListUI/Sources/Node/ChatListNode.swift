@@ -1452,7 +1452,14 @@ public final class ChatListNode: ListView {
         }
         self.accessibilityPageScrolledUsesVisibleRange = true
         self.accessibilityInterruptSpeechOnUserAction = true
-        self.accessibilityNavigationOrder = .reversed
+        // Естественный порядок (сверху вниз): после фикса цепочки контейнеров
+        // VoiceOver строго следует порядку массива, и .reversed давал «свайп
+        // вперёд идёт ВВЕРХ» (раньше VO ходил по геометрии и флаг не был
+        // заметен). Ротированная история чата оставляет .reversed — там это
+        // и есть визуальный «сверху вниз». Побочно: trailing-эдж массива
+        // теперь НИЖНЯЯ строка — wrap-гейты recovery выравниваются с местом,
+        // где выпады реально происходят (кромка таббара).
+        self.accessibilityNavigationOrder = .natural
 
         // VoiceOver-driven full materialisation of the chat list.
         //

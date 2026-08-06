@@ -58,7 +58,7 @@ public final class ListViewScroller: UIScrollView, UIGestureRecognizerDelegate {
     var voSuppressScrollRectToVisible: (() -> Bool)?
     override public func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
         if self.voSuppressScrollRectToVisible?() == true {
-            print("[VO-DIAG][SCROLL] native-scroll-to-visible-suppressed rect=(\(Int(rect.minY))..\(Int(rect.maxY)))")
+            voDiagLog("[VO-DIAG][SCROLL] native-scroll-to-visible-suppressed rect=(\(Int(rect.minY))..\(Int(rect.maxY)))")
             return
         }
         super.scrollRectToVisible(rect, animated: animated)

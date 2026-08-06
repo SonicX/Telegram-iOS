@@ -125,6 +125,17 @@ private final class PeerInfoScreenActionItemNode: PeerInfoScreenItemNode {
         self.textNode.maximumNumberOfLines = 1
         self.textNode.attributedText = NSAttributedString(string: item.text, font: titleFont, textColor: textColorValue)
         self.activateArea.accessibilityLabel = item.text
+        // VoiceOver: зона перекрывает пункт и без activate-замыкания «съедала»
+        // двойной тап — действие не вызывалось (жалоба 2026-08-06 на «Отправить
+        // логи»; касалось и остальных action-пунктов настроек).
+        self.activateArea.accessibilityTraits = .button
+        self.activateArea.activate = { [weak self] in
+            guard let action = self?.item?.action else {
+                return false
+            }
+            action()
+            return true
+        }
         
         let textSize = self.textNode.updateLayout(CGSize(width: width - (leftInset + rightInset), height: .greatestFiniteMagnitude))
         let height = textSize.height + 32.0

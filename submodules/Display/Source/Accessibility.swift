@@ -18,8 +18,22 @@ public var voVerboseAccessibilityLogging = false
 @inline(__always)
 public func voAccessibilityLog(_ message: @autoclosure () -> String) {
     if voVerboseAccessibilityLogging {
-        print(message())
+        let text = message()
+        print(text)
+        voDiagnosticsSink?(text)
     }
+}
+
+/// Приёмник VO-диагностики для УДАЛЁННОГО сбора логов: приложение (TelegramUI)
+/// подключает сюда файловый Logger, и тестировщики отправляют логи штатным
+/// Debug → Send Logs. Без подключения диагностика идёт только в консоль.
+public var voDiagnosticsSink: ((String) -> Void)?
+
+/// Диагностический принт [VO-DIAG]: в консоль + в файловый лог (если подключён).
+public func voDiagLog(_ message: @autoclosure () -> String) {
+    let text = message()
+    print(text)
+    voDiagnosticsSink?(text)
 }
 
 /// Описание реального VO-элемента, который `ListView` дописывает ПОСЛЕ

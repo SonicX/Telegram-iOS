@@ -560,6 +560,7 @@ private enum PeerInfoContextSubject {
 private enum PeerInfoSettingsSection {
     case swiftgram
     case swiftgramPro
+    case sendLogs
     case avatar
     case edit
     case proxy
@@ -870,7 +871,16 @@ private func settingsItems(showProfileId: Bool, data: PeerInfoScreenData?, conte
     for section in SettingsSection.allCases {
         items[section] = []
     }
-    
+
+    // MARK: Swiftgram
+    // Кнопка «Отправить логи» В САМОМ ВЕРХУ настроек: незрячим тестировщикам
+    // недоступны скрытые пути к Debug-меню (10 быстрых тапов под VoiceOver
+    // невозможны), а логи с [VO]-диагностикой нужны для разбора их жалоб.
+    let sendLogsTitle = presentationData.strings.baseLanguageCode == "ru" ? "Отправить логи" : "Send Logs"
+    items[.edit]!.append(PeerInfoScreenActionItem(id: 90, text: sendLogsTitle, color: .accent, action: {
+        interaction.openSettings(.sendLogs)
+    }))
+
     let setPhotoTitle: String
     if let peer = data.peer, !peer.profileImageRepresentations.isEmpty {
         setPhotoTitle = presentationData.strings.Settings_ChangeProfilePhoto
@@ -11144,6 +11154,44 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
             }
         }
         switch section {
+        case .sendLogs:
+            // Сбор логов (в т.ч. [VO]-диагностика) → выбор чата → отправка
+            // файлом. Тот же флоу, что «Send Logs» в Debug-меню, но доступный
+            // из верха настроек — для незрячих тестировщиков.
+            let context = self.context
+            let _ = (Logger.shared.collectLogs()
+            |> deliverOnMainQueue).start(next: { logs in
+                let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
+                controller.peerSelected = { [weak controller] peer, _ in
+                    let peerId = peer.id
+                    guard let strongController = controller else {
+                        return
+                    }
+                    strongController.dismiss()
+
+                    let lineFeed = "\n".data(using: .utf8)!
+                    var rawLogData: Data = Data()
+                    for (name, path) in logs {
+                        if !rawLogData.isEmpty {
+                            rawLogData.append(lineFeed)
+                            rawLogData.append(lineFeed)
+                        }
+                        rawLogData.append("------ File: \(name) ------\n".data(using: .utf8)!)
+                        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+                            rawLogData.append(data)
+                        }
+                    }
+
+                    let id = Int64.random(in: Int64.min ... Int64.max)
+                    let fileResource = LocalFileMediaResource(fileId: id, size: Int64(rawLogData.count), isSecretRelated: false)
+                    context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: rawLogData)
+
+                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(rawLogData.count), attributes: [.FileName(fileName: "Swiftgram-Log.txt")], alternativeRepresentations: [])
+                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
+                    let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).startStandalone()
+                }
+                push(controller)
+            })
         case .swiftgram:
             self.controller?.push(sgSettingsController(context: self.context))
         case .swiftgramPro:
