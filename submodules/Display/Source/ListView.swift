@@ -7607,6 +7607,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // between two visible neighbours (the "chat=43 ↔ chat=44" loop
         // observed in the user's logs).  We only scroll when the target
         // row is genuinely outside the viewport.
+        // Был ли элемент в момент фокуса ЦЕЛИКОМ вне клипа. VO рисует рамку
+        // по фрейму на момент установки курсора; для такого элемента рамка
+        // оказывается за экраном и после нашего подскролла сама не
+        // перерисуется — ниже по этому флагу делается ring-repost.
+        var itemWasFullyOffscreen = true
         if let itemNode = self.itemNodes.first(where: { $0.index == localIndex }) {
             // **Rotation-correct visibility test.** The earlier version
             // compared `itemNode.frame` (ListView layout space) against a
@@ -7629,6 +7634,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if !itemScreenFrame.isNull, !listClipFrame.isNull {
                 let intersection = itemScreenFrame.intersection(listClipFrame)
                 let intersectionHeight = intersection.isNull ? 0.0 : intersection.height
+                itemWasFullyOffscreen = intersectionHeight <= 0.0
                 if itemScreenFrame.height >= listClipFrame.height {
                     // Сообщение ВЫШЕ вьюпорта. Предраскрытие его низа (раунды
                     // 4-5) НЕ работает: iOS-овская AX-машинерия тут же
@@ -7698,6 +7704,34 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         DispatchQueue.main.async { [weak self] in
             DispatchQueue.main.async { [weak self] in
                 self?.accessibilityEdgeScrollPending = false
+            }
+        }
+
+        // Рамка VO рисуется по фрейму НА МОМЕНТ фокуса. Если курсор встал на
+        // элемент целиком вне клипа (последняя голосовуха, вытолкнутая под
+        // панель ввода появившейся шапкой плеера: фрейм y=823 при экране 812),
+        // озвучка идёт, а рамка остаётся за экраном — синхронный подскролл
+        // выше её не перерисовывает. После оседания фреймов перепощиваем ТОТ
+        // ЖЕ элемент: курсор не двигается, VO лишь перерисовывает рамку по
+        // новому фрейму (цена — рестарт озвучки, только в этом краевом
+        // случае). Гейт «фокус всё ещё на этом элементе» отсекает случаи,
+        // когда пользователь уже свайпнул дальше. Каскада нет: повторный
+        // фокус-нотификейшн упрётся в гейт «уже на экране» выше.
+        if itemWasFullyOffscreen {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self else {
+                    return
+                }
+                // Принадлежность элемента ИМЕННО этому списку обязательна:
+                // pinnedLocalIndex сам по себе мог бы совпасть с элементом
+                // другого ListView, если за 0.25 с экран сменился.
+                guard let focused = UIAccessibility.focusedElement(using: nil) as? FocusTrackingAccessibilityElement,
+                      focused.pinnedLocalIndex == localIndex,
+                      self.isAccessibilityObjectInsideListView(focused) else {
+                    return
+                }
+                voDiagLog("[VO-DIAG][SCROLL] ring-repost index=\(localIndex)")
+                UIAccessibility.post(notification: .layoutChanged, argument: focused)
             }
         }
     }
