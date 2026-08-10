@@ -6301,6 +6301,30 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 self.accessibilityLastFocusedScreenMidY = earlyFocusedFrame.midY
                 self.accessibilityLastInListFocusHeight = earlyFocusedFrame.height
             }
+            // Гейт планирования ring-repost: рамка «сломана», если видимая
+            // (в клипе) часть нарисованного фрейма меньше половины реальной
+            // высоты элемента — узкая полоска после клипа или элемент целиком
+            // за экраном. Нормальные фокусы на видимых сообщениях сюда не
+            // попадают — никакого рестарта озвучки при обычных свайпах.
+            if let tracked = focusedAny as? FocusTrackingAccessibilityElement,
+               let pinned = tracked.pinnedLocalIndex,
+               let trackedSourceView = tracked.sourceView {
+                let drawnFrame = tracked.accessibilityFrame
+                let fullHeight = trackedSourceView.bounds.height
+                var drawnVisibleHeight = drawnFrame.isNull ? 0.0 : drawnFrame.height
+                var tallAsClip = false
+                if let clip = self.accessibilityClippingFrameInScreenCoordinates() {
+                    let visible = drawnFrame.intersection(clip)
+                    drawnVisibleHeight = visible.isNull ? 0.0 : visible.height
+                    // Высокие сообщения (≥ вьюпорта) не трогаем: целиком они
+                    // не показываются в принципе, у них своя машинерия
+                    // (tall-advance), а перепост давал бы ложные рестарты.
+                    tallAsClip = fullHeight >= clip.height
+                }
+                if !tallAsClip, fullHeight > 1.0, drawnVisibleHeight < fullHeight * 0.5 {
+                    self.scheduleAccessibilityRingRepost(localIndex: pinned, drawnFrame: drawnFrame)
+                }
+            }
         }
         if let focusedView = focusedAny as? UIView,
            self.isAccessibilityObjectInsideListView(focusedView),
@@ -7607,11 +7631,6 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // between two visible neighbours (the "chat=43 ↔ chat=44" loop
         // observed in the user's logs).  We only scroll when the target
         // row is genuinely outside the viewport.
-        // Был ли элемент в момент фокуса ЦЕЛИКОМ вне клипа. VO рисует рамку
-        // по фрейму на момент установки курсора; для такого элемента рамка
-        // оказывается за экраном и после нашего подскролла сама не
-        // перерисуется — ниже по этому флагу делается ring-repost.
-        var itemWasFullyOffscreen = true
         if let itemNode = self.itemNodes.first(where: { $0.index == localIndex }) {
             // **Rotation-correct visibility test.** The earlier version
             // compared `itemNode.frame` (ListView layout space) against a
@@ -7634,7 +7653,6 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if !itemScreenFrame.isNull, !listClipFrame.isNull {
                 let intersection = itemScreenFrame.intersection(listClipFrame)
                 let intersectionHeight = intersection.isNull ? 0.0 : intersection.height
-                itemWasFullyOffscreen = intersectionHeight <= 0.0
                 if itemScreenFrame.height >= listClipFrame.height {
                     // Сообщение ВЫШЕ вьюпорта. Предраскрытие его низа (раунды
                     // 4-5) НЕ работает: iOS-овская AX-машинерия тут же
@@ -7707,32 +7725,53 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
 
-        // Рамка VO рисуется по фрейму НА МОМЕНТ фокуса. Если курсор встал на
-        // элемент целиком вне клипа (последняя голосовуха, вытолкнутая под
-        // панель ввода появившейся шапкой плеера: фрейм y=823 при экране 812),
-        // озвучка идёт, а рамка остаётся за экраном — синхронный подскролл
-        // выше её не перерисовывает. После оседания фреймов перепощиваем ТОТ
-        // ЖЕ элемент: курсор не двигается, VO лишь перерисовывает рамку по
-        // новому фрейму (цена — рестарт озвучки, только в этом краевом
-        // случае). Гейт «фокус всё ещё на этом элементе» отсекает случаи,
-        // когда пользователь уже свайпнул дальше. Каскада нет: повторный
-        // фокус-нотификейшн упрётся в гейт «уже на экране» выше.
-        if itemWasFullyOffscreen {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                guard let self else {
-                    return
-                }
-                // Принадлежность элемента ИМЕННО этому списку обязательна:
-                // pinnedLocalIndex сам по себе мог бы совпасть с элементом
-                // другого ListView, если за 0.25 с экран сменился.
-                guard let focused = UIAccessibility.focusedElement(using: nil) as? FocusTrackingAccessibilityElement,
-                      focused.pinnedLocalIndex == localIndex,
-                      self.isAccessibilityObjectInsideListView(focused) else {
-                    return
-                }
-                voDiagLog("[VO-DIAG][SCROLL] ring-repost index=\(localIndex)")
-                UIAccessibility.post(notification: .layoutChanged, argument: focused)
+    }
+
+    /// Поколение отложенных перепостов рамки VO: новое планирование отменяет
+    /// все предыдущие (актуален только последний фокус).
+    private var accessibilityRingRepostGeneration: Int = 0
+
+    /// Рамка VO рисуется по `accessibilityFrame` НА МОМЕНТ установки фокуса и
+    /// сама не перерисовывается. Если курсор встал на элемент, видимый узкой
+    /// клипнутой полоской (лог: h=25 у голосовухи высотой 110) или целиком за
+    /// экраном (последнее сообщение, вытолкнутое под панель ввода шапкой
+    /// плеера: y=823 при экране 812), озвучка идёт, а рамка остаётся полоской
+    /// или за краем — синхронный подскролл её не перерисовывает. Через `delay`
+    /// проверяем: фокус всё ещё на этом элементе и тот успел нормально
+    /// показаться — освежаем `accessibilityFrame` из sourceView (VO при посте
+    /// layoutChanged с конкретным элементом массив контейнера НЕ пересобирает
+    /// и читает фрейм как есть) и перепощиваем ТОТ ЖЕ элемент. Курсор не
+    /// двигается, цена — рестарт озвучки, только когда рамка реально была
+    /// сломана (планирование гейтится на стороне вызова).
+    private func scheduleAccessibilityRingRepost(localIndex: Int, drawnFrame: CGRect, delay: Double = 0.3) {
+        self.accessibilityRingRepostGeneration &+= 1
+        let generation = self.accessibilityRingRepostGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.accessibilityRingRepostGeneration == generation else {
+                return
             }
+            // Принадлежность элемента ИМЕННО этому списку обязательна:
+            // pinnedLocalIndex сам по себе мог бы совпасть с элементом
+            // другого ListView, если за задержку экран сменился.
+            guard let focused = UIAccessibility.focusedElement(using: nil) as? FocusTrackingAccessibilityElement,
+                  focused.pinnedLocalIndex == localIndex,
+                  self.isAccessibilityObjectInsideListView(focused),
+                  let sourceView = focused.sourceView, sourceView.window != nil else {
+                return
+            }
+            var freshFrame = UIAccessibility.convertToScreenCoordinates(sourceView.bounds, in: sourceView)
+            let fullHeight = freshFrame.height
+            if let clip = self.accessibilityClippingFrameInScreenCoordinates() {
+                freshFrame = freshFrame.intersection(clip)
+            }
+            // Элемент так и не показался почти целиком (подскролл не прошёл
+            // или ещё идёт) — перепост нарисовал бы ту же полоску.
+            guard !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.75 else {
+                return
+            }
+            focused.accessibilityFrame = freshFrame
+            voDiagLog("[VO-DIAG][SCROLL] ring-repost index=\(localIndex) drawn=(\(Int(drawnFrame.minY)),h\(Int(drawnFrame.height))) fresh=(\(Int(freshFrame.minY)),h\(Int(freshFrame.height)))")
+            UIAccessibility.post(notification: .layoutChanged, argument: focused)
         }
     }
 

@@ -1353,6 +1353,14 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                                         audioTranscriptionButton = current
                                     } else {
                                         audioTranscriptionButton = ComponentHostView<Empty>()
+                                        // VoiceOver: кнопку расшифровки прячем из accessibility-дерева.
+                                        // Иначе VO мог попадать в неё фокусом или синтезированным
+                                        // тапом при активации сообщения — вместо воспроизведения
+                                        // голосового включалась расшифровка. Активация бабла играет
+                                        // голосовое (accessibilityActivate → openMessage), а зрячим
+                                        // кнопка работает как раньше — скрытие влияет только на VO.
+                                        audioTranscriptionButton.accessibilityElementsHidden = true
+                                        audioTranscriptionButton.isAccessibilityElement = false
                                         strongSelf.audioTranscriptionButton = audioTranscriptionButton
                                         strongSelf.view.addSubview(audioTranscriptionButton)
                                         added = true
