@@ -11169,17 +11169,41 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     }
                     strongController.dismiss()
 
+                    // Режем полезную нагрузку до ~1 МБ: полный набор файлов
+                    // разрастался до десятков МБ, а для диагностики важен
+                    // свежий хвост. Файлы отсортированы от старых к новым —
+                    // идём с конца, от первого не влезающего файла берём
+                    // ХВОСТ (свежие записи), собираем в хронологическом
+                    // порядке.
+                    let maxTotalLogBytes = 1024 * 1024
                     let lineFeed = "\n".data(using: .utf8)!
+                    var logChunks: [Data] = []
+                    var remainingLogBytes = maxTotalLogBytes
+                    for (name, path) in logs.reversed() {
+                        if remainingLogBytes <= 0 {
+                            break
+                        }
+                        guard var data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+                            continue
+                        }
+                        var truncated = false
+                        if data.count > remainingLogBytes {
+                            data = data.suffix(remainingLogBytes)
+                            truncated = true
+                        }
+                        remainingLogBytes -= data.count
+                        var chunk = Data()
+                        chunk.append("------ File: \(name)\(truncated ? " (tail)" : "") ------\n".data(using: .utf8)!)
+                        chunk.append(data)
+                        logChunks.append(chunk)
+                    }
                     var rawLogData: Data = Data()
-                    for (name, path) in logs {
+                    for chunk in logChunks.reversed() {
                         if !rawLogData.isEmpty {
                             rawLogData.append(lineFeed)
                             rawLogData.append(lineFeed)
                         }
-                        rawLogData.append("------ File: \(name) ------\n".data(using: .utf8)!)
-                        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
-                            rawLogData.append(data)
-                        }
+                        rawLogData.append(chunk)
                     }
 
                     let id = Int64.random(in: Int64.min ... Int64.max)
