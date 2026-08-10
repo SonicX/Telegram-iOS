@@ -1828,6 +1828,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.visibleContentOffsetChanged(offset)
         self.visibleBottomContentOffsetChanged(self.visibleBottomContentOffset())
         self.accessibilityRefreshBarBandFrames()
+        self.scheduleTrailingFocusRingRecheckIfNeeded()
     }
     
     public func stopScrolling() {
@@ -6324,7 +6325,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                         if let clip = self.accessibilityClippingFrameInScreenCoordinates() {
                             freshFrame = freshFrame.intersection(clip)
                         }
-                        if !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.75 {
+                        // Порог 0.5 согласован с ring-repost: последний бабл у
+                        // панели ввода легитимно виден не на всю высоту элемента.
+                        if !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.5 {
                             self.accessibilityExpectedTrailingFocusElement = nil
                             // Отменяем висящие ring-repost'ы: возврат сам
                             // перерисует рамку, двойной пост дал бы двойную
@@ -7823,15 +7826,47 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if let clip = self.accessibilityClippingFrameInScreenCoordinates() {
                 freshFrame = freshFrame.intersection(clip)
             }
-            // Элемент так и не показался почти целиком (подскролл не прошёл
-            // или ещё идёт) — перепост нарисовал бы ту же полоску.
-            guard !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.75 else {
+            // Элемент так и не показался хотя бы наполовину (подскролл не
+            // прошёл или ещё идёт) — перепост нарисовал бы ту же полоску.
+            // Порог 0.5, а не выше: последний бабл вплотную к панели ввода
+            // может легитимно показываться на ~60-78% высоты элемента
+            // (межстрочный зазор уходит под клип), и жёсткий порог молча
+            // отменял перепост — рамка оставалась полоской (скрин 2026-08-10).
+            guard !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.5 else {
+                return
+            }
+            // Рамка уже там, где надо, — не дёргаем VO (и озвучку) зря.
+            let diverged = drawnFrame.isNull || abs(freshFrame.minY - drawnFrame.minY) > 8.0 || abs(freshFrame.height - drawnFrame.height) > 8.0
+            guard diverged else {
                 return
             }
             focused.accessibilityFrame = freshFrame
             voDiagLog("[VO-DIAG][SCROLL] ring-repost index=\(localIndex) drawn=(\(Int(drawnFrame.minY)),h\(Int(drawnFrame.height))) fresh=(\(Int(freshFrame.minY)),h\(Int(freshFrame.height)))")
             UIAccessibility.post(notification: .layoutChanged, argument: focused)
         }
+    }
+
+    /// Дожим рамки на КРАЙНЕМ сообщении после сдвигов контента. Фреймы пула
+    /// протухают, когда контент сдвигается БЕЗ пересборки массива элементов
+    /// (offset-jump ±52 при появлении/скрытии шапки плеера, доводка инсетов):
+    /// рамка остаётся полоской над баблом, а синтезированный тап при
+    /// активации летит в центр полоски — мимо бабла, голосовое не играет
+    /// (скрин 2026-08-10). На каждый сдвиг планируем перепроверку рамки
+    /// сфокусированного элемента; поколение даёт дебаунс (реально выполнится
+    /// только последняя), а перепост случится только при фактическом
+    /// расхождении рамки. Только для крайнего элемента — бласт-радиус
+    /// минимальный, середины ленты это не касается.
+    private func scheduleTrailingFocusRingRecheckIfNeeded() {
+        guard UIAccessibility.isVoiceOverRunning, self.accessibilityFocusIsCurrentlyInList else {
+            return
+        }
+        guard let focused = UIAccessibility.focusedElement(using: nil) as? FocusTrackingAccessibilityElement,
+              let pinned = focused.pinnedLocalIndex,
+              pinned == (self.rotated ? 0 : max(0, self.items.count - 1)),
+              self.isAccessibilityObjectInsideListView(focused) else {
+            return
+        }
+        self.scheduleAccessibilityRingRepost(localIndex: pinned, drawnFrame: focused.accessibilityFrame)
     }
 
     /// Reverse lookup: which `localIndex` does this UIView back, according
