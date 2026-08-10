@@ -189,7 +189,13 @@ public final class TabBarComponent: Component {
             self.contextGestureContainerView.isGestureEnabled = true
             
             super.init(frame: frame)
-            
+
+            // VoiceOver: гейт escape-to-tabbar в ListView ищет вверх по superview
+            // вьюху с трейтом .tabBar (как у старого TabBarNode). Без трейта
+            // recovery-машинерия утаскивала курсор с вкладок обратно в список
+            // чатов — вкладки нельзя было пройти свайпом.
+            self.accessibilityTraits = .tabBar
+
             if #available(iOS 17.0, *) {
                 self.traitOverrides.verticalSizeClass = .compact
                 self.traitOverrides.horizontalSizeClass = .compact
