@@ -954,7 +954,20 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
     required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
+    // VoiceOver: активация пула-прокси ListView приходит сюда через
+    // sourceView (_ASDisplayView форвардит accessibilityActivate в ноду).
+    // Без override активация проваливалась в синтезированный тап по центру
+    // рамки — при протухшем фрейме (полоска над баблом) тап уходил мимо и
+    // голосовое не воспроизводилось. Явный вызов той же логики, что у
+    // messageAccessibilityArea, делает активацию независимой от фрейма.
+    override public func accessibilityActivate() -> Bool {
+        if let activate = self.messageAccessibilityArea.activate, activate() {
+            return true
+        }
+        return super.accessibilityActivate()
+    }
+
     deinit {
     }
 

@@ -6362,6 +6362,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     tallAsClip = fullHeight >= clip.height
                 }
                 if !tallAsClip, fullHeight > 1.0, drawnVisibleHeight < fullHeight * 0.5 {
+                    voDiagLog("[VO-DIAG][RING] scheduled idx=\(pinned) drawn=(\(Int(drawnFrame.minY)),h\(drawnFrame.isNull ? -1 : Int(drawnFrame.height))) vis=\(Int(drawnVisibleHeight)) full=\(Int(fullHeight))")
                     self.scheduleAccessibilityRingRepost(localIndex: pinned, drawnFrame: drawnFrame)
                 }
             }
@@ -7815,16 +7816,24 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // Принадлежность элемента ИМЕННО этому списку обязательна:
             // pinnedLocalIndex сам по себе мог бы совпасть с элементом
             // другого ListView, если за задержку экран сменился.
-            guard let focused = UIAccessibility.focusedElement(using: nil) as? FocusTrackingAccessibilityElement,
+            let focusedAny = UIAccessibility.focusedElement(using: nil)
+            guard let focused = focusedAny as? FocusTrackingAccessibilityElement,
                   focused.pinnedLocalIndex == localIndex,
-                  self.isAccessibilityObjectInsideListView(focused),
-                  let sourceView = focused.sourceView, sourceView.window != nil else {
+                  self.isAccessibilityObjectInsideListView(focused) else {
+                voDiagLog("[VO-DIAG][RING] skip=focus-moved idx=\(localIndex) focusedType=\(type(of: focusedAny ?? NSNull())) focusedPinned=\(String(describing: (focusedAny as? FocusTrackingAccessibilityElement)?.pinnedLocalIndex))")
                 return
             }
-            var freshFrame = UIAccessibility.convertToScreenCoordinates(sourceView.bounds, in: sourceView)
-            let fullHeight = freshFrame.height
+            guard let sourceView = focused.sourceView, sourceView.window != nil else {
+                voDiagLog("[VO-DIAG][RING] skip=no-source idx=\(localIndex)")
+                return
+            }
+            let rawFrame = UIAccessibility.convertToScreenCoordinates(sourceView.bounds, in: sourceView)
+            let fullHeight = rawFrame.height
+            var freshFrame = rawFrame
+            var clipDescription = "nil"
             if let clip = self.accessibilityClippingFrameInScreenCoordinates() {
                 freshFrame = freshFrame.intersection(clip)
+                clipDescription = "(\(Int(clip.minY))..\(Int(clip.maxY)))"
             }
             // Элемент так и не показался хотя бы наполовину (подскролл не
             // прошёл или ещё идёт) — перепост нарисовал бы ту же полоску.
@@ -7833,15 +7842,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // (межстрочный зазор уходит под клип), и жёсткий порог молча
             // отменял перепост — рамка оставалась полоской (скрин 2026-08-10).
             guard !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.5 else {
+                voDiagLog("[VO-DIAG][RING] skip=sliver idx=\(localIndex) raw=(\(Int(rawFrame.minY))..\(Int(rawFrame.maxY))) clip=\(clipDescription) fresh_h=\(freshFrame.isNull ? -1 : Int(freshFrame.height))")
                 return
             }
             // Рамка уже там, где надо, — не дёргаем VO (и озвучку) зря.
             let diverged = drawnFrame.isNull || abs(freshFrame.minY - drawnFrame.minY) > 8.0 || abs(freshFrame.height - drawnFrame.height) > 8.0
             guard diverged else {
+                voDiagLog("[VO-DIAG][RING] skip=same idx=\(localIndex) frame=(\(Int(freshFrame.minY)),h\(Int(freshFrame.height)))")
                 return
             }
             focused.accessibilityFrame = freshFrame
-            voDiagLog("[VO-DIAG][SCROLL] ring-repost index=\(localIndex) drawn=(\(Int(drawnFrame.minY)),h\(Int(drawnFrame.height))) fresh=(\(Int(freshFrame.minY)),h\(Int(freshFrame.height)))")
+            voDiagLog("[VO-DIAG][RING] ring-repost idx=\(localIndex) drawn=(\(Int(drawnFrame.minY)),h\(Int(drawnFrame.height))) fresh=(\(Int(freshFrame.minY)),h\(Int(freshFrame.height))) clip=\(clipDescription)")
             UIAccessibility.post(notification: .layoutChanged, argument: focused)
         }
     }
