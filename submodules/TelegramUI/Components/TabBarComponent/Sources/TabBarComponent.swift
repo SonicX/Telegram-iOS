@@ -500,6 +500,28 @@ public final class TabBarComponent: Component {
                 self.selectedItemViews.removeValue(forKey: id)
             }
 
+            // VoiceOver: отдаём ПЛОСКИЙ статический список вкладок. Без него
+            // VO строит навигацию обходом визуальной иерархии, а вкладки
+            // лежат на 7 уровней вглубь стеклянного сэндвича (GlassBackground,
+            // приватный lensView с punchout, маски, display link анимации
+            // линзы) — любое шевеление этой кухни перестраивает обход прямо
+            // под жестом. Симптом у тестировщиков: свайп влево/вправо по
+            // вкладкам «бонкает» звуком границы экрана и переозвучивает ту же
+            // вкладку — сосед не находится. Явный accessibilityElements
+            // замораживает порядок обхода и полностью изолирует VO от
+            // визуального дерева линзы. Переустанавливаем только при
+            // фактическом изменении состава.
+            var orderedAccessibilityItems: [UIView] = []
+            for item in component.items {
+                if let itemComponentView = self.itemViews[item.id]?.view {
+                    orderedAccessibilityItems.append(itemComponentView)
+                }
+            }
+            let currentAccessibilityItems = self.accessibilityElements as? [UIView] ?? []
+            if currentAccessibilityItems.count != orderedAccessibilityItems.count || !zip(currentAccessibilityItems, orderedAccessibilityItems).allSatisfy({ $0 === $1 }) {
+                self.accessibilityElements = orderedAccessibilityItems
+            }
+
             transition.setFrame(view: self.contextGestureContainerView, frame: CGRect(origin: CGPoint(), size: size))
 
             transition.setFrame(view: self.liquidLensView, frame: CGRect(origin: CGPoint(), size: size))
