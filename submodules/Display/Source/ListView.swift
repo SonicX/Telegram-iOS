@@ -6128,9 +6128,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     public func accessibilityClippingFrameInScreenCoordinates() -> CGRect? {
+        // Видимая область в ЛОКАЛЬНЫХ координатах скроллера — ВСЕГДА
+        // [insets.top .. H - insets.bottom]; 180°-поворот ротированной ленты
+        // учитывает сам convertToScreenCoordinates (он идёт по цепочке
+        // трансформов). Прежний спец-кейс «rotated → y = insets.bottom»
+        // применял поворот дважды: у чата экранный клип получался (93..668)
+        // при реальной видимой области (144..718) — оба края сдвинуты на
+        // разницу инсетов. Верх спасало пересечение с провайдером
+        // ChatControllerNode (он опускал верх под навбар и закреп), а вот
+        // НИЗ резал последнее сообщение в полоску h=25: рамка VO рисовалась
+        // огрызком над баблом, синтезированный тап активации бил мимо,
+        // ring-repost и rollback-fix гасились гейтами видимости, считавшими
+        // от того же кривого клипа (лог [RING] skip=sliver 2026-08-10).
         let visibleBoundsRect = CGRect(
             x: 0.0,
-            y: self.rotated ? self.insets.bottom : self.insets.top,
+            y: self.insets.top,
             width: self.visibleSize.width,
             height: max(0.0, self.visibleSize.height - self.insets.top - self.insets.bottom)
         )
