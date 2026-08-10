@@ -6301,6 +6301,43 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 self.accessibilityLastFocusedScreenMidY = earlyFocusedFrame.midY
                 self.accessibilityLastInListFocusHeight = earlyFocusedFrame.height
             }
+            // Перехват отката ре-анкора после подскролла к КРАЙНЕМУ сообщению.
+            // Пользователь досвайпнул до последней голосовухи (фокус на
+            // полоске/за экраном), наш focus-scroll раскрыл её, но iOS после
+            // сдвига контента ре-анкорит фокус «к ближайшему по координатам» —
+            // на ПРЕДЫДУЩЕЕ сообщение. Если в окне 0.35 с после такого скролла
+            // фокус пришёл на ДРУГОЙ элемент этого списка, а цель уже
+            // раскрыта, — возвращаем курсор на цель. Осознанный свайп назад в
+            // этом окне неотличим и тоже вернётся — редкий, самокорректируемый
+            // случай (пользователь только что услышал начало озвучки цели).
+            if let expected = self.accessibilityExpectedTrailingFocusElement {
+                if CACurrentMediaTime() - self.accessibilityExpectedTrailingFocusTimestamp > 0.35 {
+                    self.accessibilityExpectedTrailingFocusElement = nil
+                } else if let tracked = focusedAny as? FocusTrackingAccessibilityElement {
+                    if tracked === expected {
+                        // Курсор дошёл куда нужно — перехват больше не нужен,
+                        // рамкой (если сломана) займётся ring-repost ниже.
+                        self.accessibilityExpectedTrailingFocusElement = nil
+                    } else if let expectedSourceView = expected.sourceView, expectedSourceView.window != nil {
+                        var freshFrame = UIAccessibility.convertToScreenCoordinates(expectedSourceView.bounds, in: expectedSourceView)
+                        let fullHeight = freshFrame.height
+                        if let clip = self.accessibilityClippingFrameInScreenCoordinates() {
+                            freshFrame = freshFrame.intersection(clip)
+                        }
+                        if !freshFrame.isNull, fullHeight > 1.0, freshFrame.height >= fullHeight * 0.75 {
+                            self.accessibilityExpectedTrailingFocusElement = nil
+                            // Отменяем висящие ring-repost'ы: возврат сам
+                            // перерисует рамку, двойной пост дал бы двойную
+                            // озвучку.
+                            self.accessibilityRingRepostGeneration &+= 1
+                            expected.accessibilityFrame = freshFrame
+                            voDiagLog("[VO-DIAG][SCROLL] reanchor-rollback-fix to=«\(expected.accessibilityLabel ?? "-")» fresh=(\(Int(freshFrame.minY)),h\(Int(freshFrame.height)))")
+                            UIAccessibility.post(notification: .layoutChanged, argument: expected)
+                            return
+                        }
+                    }
+                }
+            }
             // Гейт планирования ring-repost: рамка «сломана», если видимая
             // (в клипе) часть нарисованного фрейма меньше половины реальной
             // высоты элемента — узкая полоска после клипа или элемент целиком
@@ -7719,6 +7756,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         )
         self.accessibilityLastProgrammaticEdgeScrollTimestamp = CACurrentMediaTime()
 
+        // Подскролл к КРАЙНЕМУ (trailing) сообщению: запоминаем, на каком
+        // элементе курсор должен остаться. Ошибочный ре-анкор iOS после
+        // сдвига контента откатывает фокус на предыдущее сообщение —
+        // обработчик по этому полю вернёт курсор обратно. Только для
+        // trailing: в середине ленты ре-анкор попадает в тот же элемент
+        // корректно, а перехват мешал бы быстрым свайпам.
+        let trailingItemIndex = self.rotated ? 0 : max(0, self.items.count - 1)
+        if localIndex == trailingItemIndex,
+           let expected = (self.accessibilityDirectionalElementPool[localIndex] ?? []).first(where: { $0.pinnedLocalIndex == localIndex && $0.sourceView != nil }) {
+            self.accessibilityExpectedTrailingFocusElement = expected
+            self.accessibilityExpectedTrailingFocusTimestamp = CACurrentMediaTime()
+        }
+
         DispatchQueue.main.async { [weak self] in
             DispatchQueue.main.async { [weak self] in
                 self?.accessibilityEdgeScrollPending = false
@@ -7730,6 +7780,15 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// Поколение отложенных перепостов рамки VO: новое планирование отменяет
     /// все предыдущие (актуален только последний фокус).
     private var accessibilityRingRepostGeneration: Int = 0
+
+    /// Элемент, на котором курсор ДОЛЖЕН оказаться после нашего
+    /// focus-scroll-to-item к крайнему (trailing) сообщению. iOS после сдвига
+    /// контента ре-анкорит фокус «к ближайшему по координатам» — после
+    /// подскролла последней голосовухи это ПРЕДЫДУЩЕЕ сообщение (лог: фокус
+    /// (642,h25) → скролл → фокус откатился на (565)). По этому полю
+    /// обработчик распознаёт откат и возвращает курсор на цель.
+    private weak var accessibilityExpectedTrailingFocusElement: FocusTrackingAccessibilityElement?
+    private var accessibilityExpectedTrailingFocusTimestamp: Double = 0.0
 
     /// Рамка VO рисуется по `accessibilityFrame` НА МОМЕНТ установки фокуса и
     /// сама не перерисовывается. Если курсор встал на элемент, видимый узкой
