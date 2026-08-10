@@ -11169,13 +11169,19 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     }
                     strongController.dismiss()
 
-                    // Режем полезную нагрузку до ~1 МБ: полный набор файлов
-                    // разрастался до десятков МБ, а для диагностики важен
-                    // свежий хвост. Файлы отсортированы от старых к новым —
-                    // идём с конца, от первого не влезающего файла берём
-                    // ХВОСТ (свежие записи), собираем в хронологическом
-                    // порядке.
+                    // Фильтрация читает и обрабатывает десятки МБ — уводим с
+                    // главного потока (postbox/enqueueMessages потокобезопасны).
+                    DispatchQueue.global(qos: .userInitiated).async {
+                    // Режем полезную нагрузку до ~1 МБ, но УМНО: тупой хвост
+                    // сырого лога вмещал ~40 секунд сессии, потому что 99%
+                    // объёма съедали мегастроки [MT] (дампы стикеров и сетевых
+                    // ответов). Правила: [VO]-строки сохраняются целиком
+                    // (главный диагностический сигнал), остальные строки
+                    // обрезаются до 300 символов (поток событий виден, дампы
+                    // отсечены). Файлы идут от старых к новым — собираем с
+                    // конца, от первого не влезающего берём хвост.
                     let maxTotalLogBytes = 1024 * 1024
+                    let maxPlainLineChars = 300
                     let lineFeed = "\n".data(using: .utf8)!
                     var logChunks: [Data] = []
                     var remainingLogBytes = maxTotalLogBytes
@@ -11183,9 +11189,19 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                         if remainingLogBytes <= 0 {
                             break
                         }
-                        guard var data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+                        guard let rawData = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
                             continue
                         }
+                        let filteredText = String(decoding: rawData, as: UTF8.self)
+                            .split(separator: "\n", omittingEmptySubsequences: false)
+                            .map { line -> Substring in
+                                if line.count > maxPlainLineChars && !line.hasPrefix("[VO]") {
+                                    return line.prefix(maxPlainLineChars)
+                                }
+                                return line
+                            }
+                            .joined(separator: "\n")
+                        var data = Data(filteredText.utf8)
                         var truncated = false
                         if data.count > remainingLogBytes {
                             data = data.suffix(remainingLogBytes)
@@ -11213,6 +11229,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(rawLogData.count), attributes: [.FileName(fileName: "Swiftgram-Log.txt")], alternativeRepresentations: [])
                     let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).startStandalone()
+                    }
                 }
                 push(controller)
             })

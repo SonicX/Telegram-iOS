@@ -448,10 +448,25 @@ public final class TabBarComponent: Component {
                     itemTransition.setPosition(view: selectedItemComponentView, position: itemFrame.center)
                     itemTransition.setBounds(view: selectedItemComponentView, bounds: CGRect(origin: CGPoint(), size: itemFrame.size))
                     itemTransition.setScale(view: selectedItemComponentView, scale: self.selectionGestureState != nil ? 1.15 : 1.0)
+                    // VoiceOver: свойства выставляем ТОЛЬКО при фактическом
+                    // изменении. Безусловная переустановка label/traits/frame
+                    // на каждом update-проходе (бейдж, жест, тема) дёргала VO
+                    // прямо под стоящим на вкладке курсором — в логе
+                    // тестировщика один свайп давал двойной шаг (Chats и через
+                    // 54 мс Calls): фокус пересчитывался по «обновлённому»
+                    // элементу и перескакивал вкладку.
                     itemComponentView.isAccessibilityElement = true
-                    itemComponentView.accessibilityLabel = item.item.title
-                    itemComponentView.accessibilityTraits = isItemSelected ? [.button, .selected] : [.button]
-                    itemComponentView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemFrame, in: self)
+                    if itemComponentView.accessibilityLabel != item.item.title {
+                        itemComponentView.accessibilityLabel = item.item.title
+                    }
+                    let itemAccessibilityTraits: UIAccessibilityTraits = isItemSelected ? [.button, .selected] : [.button]
+                    if itemComponentView.accessibilityTraits != itemAccessibilityTraits {
+                        itemComponentView.accessibilityTraits = itemAccessibilityTraits
+                    }
+                    let itemAccessibilityFrame = UIAccessibility.convertToScreenCoordinates(itemFrame, in: self)
+                    if itemComponentView.accessibilityFrame != itemAccessibilityFrame {
+                        itemComponentView.accessibilityFrame = itemAccessibilityFrame
+                    }
                     itemComponentView.accessibilityActivateAction = { [weak self] in
                         guard let self else {
                             return
