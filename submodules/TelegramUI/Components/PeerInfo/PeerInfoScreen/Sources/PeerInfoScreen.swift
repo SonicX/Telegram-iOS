@@ -1,5 +1,6 @@
 // MARK: Swiftgram
 import SGDebugUI
+import DeviceModel
 import SGSimpleSettings
 import SGSettingsUI
 import SGStrings
@@ -11226,7 +11227,15 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     let fileResource = LocalFileMediaResource(fileId: id, size: Int64(rawLogData.count), isSecretRelated: false)
                     context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: rawLogData)
 
-                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(rawLogData.count), attributes: [.FileName(fileName: "Swiftgram-Log.txt")], alternativeRepresentations: [])
+                    // Имя файла несёт контекст, который иначе приходится
+                    // выспрашивать у тестировщика: версия, номер сборки,
+                    // модель устройства и версия iOS.
+                    // Пример: Swiftgram-Log-12.2.5-260812-iPhone10,6-iOS16.7.8.txt
+                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+                    let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+                    let logFileName = "Swiftgram-Log-\(appVersion)-\(appBuild)-\(DeviceModel.currentModelCode())-iOS\(UIDevice.current.systemVersion).txt"
+
+                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(rawLogData.count), attributes: [.FileName(fileName: logFileName)], alternativeRepresentations: [])
                     let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).startStandalone()
                     }

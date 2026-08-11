@@ -8,6 +8,9 @@ sgdeps = [
     "//Swiftgram/SGRegDate:SGRegDate",
     "//Swiftgram/SGRegDateScheme:SGRegDateScheme",
     "//Swiftgram/SGDebugUI:SGDebugUI",
+
+    # Модель устройства для имени тестерского лог-файла
+    "//submodules/Utils/DeviceModel",
 ]
 
 
