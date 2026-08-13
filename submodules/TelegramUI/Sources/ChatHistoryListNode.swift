@@ -6752,6 +6752,51 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                         voAccessibilityLog("[VO-CHAT] initial-history-prime: posting layoutChanged(nil) after first transition")
                         UIAccessibility.post(notification: .layoutChanged, argument: nil)
                     }
+                    // Детерминированная установка курсора при входе в чат.
+                    // После пуша iOS анкорит фокус на ВЕРХНЕЕ видимое (самое
+                    // старое на экране) сообщение — жалоба тестировщиков «VO
+                    // начинает озвучивать старое сообщение». Ставим курсор на
+                    // плашку «Непрочитанные сообщения», а если её нет (всё
+                    // прочитано, чат открыт в конце) — на последнее сообщение
+                    // (index 0 в ротированной истории). Только для обычного
+                    // открытия (.Initial): переходы к конкретному сообщению
+                    // (поиск, закреп, реплай — .InitialSearch/.Scroll/
+                    // .Navigation) не трогаем. Пост в SOURCE VIEW, не в
+                    // пуловый прокси (правило раунда 12: пост в прокси даёт
+                    // полудохлый фокус). Задержка 0.6с — пуш-транзишен и
+                    // первые транзакции должны осесть, иначе пост потеряется
+                    // в churn'е.
+                    var isPlainInitialOpen = false
+                    if let location = strongSelf.chatHistoryLocationValue?.content, case .Initial = location {
+                        isPlainInitialOpen = true
+                    }
+                    if isPlainInitialOpen {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak strongSelf] in
+                            guard let strongSelf, UIAccessibility.isVoiceOverRunning, strongSelf.isNodeLoaded, strongSelf.view.window != nil else {
+                                return
+                            }
+                            var unreadNode: ChatUnreadItemNode?
+                            var trailingNode: ListViewItemNode?
+                            strongSelf.forEachItemNode { itemNode in
+                                if let itemNode = itemNode as? ChatUnreadItemNode, itemNode.isNodeLoaded {
+                                    unreadNode = itemNode
+                                }
+                                if let itemNode = itemNode as? ListViewItemNode, itemNode.index == 0, itemNode.isNodeLoaded {
+                                    trailingNode = itemNode
+                                }
+                            }
+                            if let unreadNode {
+                                let target: UIView = unreadNode.activateArea.isNodeLoaded ? unreadNode.activateArea.view : unreadNode.view
+                                voDiagLog("[VO-DIAG] initial-focus → unread-plaque")
+                                UIAccessibility.post(notification: .layoutChanged, argument: target)
+                            } else if let trailingNode {
+                                voDiagLog("[VO-DIAG] initial-focus → trailing-message")
+                                UIAccessibility.post(notification: .layoutChanged, argument: trailingNode.view)
+                            } else {
+                                voDiagLog("[VO-DIAG] initial-focus → no-target")
+                            }
+                        }
+                    }
                 }
             }
         }
