@@ -4934,6 +4934,13 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                             let searchTabsNode = SparseNode()
                             strongSelf.searchTabsNode = searchTabsNode
                             searchTabsNode.addSubnode(filterContainerNode)
+                            // VoiceOver: строка поиска — первый элемент обхода полосы
+                            // фильтров (см. accessibilityLeadingElementProvider).
+                            if let filterContainerNode = filterContainerNode as? ChatListSearchFiltersContainerNode {
+                                filterContainerNode.accessibilityLeadingElementProvider = { [weak strongSelf] in
+                                    return strongSelf?.chatListDisplayNode.searchDisplayController?.accessibilitySearchBarView
+                                }
+                            }
                         }
                         
                         activate(filter != .downloads)

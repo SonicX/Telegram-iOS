@@ -35,6 +35,13 @@ public final class SearchDisplayController {
     private var containerLayout: (ContainerViewLayout, CGFloat)?
     
     public var isDeactivating = false
+
+    /// VoiceOver: вьюшка строки поиска — для явного порядка обхода в
+    /// соседних контейнерах (полоса фильтров ставит её первым элементом,
+    /// чтобы свайп назад с первого фильтра приходил на поле).
+    public var accessibilitySearchBarView: UIView? {
+        return self.searchBar.isNodeLoaded ? self.searchBar.view : nil
+    }
     
     private var isSearchingDisposable: Disposable?
     

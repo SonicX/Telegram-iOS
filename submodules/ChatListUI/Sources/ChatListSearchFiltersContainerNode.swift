@@ -242,6 +242,11 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
     private var itemNodes: [ChatListSearchFilterEntryId: ItemNode] = [:]
     
     var filterPressed: ((ChatListSearchFilter) -> Void)?
+    /// VoiceOver: элемент, идущий в обходе ПЕРЕД первым фильтром (строка
+    /// поиска). Полоса и поле — разные сабноды навбара, и VO геометрически
+    /// не выходил с первого фильтра на поле (лог: обход останавливался на
+    /// Chats). Включаем поле в наш плоский список первым — один контейнер.
+    var accessibilityLeadingElementProvider: (() -> UIView?)?
 
     private var currentParams: (size: CGSize, sideInset: CGFloat, filters: [ChatListSearchFilterEntry], selectedFilter: ChatListSearchFilterEntryId?, transitionFraction: CGFloat, presentationData: PresentationData)?
         
@@ -358,6 +363,9 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
         // из цепочки обхода: с первого фильтра VO уходит наружу — на поле.
         // Переустанавливаем только при изменении состава/порядка.
         var orderedFilterButtons: [Any] = []
+        if let leading = self.accessibilityLeadingElementProvider?() {
+            orderedFilterButtons.append(leading)
+        }
         for filter in filters {
             if let itemNode = self.itemNodes[filter.id], itemNode.buttonNode.isNodeLoaded {
                 orderedFilterButtons.append(itemNode.buttonNode.view)
