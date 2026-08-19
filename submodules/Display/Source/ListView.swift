@@ -718,14 +718,22 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             let intersection = node.frame.intersection(visibleRect)
             let minimumVisibleHeight: CGFloat = node.frame.height * 0.5
             if !intersection.isNull && intersection.height > minimumVisibleHeight {
-                addAccessibilityChildren(of: node, container: self, to: &accessibilityElements, trackFocus: false)
+                // Контейнер — ВЬЮШКА, не нода (урок навбара-8): backing view
+                // форвардит accessibilityElements, и цепочка «element →
+                // container → его accessibilityElements» сходится только через
+                // вьюшку. С нодой в контейнере VO не мог перечислить соседей
+                // сфокусированного элемента: свайп по результатам поиска
+                // «зацикливался между двумя позициями» (лог: один и тот же
+                // UIAccessibilityElement фокусится 3-4 раза подряд), секции
+                // чатов/каналов/приложений были непроходимы.
+                addAccessibilityChildren(of: node, container: (self.isNodeLoaded ? self.view : self) as Any, to: &accessibilityElements, trackFocus: false)
             }
         })
         if !trackDirectionalFocus && accessibilityElements.isEmpty {
             self.forEachItemNode({ node in
                 let intersection = node.frame.intersection(visibleRect)
                 if !intersection.isNull && intersection.height > 1.0 {
-                    addAccessibilityChildren(of: node, container: self, to: &accessibilityElements, trackFocus: false)
+                    addAccessibilityChildren(of: node, container: (self.isNodeLoaded ? self.view : self) as Any, to: &accessibilityElements, trackFocus: false)
                 }
             })
         }
