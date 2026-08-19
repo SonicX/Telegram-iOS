@@ -14,7 +14,7 @@ private final class ItemNode: ASDisplayNode {
     private let titleNode: ImmediateTextNode
     private let titleActiveNode: ImmediateTextNode
     private var titleBadgeView: UIImageView?
-    private let buttonNode: HighlightTrackingButtonNode
+    fileprivate let buttonNode: HighlightTrackingButtonNode
     
     private var selectionFraction: CGFloat = 0.0
     
@@ -350,6 +350,33 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
             }
         }
         
+        // VoiceOver: полоса фильтров — горизонтальный ASScrollNode. При обходе
+        // по иерархии VO на краю скролла начинал листать сам контейнер —
+        // свайп назад с первого фильтра зацикливался по фильтрам (лог:
+        // Chats → Channels → Chats → …) и не выходил на строку поиска.
+        // Явный плоский список кнопок фильтров (слева направо) выводит скролл
+        // из цепочки обхода: с первого фильтра VO уходит наружу — на поле.
+        // Переустанавливаем только при изменении состава/порядка.
+        var orderedFilterButtons: [Any] = []
+        for filter in filters {
+            if let itemNode = self.itemNodes[filter.id], itemNode.buttonNode.isNodeLoaded {
+                orderedFilterButtons.append(itemNode.buttonNode.view)
+            }
+        }
+        let currentFilterButtons = self.accessibilityElements ?? []
+        var filterButtonsChanged = currentFilterButtons.count != orderedFilterButtons.count
+        if !filterButtonsChanged {
+            for (lhs, rhs) in zip(currentFilterButtons, orderedFilterButtons) {
+                if (lhs as AnyObject) !== (rhs as AnyObject) {
+                    filterButtonsChanged = true
+                    break
+                }
+            }
+        }
+        if filterButtonsChanged {
+            self.accessibilityElements = orderedFilterButtons
+        }
+
         var tabSizes: [(ChatListSearchFilterEntryId, CGSize, ItemNode, Bool)] = []
         var totalRawTabSize: CGFloat = 0.0
         var selectionFrames: [CGRect] = []

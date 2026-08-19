@@ -49,6 +49,7 @@ public final class SearchDisplayController {
         self.hasSeparator = hasSeparator
         
         self.searchBar.textUpdated = { [weak contentNode] text, _ in
+            contentNode?.voNoteSearchTextChanged()
             contentNode?.searchTextUpdated(text: text)
         }
         self.searchBar.tokensUpdated = { [weak contentNode] tokens in
@@ -70,6 +71,9 @@ public final class SearchDisplayController {
         }
         self.contentNode.dismissInput = { [weak self] in
             self?.searchBar.deactivate(clear: false)
+        }
+        self.contentNode.voIsSearchFieldFirstResponder = { [weak self] in
+            return self?.searchBar.isTextFieldFirstResponder ?? false
         }
         
         var isFirstTime = true

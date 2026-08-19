@@ -30,6 +30,16 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
     // false)); тап по полю поиска снова поднимает клавиатуру.
     private var voFocusObserver: NSObjectProtocol?
     private var voDismissGeneration: Int = 0
+    private var voLastTextChangeTimestamp: Double = 0.0
+
+    /// Пользователь печатает (SearchDisplayController зовёт на каждый
+    /// textUpdated): отменяем отложенное скрытие и на короткое окно глушим
+    /// новые — при вводе VO перестраивает результаты и мимолётно фокусит
+    /// их, это не «листание».
+    public final func voNoteSearchTextChanged() {
+        self.voDismissGeneration &+= 1
+        self.voLastTextChangeTimestamp = CACurrentMediaTime()
+    }
 
     override public init() {
         super.init()
@@ -44,22 +54,22 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
         }
     }
 
+    private var voPreviousFocusWasInsideContent: Bool = false
+
+    /// Замыкание от SearchDisplayController: «поле поиска сейчас first
+    /// responder?». Единственный надёжный признак, что пользователь хочет
+    /// печатать, — нотификации фокуса VO приходят с произвольной задержкой
+    /// относительно becomeFirstResponder.
+    public final var voIsSearchFieldFirstResponder: (() -> Bool)?
+
     private func voHandleFocusChange(_ notification: Notification) {
-        // Любая смена фокуса отменяет отложенное скрытие: если следующим
-        // фокусом стало поле поиска — клавиатуру трогать нельзя.
+        // Любая смена фокуса отменяет отложенное скрытие.
         self.voDismissGeneration &+= 1
         guard UIAccessibility.isVoiceOverRunning, self.isNodeLoaded, self.view.window != nil else {
+            self.voPreviousFocusWasInsideContent = false
             return
         }
         guard let focusedAny = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey] else {
-            return
-        }
-        // Поле ввода (UITextField и его потомки) — пользователь хочет
-        // печатать: не прячем и не планируем.
-        if focusedAny is UITextField || focusedAny is UITextView {
-            return
-        }
-        if let focusedView = focusedAny as? UIView, focusedView.isFirstResponder {
             return
         }
         // Определяем вьюшку сфокусированного объекта (вьюшка, нода или
@@ -76,29 +86,46 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
                 focusedView = containerNode.view
             }
         }
-        guard let focusedView else {
+        let isInsideContent: Bool
+        if let focusedView {
+            isInsideContent = focusedView.isDescendant(of: self.view)
+        } else {
+            isInsideContent = false
+        }
+        let previousWasInsideContent = self.voPreviousFocusWasInsideContent
+        self.voPreviousFocusWasInsideContent = isInsideContent
+        guard isInsideContent else {
             return
         }
-        // Клавиатура и строка поиска — не результаты; реагируем только на
-        // фокус ВНУТРИ нашего контента (результаты, секции, фильтры).
-        if !focusedView.isDescendant(of: self.view) {
+        // Только что печатали — результаты перестраиваются, их мимолётные
+        // фокусы не считаются листанием.
+        if CACurrentMediaTime() - self.voLastTextChangeTimestamp < 0.8 {
             return
         }
-        // Скрываем с задержкой. Тап по полю поиска при открытых результатах
-        // VO сначала может кратко провести фокус через элемент под пальцем
-        // (результат), и мгновенный resignFirstResponder срывал активацию
-        // поля — курсор откатывался на результат, напечатать было нельзя.
-        // Если за 0.35с фокус ушёл на поле — generation сменился, скрытие
-        // отменено.
+        // Прячем ТОЛЬКО при листании ПО результатам (предыдущий фокус тоже
+        // был в контенте). Первое попадание в список (свайп с поля/клавиш или
+        // тап по результату) клавиатуру не трогает — иначе конфликт с тапом
+        // по полю поиска: мгновенный resignFirstResponder срывал активацию
+        // поля, курсор откатывался на результат, напечатать было нельзя.
+        guard previousWasInsideContent else {
+            return
+        }
+        // Поле активно прямо сейчас — пользователь печатает, не трогаем.
+        if self.voIsSearchFieldFirstResponder?() != true {
+            return
+        }
         let generation = self.voDismissGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self, self.voDismissGeneration == generation else {
                 return
             }
             guard UIAccessibility.isVoiceOverRunning else {
                 return
             }
-            // Финальная проверка: фокус всё ещё на результате, а не на поле.
+            // Поле всё ещё first responder и фокус не ушёл — прячем.
+            guard self.voIsSearchFieldFirstResponder?() == true else {
+                return
+            }
             if let current = UIAccessibility.focusedElement(using: nil) {
                 if current is UITextField || current is UITextView {
                     return
@@ -107,8 +134,6 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
                     return
                 }
             }
-            // dismissInput → resignFirstResponder: на уже неактивном поле —
-            // no-op, повторные вызовы при каждом свайпе безвредны.
             self.dismissInput?()
         }
     }

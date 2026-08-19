@@ -1180,6 +1180,12 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
         node.isHidden = true
     }
     
+    /// VoiceOver: поле сейчас активно (клавиатура поднята)? Используется
+    /// машинерией скрытия клавиатуры при листании результатов поиска.
+    public var isTextFieldFirstResponder: Bool {
+        return self.textField.isFirstResponder
+    }
+
     public func deactivate(clear: Bool = true) {
         self.textField.resignFirstResponder()
         if clear {
