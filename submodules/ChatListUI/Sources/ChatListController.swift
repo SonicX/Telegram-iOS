@@ -2493,12 +2493,17 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     // соседний чат. Сначала показываем строку, потом ставим
                     // курсор.
                     listNode.ensureItemNodeVisible(targetNode, animated: false)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak targetNode] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak targetNode, weak listNode] in
                         guard let targetNode, targetNode.isNodeLoaded else {
                             return
                         }
-                        voDiagLog("[VO-DIAG] return-focus-to-opened-chat posted")
-                        UIAccessibility.post(notification: .layoutChanged, argument: targetNode.view)
+                        // Постим в ПУЛОВЫЙ VO-элемент строки, а не в сырую
+                        // вьюшку: строки списка отдаются VO как прокси, и
+                        // пост в вьюшку iOS применить не мог — курсор падал
+                        // на первый элемент списка («Archived Chats»).
+                        let target: Any = listNode?.accessibilityFocusTarget(for: targetNode) ?? targetNode.view
+                        voDiagLog("[VO-DIAG] return-focus-to-opened-chat posted target=\(type(of: target))")
+                        UIAccessibility.post(notification: .layoutChanged, argument: target)
                     }
                 }
             }

@@ -7969,6 +7969,28 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// Reverse lookup: which `localIndex` does this UIView back, according
     /// to the directional element pool?  Used by the focus handler to
     /// translate UIView focus events into index-based scrolls.
+    /// VoiceOver: объект, который надо передать в UIAccessibility.post,
+    /// чтобы курсор встал на строку `itemNode`. Для списков с пул-машинерией
+    /// (список чатов, история) строки отдаются VO как пуловые прокси — пост
+    /// в сырую вьюшку строки VO применить не может (её нет в массиве
+    /// accessibilityElements) и ре-анкорится на первый элемент контейнера
+    /// («Archived Chats» вместо открытого чата при возврате, лог 2026-08-11).
+    /// Возвращает пуловый элемент, если он есть, иначе — вьюшку строки.
+    /// Перед поиском обновляет массив, чтобы пул был актуален.
+    public func accessibilityFocusTarget(for itemNode: ListViewItemNode) -> Any {
+        let _ = self.customAccessibilityElements()
+        if let index = itemNode.index, let elements = self.accessibilityDirectionalElementPool[index] {
+            if let element = elements.first(where: { $0.sourceView === itemNode.view }) ?? elements.first {
+                return element
+            }
+        }
+        if itemNode.isNodeLoaded, let index = self.localIndexForSourceView(itemNode.view),
+           let element = self.accessibilityDirectionalElementPool[index]?.first {
+            return element
+        }
+        return itemNode.view
+    }
+
     private func localIndexForSourceView(_ view: UIView) -> Int? {
         for (index, elements) in self.accessibilityDirectionalElementPool {
             for element in elements {

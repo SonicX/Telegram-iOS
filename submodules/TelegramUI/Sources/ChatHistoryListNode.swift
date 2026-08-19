@@ -6786,12 +6786,15 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                                 }
                             }
                             if let unreadNode {
-                                let target: UIView = unreadNode.activateArea.isNodeLoaded ? unreadNode.activateArea.view : unreadNode.view
-                                voDiagLog("[VO-DIAG] initial-focus → unread-plaque")
+                                // Плашка — item node: постим в её пуловый VO-элемент
+                                // (пост в сырую вьюшку VO может не применить).
+                                let target: Any = strongSelf.accessibilityFocusTarget(for: unreadNode)
+                                voDiagLog("[VO-DIAG] initial-focus → unread-plaque target=\(type(of: target))")
                                 UIAccessibility.post(notification: .layoutChanged, argument: target)
                             } else if let trailingNode {
-                                voDiagLog("[VO-DIAG] initial-focus → trailing-message")
-                                UIAccessibility.post(notification: .layoutChanged, argument: trailingNode.view)
+                                let target: Any = strongSelf.accessibilityFocusTarget(for: trailingNode)
+                                voDiagLog("[VO-DIAG] initial-focus → trailing-message target=\(type(of: target))")
+                                UIAccessibility.post(notification: .layoutChanged, argument: target)
                             } else {
                                 voDiagLog("[VO-DIAG] initial-focus → no-target")
                             }

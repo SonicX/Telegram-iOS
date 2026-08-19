@@ -247,6 +247,33 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
     /// не выходил с первого фильтра на поле (лог: обход останавливался на
     /// Chats). Включаем поле в наш плоский список первым — один контейнер.
     var accessibilityLeadingElementProvider: (() -> UIView?)?
+    /// Порядок фильтров последнего update — для живого accessibilityElements.
+    private var accessibilityOrderedFilterIds: [ChatListSearchFilterEntryId] = []
+
+    // VoiceOver: полоса фильтров — горизонтальный ASScrollNode. При обходе
+    // по иерархии VO на краю скролла листал сам контейнер — свайп назад с
+    // первого фильтра зацикливался по фильтрам (Chats → Channels → …) и не
+    // выходил на строку поиска. Живой плоский список: [строка поиска] +
+    // кнопки фильтров слева направо — собирается при КАЖДОМ запросе, так
+    // что не зависит от момента подключения провайдера и загрузки searchBar
+    // (версия, считавшаяся только в update(), отдавала список без поля:
+    // провайдер подключался после первого update, а следующего не было).
+    // ВАЖНО: Swift-override `accessibilityElements` на ASDisplayNode
+    // ЗАТЕНЯЕТСЯ ObjC-категорией ASDK и не вызывается; мост
+    // _ASDisplayViewAccessiblity читает `customAccessibilityElements()` —
+    // тот же хук, что у ListView/NavigationBar.
+    @objc func customAccessibilityElements() -> [Any]? {
+        var result: [Any] = []
+        if let leading = self.accessibilityLeadingElementProvider?() {
+            result.append(leading)
+        }
+        for id in self.accessibilityOrderedFilterIds {
+            if let itemNode = self.itemNodes[id], itemNode.buttonNode.isNodeLoaded {
+                result.append(itemNode.buttonNode.view)
+            }
+        }
+        return result.isEmpty ? nil : result
+    }
 
     private var currentParams: (size: CGSize, sideInset: CGFloat, filters: [ChatListSearchFilterEntry], selectedFilter: ChatListSearchFilterEntryId?, transitionFraction: CGFloat, presentationData: PresentationData)?
         
@@ -355,35 +382,7 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
             }
         }
         
-        // VoiceOver: полоса фильтров — горизонтальный ASScrollNode. При обходе
-        // по иерархии VO на краю скролла начинал листать сам контейнер —
-        // свайп назад с первого фильтра зацикливался по фильтрам (лог:
-        // Chats → Channels → Chats → …) и не выходил на строку поиска.
-        // Явный плоский список кнопок фильтров (слева направо) выводит скролл
-        // из цепочки обхода: с первого фильтра VO уходит наружу — на поле.
-        // Переустанавливаем только при изменении состава/порядка.
-        var orderedFilterButtons: [Any] = []
-        if let leading = self.accessibilityLeadingElementProvider?() {
-            orderedFilterButtons.append(leading)
-        }
-        for filter in filters {
-            if let itemNode = self.itemNodes[filter.id], itemNode.buttonNode.isNodeLoaded {
-                orderedFilterButtons.append(itemNode.buttonNode.view)
-            }
-        }
-        let currentFilterButtons = self.accessibilityElements ?? []
-        var filterButtonsChanged = currentFilterButtons.count != orderedFilterButtons.count
-        if !filterButtonsChanged {
-            for (lhs, rhs) in zip(currentFilterButtons, orderedFilterButtons) {
-                if (lhs as AnyObject) !== (rhs as AnyObject) {
-                    filterButtonsChanged = true
-                    break
-                }
-            }
-        }
-        if filterButtonsChanged {
-            self.accessibilityElements = orderedFilterButtons
-        }
+        self.accessibilityOrderedFilterIds = filters.map { $0.id }
 
         var tabSizes: [(ChatListSearchFilterEntryId, CGSize, ItemNode, Bool)] = []
         var totalRawTabSize: CGFloat = 0.0
