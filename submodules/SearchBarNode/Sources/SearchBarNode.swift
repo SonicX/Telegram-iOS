@@ -1186,6 +1186,16 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
         return self.textField.isFirstResponder
     }
 
+    /// VoiceOver: КОНЕЧНЫЙ элемент строки поиска — само текстовое поле
+    /// (.searchField). Именно его надо отдавать в чужие плоские
+    /// accessibilityElements: вьюшка SearchBarNode — контейнер (поле,
+    /// Cancel, очистка), фокус на контейнер VO поставить не может
+    /// («Went all the way up the container chain…») и выбрасывает курсор
+    /// на соседнего ребёнка навбара (лог: Chats → Cancel, поле пропущено).
+    public var accessibilityTextFieldView: UIView {
+        return self.textField
+    }
+
     public func deactivate(clear: Bool = true) {
         self.textField.resignFirstResponder()
         if clear {

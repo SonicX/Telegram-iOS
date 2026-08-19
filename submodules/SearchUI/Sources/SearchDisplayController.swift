@@ -40,7 +40,8 @@ public final class SearchDisplayController {
     /// соседних контейнерах (полоса фильтров ставит её первым элементом,
     /// чтобы свайп назад с первого фильтра приходил на поле).
     public var accessibilitySearchBarView: UIView? {
-        return self.searchBar.isNodeLoaded ? self.searchBar.view : nil
+        // Конечный элемент — текстовое поле, не контейнер SearchBarNode.
+        return self.searchBar.isNodeLoaded ? self.searchBar.accessibilityTextFieldView : nil
     }
     
     private var isSearchingDisposable: Disposable?
