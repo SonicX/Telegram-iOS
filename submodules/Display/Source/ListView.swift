@@ -531,6 +531,68 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.voAccessibilityElementsCache = nil
     }
 
+    // Стабильный пул VO-элементов для НЕ-пулового пути (списки без
+    // directional-машинерии: результаты поиска, контакты, настройки).
+    // Раньше addAccessibilityChildren создавал НОВЫЕ UIAccessibilityElement
+    // при каждом вызове customAccessibilityElements(); кэш живёт 0.25с, VO
+    // дёргает массив пачками на каждый жест — через четверть секунды
+    // получал ДРУГИЕ объекты. Сфокусированный инстанс исчезал из массива,
+    // VO терял позицию и ре-резолвил её геометрией — на тот же элемент.
+    // Симптом: свайпы по результатам поиска «зацикливаются между двумя
+    // позициями» (лог: один элемент фокусится 3-4 раза подряд). Ключ —
+    // вьюшка ноды-строки: переживает перерисовки, умирает вместе с нодой.
+    private var accessibilityStableElementPool: [ObjectIdentifier: UIAccessibilityElement] = [:]
+
+    private func appendStableAccessibilityChildren(of node: ASDisplayNode, to list: inout [Any], activeKeys: inout Set<ObjectIdentifier>) {
+        guard node.isAccessibilityElement, node.isNodeLoaded else {
+            // Составные строки (accessibilityElements у ноды) — как раньше:
+            // их элементы живут в самой ноде и уже стабильны.
+            addAccessibilityChildren(of: node, container: (self.isNodeLoaded ? self.view : self) as Any, to: &list, trackFocus: false)
+            return
+        }
+        let frame = clipAccessibilityFrameToContainers(UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view), for: node)
+        guard !frame.isNull, frame.width > 1.0, frame.height > 1.0 else {
+            return
+        }
+        let key = ObjectIdentifier(node.view)
+        let element: UIAccessibilityElement
+        if let existing = self.accessibilityStableElementPool[key] {
+            element = existing
+        } else {
+            element = UIAccessibilityElement(accessibilityContainer: (self.isNodeLoaded ? self.view : self) as Any)
+            self.accessibilityStableElementPool[key] = element
+        }
+        activeKeys.insert(key)
+        if element.accessibilityFrame != frame {
+            element.accessibilityFrame = frame
+        }
+        if element.accessibilityLabel != node.accessibilityLabel {
+            element.accessibilityLabel = node.accessibilityLabel
+        }
+        if element.accessibilityValue != node.accessibilityValue {
+            element.accessibilityValue = node.accessibilityValue
+        }
+        if element.accessibilityTraits != node.accessibilityTraits {
+            element.accessibilityTraits = node.accessibilityTraits
+        }
+        if element.accessibilityHint != node.accessibilityHint {
+            element.accessibilityHint = node.accessibilityHint
+        }
+        if element.accessibilityIdentifier != node.accessibilityIdentifier {
+            element.accessibilityIdentifier = node.accessibilityIdentifier
+        }
+        element.accessibilityCustomActions = node.view.accessibilityCustomActions
+        list.append(element)
+    }
+
+    private func cleanupStableAccessibilityElementPool(activeKeys: Set<ObjectIdentifier>) {
+        // Чистим только когда пул разросся: строки, ушедшие из буфера
+        // материализации, освобождаем; живые инстансы не трогаем.
+        if self.accessibilityStableElementPool.count > activeKeys.count + 64 {
+            self.accessibilityStableElementPool = self.accessibilityStableElementPool.filter { activeKeys.contains($0.key) }
+        }
+    }
+
     @objc open func customAccessibilityElements() -> [Any]? {
         // Баг 1: пока список приостановлен (уходим в чат — см.
         // accessibilityFocusHandlingSuspended), отдаём VoiceOver ПУСТОЙ набор.
@@ -541,6 +603,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return nil
         }
         var accessibilityElements: [Any] = []
+        var stableActiveKeys = Set<ObjectIdentifier>()
         let trackDirectionalFocus = self.accessibilityDirectionalAnnouncement != nil
         var directionalCandidates: [(localIndex: Int, order: Int, element: Any)] = []
         var activeLocalIndices = Set<Int>()
@@ -726,16 +789,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 // «зацикливался между двумя позициями» (лог: один и тот же
                 // UIAccessibilityElement фокусится 3-4 раза подряд), секции
                 // чатов/каналов/приложений были непроходимы.
-                addAccessibilityChildren(of: node, container: (self.isNodeLoaded ? self.view : self) as Any, to: &accessibilityElements, trackFocus: false)
+                self.appendStableAccessibilityChildren(of: node, to: &accessibilityElements, activeKeys: &stableActiveKeys)
             }
         })
         if !trackDirectionalFocus && accessibilityElements.isEmpty {
             self.forEachItemNode({ node in
                 let intersection = node.frame.intersection(visibleRect)
                 if !intersection.isNull && intersection.height > 1.0 {
-                    addAccessibilityChildren(of: node, container: (self.isNodeLoaded ? self.view : self) as Any, to: &accessibilityElements, trackFocus: false)
+                    self.appendStableAccessibilityChildren(of: node, to: &accessibilityElements, activeKeys: &stableActiveKeys)
                 }
             })
+        }
+        if !trackDirectionalFocus {
+            self.cleanupStableAccessibilityElementPool(activeKeys: stableActiveKeys)
         }
         if trackDirectionalFocus {
             // Баг 2: дописываем реальные trailing-элементы (кнопки) как пуловые
