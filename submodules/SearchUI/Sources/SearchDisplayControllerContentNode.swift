@@ -29,6 +29,7 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
     // Запрос при этом сохраняется (dismissInput → searchBar.deactivate(clear:
     // false)); тап по полю поиска снова поднимает клавиатуру.
     private var voFocusObserver: NSObjectProtocol?
+    private var voDismissGeneration: Int = 0
 
     override public init() {
         super.init()
@@ -44,10 +45,21 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
     }
 
     private func voHandleFocusChange(_ notification: Notification) {
+        // Любая смена фокуса отменяет отложенное скрытие: если следующим
+        // фокусом стало поле поиска — клавиатуру трогать нельзя.
+        self.voDismissGeneration &+= 1
         guard UIAccessibility.isVoiceOverRunning, self.isNodeLoaded, self.view.window != nil else {
             return
         }
         guard let focusedAny = notification.userInfo?[UIAccessibility.focusedElementUserInfoKey] else {
+            return
+        }
+        // Поле ввода (UITextField и его потомки) — пользователь хочет
+        // печатать: не прячем и не планируем.
+        if focusedAny is UITextField || focusedAny is UITextView {
+            return
+        }
+        if let focusedView = focusedAny as? UIView, focusedView.isFirstResponder {
             return
         }
         // Определяем вьюшку сфокусированного объекта (вьюшка, нода или
@@ -72,9 +84,33 @@ open class SearchDisplayControllerContentNode: ASDisplayNode {
         if !focusedView.isDescendant(of: self.view) {
             return
         }
-        // dismissInput → resignFirstResponder: на уже неактивном поле — no-op,
-        // так что повторные вызовы при каждом свайпе безвредны.
-        self.dismissInput?()
+        // Скрываем с задержкой. Тап по полю поиска при открытых результатах
+        // VO сначала может кратко провести фокус через элемент под пальцем
+        // (результат), и мгновенный resignFirstResponder срывал активацию
+        // поля — курсор откатывался на результат, напечатать было нельзя.
+        // Если за 0.35с фокус ушёл на поле — generation сменился, скрытие
+        // отменено.
+        let generation = self.voDismissGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.voDismissGeneration == generation else {
+                return
+            }
+            guard UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            // Финальная проверка: фокус всё ещё на результате, а не на поле.
+            if let current = UIAccessibility.focusedElement(using: nil) {
+                if current is UITextField || current is UITextView {
+                    return
+                }
+                if let currentView = current as? UIView, currentView.isFirstResponder {
+                    return
+                }
+            }
+            // dismissInput → resignFirstResponder: на уже неактивном поле —
+            // no-op, повторные вызовы при каждом свайпе безвредны.
+            self.dismissInput?()
+        }
     }
     
     open func updatePresentationData(_ presentationData: PresentationData) {
