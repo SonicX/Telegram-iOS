@@ -176,6 +176,16 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         itemNode.listNode.activateSearch = { [weak self] in
             self?.activateSearch?()
         }
+        // VoiceOver: строка поиска (плейсхолдер в шапке) — synthetic-элемент
+        // ПЕРЕД первым чатом: свайп назад с первого чата/папки приходит на
+        // поиск, свайп вперёд с поиска — на первый чат. Провайдер читается
+        // лениво при каждой пересборке массива.
+        itemNode.listNode.accessibilityLeadingPooledElementsProvider = { [weak self] in
+            guard let element = self?.accessibilitySearchPlaceholderElementProvider?() else {
+                return []
+            }
+            return [element]
+        }
         itemNode.listNode.presentAlert = { [weak self] text in
             self?.presentAlert?(text)
         }
@@ -404,6 +414,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     }
     
     public var activateSearch: (() -> Void)?
+    /// VoiceOver: элемент строки поиска для обхода (ставит ChatListControllerNode,
+    /// у которого есть доступ к навбару со SearchBarPlaceholderNode).
+    var accessibilitySearchPlaceholderElementProvider: (() -> ListViewAccessibilityTrailingElement?)?
     var presentAlert: ((String) -> Void)?
     var present: ((ViewController) -> Void)?
     var push: ((ViewController) -> Void)?
@@ -1165,6 +1178,35 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.controller = controller
         
         super.init()
+
+        self.mainContainerNode.accessibilitySearchPlaceholderElementProvider = { [weak self] in
+            guard let self else {
+                return nil
+            }
+            // Активный поиск — там свой маршрут (поле в полосе фильтров).
+            if self.searchDisplayController != nil {
+                return nil
+            }
+            guard let navigationBarComponentView = self.navigationBarView.view as? ChatListNavigationBar.View,
+                  let searchContentNode = navigationBarComponentView.searchContentNode else {
+                return nil
+            }
+            let placeholderNode = searchContentNode.placeholderNode
+            guard placeholderNode.isNodeLoaded, !placeholderNode.isHidden, placeholderNode.alpha > 0.01, placeholderNode.view.window != nil else {
+                return nil
+            }
+            let frame = UIAccessibility.convertToScreenCoordinates(placeholderNode.view.bounds, in: placeholderNode.view)
+            guard !frame.isNull, frame.height > 1.0 else {
+                return nil
+            }
+            return ListViewAccessibilityTrailingElement(
+                sourceView: placeholderNode.view,
+                label: placeholderNode.accessibilityLabel ?? self.presentationData.strings.Common_Search,
+                value: nil,
+                traits: [.searchField],
+                frame: frame
+            )
+        }
         
         self.setViewBlock({
             return UITracingLayerView()

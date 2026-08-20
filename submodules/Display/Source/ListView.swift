@@ -809,6 +809,25 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // минимального. После сортировки по возрастанию и reverse они
             // оказываются последними swipe-стопами (после новейшего сообщения).
             self.accessibilitySyntheticTrailingIndices.removeAll()
+            if let provider = self.accessibilityLeadingPooledElementsProvider {
+                let leading = provider()
+                if !leading.isEmpty {
+                    let minLocalIndex = directionalCandidates.map({ $0.localIndex }).min() ?? 0
+                    for (i, item) in leading.enumerated() {
+                        let synthIndex = minLocalIndex - 1 - i
+                        let element = self.reuseOrCreateDirectionalElement(localIndex: synthIndex, childOrder: 0, sourceView: item.sourceView)
+                        element.accessibilityFrame = item.frame
+                        element.accessibilityLabel = item.label
+                        element.accessibilityValue = item.value
+                        element.accessibilityHint = nil
+                        element.accessibilityTraits = item.traits
+                        element.accessibilityCustomActions = nil
+                        directionalCandidates.append((localIndex: synthIndex, order: 0, element: element))
+                        activeLocalIndices.insert(synthIndex)
+                        self.accessibilitySyntheticTrailingIndices.insert(synthIndex)
+                    }
+                }
+            }
             if let provider = self.accessibilityTrailingPooledElementsProvider {
                 let trailing = provider()
                 self.accessibilitySuppressTrailingBoundaryScroll = !trailing.isEmpty
@@ -5827,6 +5846,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     // reverse встают последними swipe-стопами. Активация делегируется в
     // `sourceView.accessibilityActivate()`.
     public var accessibilityTrailingPooledElementsProvider: (() -> [ListViewAccessibilityTrailingElement])?
+    /// VoiceOver: synthetic-элементы ПЕРЕД первым элементом natural-списка
+    /// (строка поиска над списком чатов). Та же механика индексов, что у
+    /// trailing (minLocalIndex-1 → первые в ascending-порядке), но БЕЗ
+    /// suppress-флага boundary-скролла — он глушил бы догрузку буфера у
+    /// нижнего края списка чатов.
+    public var accessibilityLeadingPooledElementsProvider: (() -> [ListViewAccessibilityTrailingElement])?
     private var accessibilitySyntheticTrailingIndices: Set<Int> = []
     private var accessibilityLastLoggedArraySnapshot: [String] = []
     private var accessibilityLastLoggedGlobalPosition: Int?
