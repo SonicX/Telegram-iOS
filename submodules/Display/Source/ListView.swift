@@ -541,7 +541,27 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     // Симптом: свайпы по результатам поиска «зацикливаются между двумя
     // позициями» (лог: один элемент фокусится 3-4 раза подряд). Ключ —
     // вьюшка ноды-строки: переживает перерисовки, умирает вместе с нодой.
-    private var accessibilityStableElementPool: [ObjectIdentifier: UIAccessibilityElement] = [:]
+    /// VoiceOver-прокси строки в не-пуловом пути. Слабая ссылка на вьюшку
+    /// строки нужна пулу, чтобы понять, что строка УШЛА из списка (смена
+    /// запроса поиска) — и чтобы не спутать её с новой вьюшкой по тому же
+    /// адресу (ObjectIdentifier переиспользуется после dealloc). Активация
+    /// идёт через ListView напрямую, а не синтезированным тапом по центру
+    /// фрейма: у первой строки секции центр ложился на кромку плавающего
+    /// заголовка, и двойной тап по «Камерата» в результатах не открывал чат.
+    private final class StableAccessibilityElement: UIAccessibilityElement {
+        weak var sourceView: UIView?
+        weak var itemNode: ListViewItemNode?
+        weak var listView: ListView?
+
+        override func accessibilityActivate() -> Bool {
+            if let listView = self.listView, let itemNode = self.itemNode, listView.accessibilityActivateItemNode(itemNode) {
+                return true
+            }
+            return self.sourceView?.accessibilityActivate() ?? false
+        }
+    }
+
+    private var accessibilityStableElementPool: [ObjectIdentifier: StableAccessibilityElement] = [:]
 
     private func appendStableAccessibilityChildren(of node: ASDisplayNode, to list: inout [Any], activeKeys: inout Set<ObjectIdentifier>) {
         guard node.isAccessibilityElement, node.isNodeLoaded else {
@@ -550,21 +570,36 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             addAccessibilityChildren(of: node, container: (self.isNodeLoaded ? self.view : self) as Any, to: &list, trackFocus: false)
             return
         }
-        let frame = clipAccessibilityFrameToContainers(UIAccessibility.convertToScreenCoordinates(node.bounds, in: node.view), for: node)
+        // Фрейм — контентная часть строки БЕЗ header-инсета: заголовок секции
+        // («Чаты и контакты», «Сообщения») — отдельная плавающая нода над
+        // строкой, а bounds ноды его пространство включают. С инсетом рамка
+        // курсора накрывала заголовок, а центр фрейма (точка активации VO)
+        // попадал на его кромку.
+        var localBounds = node.bounds
+        if let itemNode = node as? ListViewItemNode {
+            let insets = itemNode.insets
+            localBounds.origin.y += insets.top
+            localBounds.size.height = max(0.0, localBounds.height - insets.top - insets.bottom)
+        }
+        let frame = clipAccessibilityFrameToContainers(UIAccessibility.convertToScreenCoordinates(localBounds, in: node.view), for: node)
         guard !frame.isNull, frame.width > 1.0, frame.height > 1.0 else {
             return
         }
         let key = ObjectIdentifier(node.view)
-        let element: UIAccessibilityElement
-        if let existing = self.accessibilityStableElementPool[key] {
+        let element: StableAccessibilityElement
+        if let existing = self.accessibilityStableElementPool[key], existing.sourceView === node.view {
             element = existing
         } else {
-            element = UIAccessibilityElement(accessibilityContainer: (self.isNodeLoaded ? self.view : self) as Any)
+            element = StableAccessibilityElement(accessibilityContainer: (self.isNodeLoaded ? self.view : self) as Any)
+            element.sourceView = node.view
             self.accessibilityStableElementPool[key] = element
         }
+        element.itemNode = node as? ListViewItemNode
+        element.listView = self
         activeKeys.insert(key)
         if element.accessibilityFrame != frame {
             element.accessibilityFrame = frame
+            element.accessibilityActivationPoint = CGPoint(x: frame.midX, y: frame.midY)
         }
         if element.accessibilityLabel != node.accessibilityLabel {
             element.accessibilityLabel = node.accessibilityLabel
@@ -586,11 +621,69 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
 
     private func cleanupStableAccessibilityElementPool(activeKeys: Set<ObjectIdentifier>) {
-        // Чистим только когда пул разросся: строки, ушедшие из буфера
-        // материализации, освобождаем; живые инстансы не трогаем.
+        // Строки, УШЕДШИЕ из списка (вьюшка отвязана или у ноды index == nil
+        // после смены запроса поиска), выбрасываем из пула сразу и
+        // обнуляем их прокси. VoiceOver ходит по кэшу дерева и после смены
+        // запроса продолжал перечислять старые прокси со старыми подписями
+        // и фреймами — тестировщик слышал «результаты из предыдущих
+        // запросов» (видео 2026-09-06). Прокси с нулевым фреймом VO считает
+        // невидимым и пропускает, даже если он остался в кэше. Живые строки
+        // (в том числе временно за экраном) не трогаем — их стабильность и
+        // есть смысл пула.
+        var staleKeys: [ObjectIdentifier] = []
+        for (key, element) in self.accessibilityStableElementPool {
+            if activeKeys.contains(key) {
+                continue
+            }
+            var alive = false
+            if let view = element.sourceView, view.superview != nil, view.window != nil {
+                if let itemNode = element.itemNode {
+                    alive = itemNode.index != nil
+                } else {
+                    alive = true
+                }
+            }
+            if !alive {
+                staleKeys.append(key)
+            }
+        }
+        for key in staleKeys {
+            if let element = self.accessibilityStableElementPool.removeValue(forKey: key) {
+                element.accessibilityFrame = .zero
+                element.accessibilityActivationPoint = .zero
+                element.accessibilityLabel = nil
+                element.accessibilityValue = nil
+                element.accessibilityHint = nil
+                element.accessibilityCustomActions = nil
+                element.itemNode = nil
+                element.sourceView = nil
+            }
+        }
+        // Страховка от разрастания: живые, но давно не попадавшие в массив
+        // инстансы освобождаем, когда пул сильно превысил активный набор.
         if self.accessibilityStableElementPool.count > activeKeys.count + 64 {
             self.accessibilityStableElementPool = self.accessibilityStableElementPool.filter { activeKeys.contains($0.key) }
         }
+    }
+
+    /// VoiceOver: активация строки из прокси не-пулового пути — тот же
+    /// путь, что у тапа (highlight → selected у ноды и у item), но без
+    /// хит-теста по центру фрейма.
+    fileprivate func accessibilityActivateItemNode(_ itemNode: ListViewItemNode) -> Bool {
+        guard let index = itemNode.index, index >= 0, index < self.items.count else {
+            return false
+        }
+        guard self.items[index].selectable, itemNode.canBeSelected else {
+            return false
+        }
+        self.highlightedItemIndex = index
+        itemNode.setHighlighted(true, at: CGPoint(x: itemNode.bounds.midX, y: itemNode.bounds.midY), animated: false)
+        itemNode.selected()
+        self.items[index].selected(listView: self)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.clearHighlightAnimated(true)
+        }
+        return true
     }
 
     @objc open func customAccessibilityElements() -> [Any]? {
@@ -599,8 +692,16 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // Иначе VO сам наводится на строки ещё видимого под новым экраном
         // списка и зачитывает соседний чат, пока история открываемого грузится.
         // Флаг ставит только список чатов (история его не выставляет).
+        // ПУСТОЙ массив, а не nil: nil для моста ASDK и UIKit означает
+        // «элементов нет — обходи иерархию сам», и VoiceOver получал сырые
+        // вьюшки строк. То же для спрятанного списка (isHidden / alpha≈0):
+        // мост ASDK перечисляет сабноды панели явным массивом, и скрытый
+        // список недавних в поиске иначе продолжал отдавать свои прокси.
         if self.accessibilityFocusHandlingSuspended {
-            return nil
+            return []
+        }
+        if self.isHidden || self.alpha < 0.01 {
+            return []
         }
         var accessibilityElements: [Any] = []
         var stableActiveKeys = Set<ObjectIdentifier>()

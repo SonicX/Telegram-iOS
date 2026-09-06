@@ -4943,7 +4943,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                             // фильтров (см. accessibilityLeadingElementProvider).
                             if let filterContainerNode = filterContainerNode as? ChatListSearchFiltersContainerNode {
                                 filterContainerNode.accessibilityLeadingElementProvider = { [weak strongSelf] in
-                                    return strongSelf?.chatListDisplayNode.searchDisplayController?.accessibilitySearchBarView
+                                    return strongSelf?.chatListDisplayNode.searchDisplayController?.accessibilitySearchBarViews ?? []
                                 }
                             }
                         }

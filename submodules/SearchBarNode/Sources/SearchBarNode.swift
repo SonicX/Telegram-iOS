@@ -1008,6 +1008,10 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
         self.cancelButton = HighlightableButtonNode(pointerStyle: .default)
         self.cancelButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         self.cancelButton.displaysAsynchronously = false
+        // VoiceOver: явная роль «кнопка» — тестировщики слышали «Отмена» и
+        // «Очистить» без роли (видео 2026-09-06).
+        self.clearButton.accessibilityTraits = .button
+        self.cancelButton.accessibilityTraits = .button
         
         super.init()
         
@@ -1194,6 +1198,21 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
     /// на соседнего ребёнка навбара (лог: Chats → Cancel, поле пропущено).
     public var accessibilityTextFieldView: UIView {
         return self.textField
+    }
+
+    /// VoiceOver: поле + видимые кнопки строки поиска в порядке обхода
+    /// (поле, «Очистить», «Отмена») — для плоского списка полосы фильтров.
+    /// Без этого после поля курсор уходил сразу на фильтры, а «Отмена»
+    /// находилась только после последнего фильтра, «Очистить» — никогда.
+    public var accessibilityLeadingElementViews: [UIView] {
+        var result: [UIView] = [self.textField]
+        if self.clearButton.isNodeLoaded, !self.clearButton.isHidden, self.clearButton.alpha > 0.01 {
+            result.append(self.clearButton.view)
+        }
+        if self.cancelButton.isNodeLoaded, !self.cancelButton.isHidden, self.cancelButton.alpha > 0.01 {
+            result.append(self.cancelButton.view)
+        }
+        return result
     }
 
     public func deactivate(clear: Bool = true) {

@@ -29,6 +29,11 @@ public final class SearchDisplayController {
     private let mode: SearchDisplayControllerMode
     private let backgroundNode: BackgroundNode
     public let contentNode: SearchDisplayControllerContentNode
+    /// VoiceOver: плейсхолдер строки поиска в шапке под активным поиском
+    /// оставался в дереве доступности и находился как «пустое поле поиска»
+    /// последним элементом экрана. На время поиска убираем его; здесь —
+    /// исходное значение для восстановления при деактивации.
+    private var placeholderWasAccessibilityElement: Bool?
     private var hasSeparator: Bool
     private let inline: Bool
     
@@ -42,6 +47,12 @@ public final class SearchDisplayController {
     public var accessibilitySearchBarView: UIView? {
         // Конечный элемент — текстовое поле, не контейнер SearchBarNode.
         return self.searchBar.isNodeLoaded ? self.searchBar.accessibilityTextFieldView : nil
+    }
+
+    /// VoiceOver: поле и видимые кнопки строки поиска («Очистить», «Отмена»)
+    /// в порядке обхода — для плоского списка полосы фильтров.
+    public var accessibilitySearchBarViews: [UIView] {
+        return self.searchBar.isNodeLoaded ? self.searchBar.accessibilityLeadingElementViews : []
     }
     
     private var isSearchingDisposable: Disposable?
@@ -187,6 +198,12 @@ public final class SearchDisplayController {
         insertSubnode(self.backgroundNode, false)
         self.backgroundNode.addSubnode(self.contentNode)
         
+        if let placeholder {
+            self.placeholderWasAccessibilityElement = placeholder.isAccessibilityElement
+            placeholder.isAccessibilityElement = false
+            placeholder.accessibilityElementsHidden = true
+        }
+        
         if self.contentNode.hasDim {
             self.backgroundNode.backgroundColor = .clear
             self.backgroundNode.isTransparent = true
@@ -272,6 +289,12 @@ public final class SearchDisplayController {
     
     public func deactivate(placeholder: SearchBarPlaceholderNode?, animated: Bool = true) {
         self.searchBar.deactivate(clear: false)
+        
+        if let placeholder, let wasAccessibilityElement = self.placeholderWasAccessibilityElement {
+            placeholder.isAccessibilityElement = wasAccessibilityElement
+            placeholder.accessibilityElementsHidden = false
+            self.placeholderWasAccessibilityElement = nil
+        }
         
         let searchBar = self.searchBar
         if let placeholder = placeholder {

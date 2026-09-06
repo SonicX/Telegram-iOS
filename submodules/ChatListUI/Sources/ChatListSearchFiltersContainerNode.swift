@@ -246,7 +246,7 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
     /// поиска). Полоса и поле — разные сабноды навбара, и VO геометрически
     /// не выходил с первого фильтра на поле (лог: обход останавливался на
     /// Chats). Включаем поле в наш плоский список первым — один контейнер.
-    var accessibilityLeadingElementProvider: (() -> UIView?)?
+    var accessibilityLeadingElementProvider: (() -> [UIView])?
     /// Порядок фильтров последнего update — для живого accessibilityElements.
     private var accessibilityOrderedFilterIds: [ChatListSearchFilterEntryId] = []
 
@@ -265,7 +265,7 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
     @objc func customAccessibilityElements() -> [Any]? {
         var result: [Any] = []
         if let leading = self.accessibilityLeadingElementProvider?() {
-            result.append(leading)
+            result.append(contentsOf: leading)
         }
         for id in self.accessibilityOrderedFilterIds {
             if let itemNode = self.itemNodes[id], itemNode.buttonNode.isNodeLoaded {

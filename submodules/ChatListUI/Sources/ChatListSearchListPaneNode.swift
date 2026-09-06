@@ -5328,6 +5328,9 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 guard let strongSelf = self else {
                     return
                 }
+                if !transition.deletions.isEmpty || !transition.insertions.isEmpty {
+                    strongSelf.voScheduleAccessibilityLayoutChanged()
+                }
                 
                 if !strongSelf.didSetReady && !strongSelf.recentListNode.isHidden {
                     var ready: Signal<Bool, NoError>?
@@ -5528,8 +5531,12 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                         transition.updateAlpha(node: strongSelf.shimmerNode, alpha: targetAlpha, delay: 0.1)
                     }
            
+                    let recentListWasHidden = strongSelf.recentListNode.isHidden
                     strongSelf.recentListNode.isHidden = displayingResults || strongSelf.peersFilter.contains(.excludeRecent)
                     strongSelf.recentEmptyNode?.isHidden = strongSelf.recentListNode.isHidden
+                    if recentListWasHidden != strongSelf.recentListNode.isHidden || !transition.deletions.isEmpty || !transition.insertions.isEmpty {
+                        strongSelf.voScheduleAccessibilityLayoutChanged()
+                    }
                     strongSelf.backgroundColor = !displayingResults && strongSelf.peersFilter.contains(.excludeRecent) ? nil : strongSelf.presentationData.theme.chatList.backgroundColor
                     
                     if !strongSelf.didSetReady && strongSelf.recentListNode.isHidden {
@@ -5541,6 +5548,29 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
         }
     }
     
+    // VoiceOver: после смены состава результатов/недавних (и после
+    // скрытия/показа списка недавних) сбрасываем кэш дерева VoiceOver.
+    // Без этого VO продолжал ходить по снимку с прошлого запроса: в обходе
+    // свайпами всплывали строки предыдущих запросов, четырёхпальцевый тап
+    // внизу находил «пустое поле поиска», а касание верха экрана — кнопки
+    // недавних контактов под уже спрятанным списком (видео 2026-09-06).
+    // Аргумент nil — фокус не переносится. Коалесцируем: за один ввод
+    // символа приходит несколько транзакций.
+    private var voLayoutChangedToken: Int = 0
+    private func voScheduleAccessibilityLayoutChanged() {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        self.voLayoutChangedToken &+= 1
+        let token = self.voLayoutChangedToken
+        Queue.mainQueue().after(0.15) { [weak self] in
+            guard let strongSelf = self, strongSelf.voLayoutChangedToken == token, strongSelf.isNodeLoaded, strongSelf.view.window != nil else {
+                return
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: nil)
+        }
+    }
+
     func previewViewAndActionAtLocation(_ location: CGPoint) -> (UIView, CGRect, Any)? {
         var selectedItemNode: ASDisplayNode?
         var bounds: CGRect

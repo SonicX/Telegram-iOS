@@ -116,6 +116,30 @@ static void SortAccessibilityElements(NSMutableArray *elements)
 
 @end
 
+/// VoiceOver: нода, спрятанная сама (hidden / alpha≈0 / accessibilityElementsHidden),
+/// не должна попадать в массив элементов контейнера. UIKit при обходе иерархии
+/// такие вьюшки пропускает сам, но здесь мы отдаём элементы ЯВНЫМ массивом, и
+/// VoiceOver им верит: спрятанный список недавних в поиске (isHidden = true)
+/// продолжал перечисляться вместе с результатами — курсор «ходил под экраном».
+static BOOL ASNodeIsAccessibilityHidden(ASDisplayNode *node)
+{
+  return node.isHidden || node.alpha < 0.01 || node.accessibilityElementsHidden;
+}
+
+/// То же для BFS по layer-backed поддереву: спрятан сам узел или любой его
+/// предок ниже containerNode.
+static BOOL ASNodeIsAccessibilityHiddenUpTo(ASDisplayNode *node, ASDisplayNode *stopNode)
+{
+  ASDisplayNode *current = node;
+  while (current != nil && current != stopNode) {
+    if (ASNodeIsAccessibilityHidden(current)) {
+      return YES;
+    }
+    current = current.supernode;
+  }
+  return NO;
+}
+
 /// Collect all subnodes for the given node by walking down the subnode tree and calculates the screen coordinates based on the containerNode and container
 static void CollectUIAccessibilityElementsForNode(ASDisplayNode *node, ASDisplayNode *containerNode, id container, NSMutableArray *elements)
 {
@@ -124,7 +148,7 @@ static void CollectUIAccessibilityElementsForNode(ASDisplayNode *node, ASDisplay
   ASDisplayNodePerformBlockOnEveryNodeBFS(node, ^(ASDisplayNode * _Nonnull currentNode) {
     // For every subnode that is layer backed or it's supernode has subtree rasterization enabled
     // we have to create a UIAccessibilityElement as no view for this node exists
-    if (currentNode != containerNode && currentNode.isAccessibilityElement) {
+    if (currentNode != containerNode && currentNode.isAccessibilityElement && !ASNodeIsAccessibilityHiddenUpTo(currentNode, containerNode)) {
       UIAccessibilityElement *accessibilityElement = [ASAccessibilityElement accessibilityElementWithContainer:container node:currentNode containerNode:containerNode];
       [elements addObject:accessibilityElement];
     }
@@ -171,6 +195,9 @@ static void CollectAccessibilityElementsForContainer(ASDisplayNode *container, U
     }
 
     for (ASDisplayNode *subnode in node.subnodes) {
+      if (ASNodeIsAccessibilityHidden(subnode)) {
+        continue;
+      }
       queue.push(subnode);
     }
   }
@@ -235,6 +262,9 @@ static void CollectAccessibilityElementsForView(UIView *view, NSMutableArray *el
   }
   
   for (ASDisplayNode *subnode in node.subnodes) {
+    if (ASNodeIsAccessibilityHidden(subnode)) {
+      continue;
+    }
     if (subnode.isAccessibilityElement) {
       
       // An accessiblityElement can either be a UIView or a UIAccessibilityElement
