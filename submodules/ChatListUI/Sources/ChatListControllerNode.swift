@@ -181,10 +181,12 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         // поиск, свайп вперёд с поиска — на первый чат. Провайдер читается
         // лениво при каждой пересборке массива.
         itemNode.listNode.accessibilityLeadingPooledElementsProvider = { [weak self] in
-            guard let element = self?.accessibilitySearchPlaceholderElementProvider?() else {
-                return []
+            // Истории развёрнутой полосы — ПЕРЕД строкой поиска.
+            var result = self?.accessibilityStoryElementsProvider?() ?? []
+            if let element = self?.accessibilitySearchPlaceholderElementProvider?() {
+                result.append(element)
             }
-            return [element]
+            return result
         }
         itemNode.listNode.presentAlert = { [weak self] text in
             self?.presentAlert?(text)
@@ -417,6 +419,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     /// VoiceOver: элемент строки поиска для обхода (ставит ChatListControllerNode,
     /// у которого есть доступ к навбару со SearchBarPlaceholderNode).
     var accessibilitySearchPlaceholderElementProvider: (() -> ListViewAccessibilityTrailingElement?)?
+    /// VoiceOver: истории развёрнутой полосы в шапке — synthetic-элементы
+    /// перед строкой поиска (ставит ChatListControllerNode).
+    var accessibilityStoryElementsProvider: (() -> [ListViewAccessibilityTrailingElement])?
     var presentAlert: ((String) -> Void)?
     var present: ((ViewController) -> Void)?
     var push: ((ViewController) -> Void)?
@@ -1179,6 +1184,42 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         
         super.init()
 
+        // VoiceOver: истории развёрнутой полосы — synthetic-элементы списка
+        // чатов ПЕРЕД строкой поиска: свайп назад с «Поиска» приходит на
+        // последнюю историю, вперёд с истории — дальше по историям и на
+        // «Поиск». Сырые кнопки в шапке при этом прячем от VO
+        // (accessibilityItemsExposedExternally), иначе истории читались
+        // бы дважды: в списке и в шапке, которая в иерархии идёт после.
+        self.mainContainerNode.accessibilityStoryElementsProvider = { [weak self] in
+            guard let self, self.searchDisplayController == nil else {
+                return []
+            }
+            guard let storyPeerListView = self.controller?.chatListHeaderView()?.storyPeerListView() else {
+                return []
+            }
+            storyPeerListView.accessibilityItemsExposedExternally = true
+            var result: [ListViewAccessibilityTrailingElement] = []
+            let items = storyPeerListView.accessibilityItems()
+            if !items.isEmpty {
+                for item in items {
+                    let frame = UIAccessibility.convertToScreenCoordinates(item.view.bounds, in: item.view)
+                    guard !frame.isNull, frame.width > 1.0, frame.height > 1.0 else {
+                        continue
+                    }
+                    result.append(ListViewAccessibilityTrailingElement(sourceView: item.view, label: item.label, value: item.value, traits: [.button], frame: frame))
+                }
+            } else if let collapsed = storyPeerListView.accessibilityCollapsedItem() {
+                // Свёрнутая полоса: кнопка-заголовок с мини-аватарками — один
+                // ведущий элемент перед «Поиском» (лог 19:39: свайп назад с
+                // «Поиска» в навбар VO сам не уходил).
+                let frame = UIAccessibility.convertToScreenCoordinates(collapsed.view.bounds, in: collapsed.view)
+                if !frame.isNull, frame.width > 1.0, frame.height > 1.0 {
+                    result.append(ListViewAccessibilityTrailingElement(sourceView: collapsed.view, label: collapsed.label, value: nil, traits: [.button, .header], frame: frame))
+                }
+            }
+            return result
+        }
+
         self.mainContainerNode.accessibilitySearchPlaceholderElementProvider = { [weak self] in
             guard let self else {
                 return nil
@@ -1198,6 +1239,14 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
             let frame = UIAccessibility.convertToScreenCoordinates(placeholderNode.view.bounds, in: placeholderNode.view)
             guard !frame.isNull, frame.height > 1.0 else {
                 return nil
+            }
+            // Сырой плейсхолдер в шапке прячем от VO: он дублировал
+            // synthetic-«Поиск» с тем же фреймом и той же меткой, и свайп
+            // назад с «Поиска» приходил на такой же «Поиск» — как будто
+            // курсор не сдвинулся. Активация synthetic-элемента идёт через
+            // accessibilityActivate вьюшки и от флага не зависит.
+            if placeholderNode.isAccessibilityElement {
+                placeholderNode.isAccessibilityElement = false
             }
             return ListViewAccessibilityTrailingElement(
                 sourceView: placeholderNode.view,
@@ -1601,6 +1650,14 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         
         let navigationBarLayout = self.updateNavigationBar(layout: layout, deferScrollApplication: true, transition: ComponentTransition(transition))
         self.mainContainerNode.initialScrollingOffset = ChatListNavigationBar.searchScrollHeight + navigationBarLayout.storiesInset
+        // VoiceOver: сырой плейсхолдер строки поиска прячем уже на раскладке,
+        // не дожидаясь первой сборки массива списка. При запуске VO успевал
+        // сфокусировать его первым (лог 20:17: _ASDisplayView «Search» и
+        // «Went all the way up the container chain»), после скрытия курсор
+        // с него никуда не двигался. Обход идёт через synthetic-«Поиск».
+        if self.searchDisplayController == nil, let navigationBarComponentView = self.navigationBarView.view as? ChatListNavigationBar.View, let searchContentNode = navigationBarComponentView.searchContentNode, searchContentNode.placeholderNode.isAccessibilityElement {
+            searchContentNode.placeholderNode.isAccessibilityElement = false
+        }
         
         navigationBarHeight = navigationBarLayout.navigationHeight
         visualNavigationHeight = navigationBarLayout.navigationHeight

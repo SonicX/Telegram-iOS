@@ -517,6 +517,21 @@ public final class StoryPeerListItemComponent: Component {
         
         private var component: StoryPeerListItemComponent?
         private weak var componentState: EmptyComponentState?
+        /// VoiceOver: метка и значение элемента, когда полоса развёрнута
+        /// (nil — свёрнута, элемент недоступен). Читает список чатов, чтобы
+        /// отдать истории как свои ведущие пуловые элементы.
+        public private(set) var accessibilityDescriptor: (label: String, value: String?)?
+        /// VoiceOver: истории отдаёт наружу список чатов — сырая кнопка
+        /// становится НЕдоступной совсем (не только скрытой из обхода):
+        /// иначе касание и восстановление фокуса после закрытия истории
+        /// садились на неё, а свайпы с неё никуда не вели (лог 19:53).
+        public var accessibilityExposedExternally: Bool = false {
+            didSet {
+                if self.accessibilityExposedExternally != oldValue {
+                    self.button.isAccessibilityElement = self.accessibilityDescriptor != nil && !self.accessibilityExposedExternally
+                }
+            }
+        }
         
         public override init(frame: CGRect) {
             self.backgroundContainer = UIView()
@@ -1164,7 +1179,32 @@ public final class StoryPeerListItemComponent: Component {
                 })
             }
             
+            // VoiceOver: кнопка истории без метки объявлялась просто «кнопка»
+            // (тестировщики: «не озвучивает содержание статусов»). Элемент —
+            // сама кнопка: активация идёт штатным pressed. Доступна только в
+            // развёрнутой полосе; в свёрнутом состоянии мини-аватарки накрыты
+            // collapsedButton списка со своей меткой-заголовком.
+            let isAccessibleItem = component.expandedAlphaFraction > 0.5
+            self.button.isAccessibilityElement = isAccessibleItem && !self.accessibilityExposedExternally
+            self.accessibilityElementsHidden = !isAccessibleItem
+            self.button.accessibilityLabel = titleString
+            self.button.accessibilityTraits = .button
+            var accessibilityValueText: String?
+            if component.hasItems && component.totalCount > 0 {
+                accessibilityValueText = component.strings.ChatList_ArchiveStoryCount(Int32(component.totalCount))
+            } else if component.peer.id == component.context.account.peerId {
+                accessibilityValueText = component.strings.StoryFeed_AddStory
+            }
+            self.button.accessibilityValue = accessibilityValueText
+            self.accessibilityDescriptor = isAccessibleItem ? (label: titleString, value: accessibilityValueText) : nil
+            
             return availableSize
+        }
+
+        /// VoiceOver: элемент, на который ставить курсор при переходе к
+        /// полосе историй (nil, если элемент сейчас недоступен — полоса свёрнута).
+        public func accessibilityFocusTarget() -> UIView? {
+            return self.accessibilityDescriptor != nil ? self.button : nil
         }
     }
     

@@ -137,6 +137,17 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
         self.addSubnode(self.textNode)
         self.addSubnode(self.arrowNode)
         self.addSubnode(self.activateArea)
+        // VoiceOver: явная активация. Синтезированный тап по центру фрейма в
+        // этом экране до кнопки строки не доходил (тестировщики: «Мой
+        // профиль», «Уведомления» не открывались), у ActionItem такое
+        // замыкание уже было.
+        self.activateArea.activate = { [weak self] in
+            guard let self, let pressed = self.selectionNode.pressed else {
+                return false
+            }
+            pressed()
+            return true
+        }
     }
     
     deinit {

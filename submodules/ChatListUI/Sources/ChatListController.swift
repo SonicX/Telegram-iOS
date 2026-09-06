@@ -3302,6 +3302,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 
                 guard let peer else {
                     self.chatListDisplayNode.scrollToStories(animated: true)
+                    // VoiceOver: тап по кнопке-заголовку свёрнутой полосы
+                    // разворачивает истории; кнопка исчезает, и VO сам
+                    // перекидывал курсор на «Поиск». Ставим на первую историю.
+                    self.voScheduleFocusOnStories(reason: "collapsed-header-tap")
                     return
                 }
                 
@@ -3682,6 +3686,57 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         }
     }
     
+    // VoiceOver: после разворота полосы историй по кнопке-заголовку
+    // («Chats» с мини-аватарками) кнопка исчезает, и VO перекидывал курсор
+    // на «Поиск»; после закрытия просмотра историй — тоже на «Поиск».
+    // Ставим курсор на историю (нужного пира или первую) развёрнутой
+    // полосы — на ПУЛОВЫЙ элемент списка чатов, через который истории и
+    // отдаются VO. Элементы появляются после анимации, поэтому несколько
+    // попыток с шагом 0.25 с; на последней попытке годится и
+    // кнопка-заголовок свёрнутой полосы.
+    private var voStoriesFocusToken: Int = 0
+    private func voScheduleFocusOnStories(reason: String, peerId: EnginePeer.Id? = nil) {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        self.voStoriesFocusToken &+= 1
+        let token = self.voStoriesFocusToken
+        self.voAttemptFocusOnStories(token: token, reason: reason, peerId: peerId, attemptsLeft: 4, delay: 0.45)
+    }
+
+    private func voAttemptFocusOnStories(token: Int, reason: String, peerId: EnginePeer.Id?, attemptsLeft: Int, delay: Double) {
+        Queue.mainQueue().after(delay) { [weak self] in
+            guard let self, self.voStoriesFocusToken == token, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            let storyPeerListView = self.chatListHeaderView()?.storyPeerListView()
+            var target: UIView?
+            if let peerId {
+                target = storyPeerListView?.accessibilityFocusTargetView(peerId: peerId)
+            }
+            if target == nil {
+                let candidate = storyPeerListView?.accessibilityFocusTargetView()
+                if let candidate, candidate === storyPeerListView?.accessibilityCollapsedButton, attemptsLeft > 0 {
+                    // Ждём развёрнутую полосу: кнопка-заголовок — не та цель.
+                } else {
+                    target = candidate
+                }
+            }
+            guard let target else {
+                if attemptsLeft > 0 {
+                    self.voAttemptFocusOnStories(token: token, reason: reason, peerId: peerId, attemptsLeft: attemptsLeft - 1, delay: 0.25)
+                } else {
+                    voDiagLog("[VO-DIAG] stories-focus reason=\(reason) no-target")
+                }
+                return
+            }
+            let listNode = self.chatListDisplayNode.effectiveContainerNode.currentItemNode
+            let postTarget: Any = listNode.accessibilityFocusTarget(forSourceView: target) ?? target
+            voDiagLog("[VO-DIAG] stories-focus reason=\(reason) target=\(type(of: postTarget)) label=«\(target.accessibilityLabel ?? "-")»")
+            UIAccessibility.post(notification: .layoutChanged, argument: postTarget)
+        }
+    }
+
     public func scrollToStories(peerId: EnginePeer.Id? = nil) {
         self.chatListDisplayNode.scrollToStories(animated: false)
         
@@ -4603,6 +4658,9 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                                 guard let self else {
                                     return nil
                                 }
+                                // VoiceOver: после закрытия просмотра курсор —
+                                // на историю, которую смотрели последней.
+                                self.voScheduleFocusOnStories(reason: "story-dismiss", peerId: peerId)
                                 
                                 if let navigationBarView = self.chatListDisplayNode.navigationBarView.view as? ChatListNavigationBar.View {
                                     if navigationBarView.storiesUnlocked {

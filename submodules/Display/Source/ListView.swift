@@ -915,7 +915,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 if !leading.isEmpty {
                     let minLocalIndex = directionalCandidates.map({ $0.localIndex }).min() ?? 0
                     for (i, item) in leading.enumerated() {
-                        let synthIndex = minLocalIndex - 1 - i
+                        // Порядок провайдера должен сохраниться в ИТОГОВОМ
+                        // массиве: у natural-списка (чаты) индексы растут
+                        // вместе с i, у reversed — убывают (после reverse
+                        // порядок восстановится). С «−1−i» для всех несколько
+                        // историй перед «Поиском» шли задом наперёд.
+                        let synthIndex: Int
+                        if self.accessibilityNavigationOrder == .reversed {
+                            synthIndex = minLocalIndex - 1 - i
+                        } else {
+                            synthIndex = minLocalIndex - leading.count + i
+                        }
                         let element = self.reuseOrCreateDirectionalElement(localIndex: synthIndex, childOrder: 0, sourceView: item.sourceView)
                         element.accessibilityFrame = item.frame
                         element.accessibilityLabel = item.label
@@ -8103,6 +8113,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// («Archived Chats» вместо открытого чата при возврате, лог 2026-08-11).
     /// Возвращает пуловый элемент, если он есть, иначе — вьюшку строки.
     /// Перед поиском обновляет массив, чтобы пул был актуален.
+    /// VoiceOver: пуловый элемент для synthetic-источника (кнопка истории
+    /// в шапке, отданная через leading-провайдер); nil, если его нет в
+    /// текущем массиве.
+    public func accessibilityFocusTarget(forSourceView view: UIView) -> Any? {
+        let _ = self.customAccessibilityElements()
+        for (_, elements) in self.accessibilityDirectionalElementPool {
+            if let element = elements.first(where: { $0.sourceView === view }) {
+                return element
+            }
+        }
+        return nil
+    }
+
     public func accessibilityFocusTarget(for itemNode: ListViewItemNode) -> Any {
         let _ = self.customAccessibilityElements()
         if let index = itemNode.index, let elements = self.accessibilityDirectionalElementPool[index] {

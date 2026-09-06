@@ -350,6 +350,13 @@ final class StoryAuthorInfoComponent: Component {
                 counterLabel.view?.removeFromSuperview()
             }
 
+            // VoiceOver: шапка автора — один элемент «имя, время»; тап
+            // открывает профиль, поэтому роль — кнопка.
+            self.isAccessibilityElement = true
+            let subtitleText = subtitle.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.accessibilityLabel = subtitleText.isEmpty ? title : "\(title), \(subtitleText)"
+            self.accessibilityTraits = .button
+
             return size
         }
 	}

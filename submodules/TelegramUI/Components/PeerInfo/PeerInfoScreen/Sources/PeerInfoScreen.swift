@@ -182,6 +182,27 @@ class PeerInfoScreenItemNode: ASDisplayNode, AccessibilityFocusableNode {
     
     override open func accessibilityElementDidBecomeFocused() {
 //        (self.supernode as? ListView)?.ensureItemNodeVisible(self, animated: false, overflow: 22.0)
+        // VoiceOver: запоминаем строку, на которой стоит курсор, чтобы после
+        // возврата из вложенного экрана поставить его обратно на неё.
+        var supernode = self.supernode
+        while let node = supernode {
+            if let screenNode = node as? PeerInfoScreenNode {
+                screenNode.voLastFocusedItemNode = self
+                break
+            }
+            supernode = node.supernode
+        }
+    }
+
+    /// VoiceOver: элемент строки, на который можно поставить курсор
+    /// (AccessibilityAreaNode поверх строки).
+    func accessibilityFocusTargetView() -> UIView? {
+        for subnode in self.subnodes ?? [] {
+            if let areaNode = subnode as? AccessibilityAreaNode, areaNode.isNodeLoaded, areaNode.isAccessibilityElement {
+                return areaNode.view
+            }
+        }
+        return nil
     }
 }
 
@@ -3278,6 +3299,9 @@ private func editingItems(data: PeerInfoScreenData?, boostStatus: ChannelBoostSt
 }
 
 final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodeProtocol, ASScrollViewDelegate {
+    /// VoiceOver: строка, на которой курсор стоял последней (см.
+    /// PeerInfoScreenItemNode.accessibilityElementDidBecomeFocused).
+    weak var voLastFocusedItemNode: PeerInfoScreenItemNode?
     private weak var controller: PeerInfoScreenImpl?
     
     private let context: AccountContext
@@ -14657,6 +14681,23 @@ public final class PeerInfoScreenImpl: ViewController, PeerInfoScreen, KeyShortc
     
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        
+        // VoiceOver: после возврата из вложенного экрана («Мой профиль»,
+        // «Уведомления») курсор садился на заголовок навбара. Возвращаем его
+        // на строку, с которой уходили. didAppear ещё false при первом показе.
+        if self.didAppear, UIAccessibility.isVoiceOverRunning, let itemNode = self.controllerNode.voLastFocusedItemNode {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak itemNode] in
+                guard let self, UIAccessibility.isVoiceOverRunning, self.view.window != nil else {
+                    return
+                }
+                guard let itemNode, itemNode.isNodeLoaded, itemNode.view.window != nil, let target = itemNode.accessibilityFocusTargetView() else {
+                    voDiagLog("[VO-DIAG] peerinfo-return-focus no-target")
+                    return
+                }
+                voDiagLog("[VO-DIAG] peerinfo-return-focus label=«\(target.accessibilityLabel ?? "-")»")
+                UIAccessibility.post(notification: .layoutChanged, argument: target)
+            }
+        }
         
         DispatchQueue.main.async { [weak self] in
             self?.didAppear = true

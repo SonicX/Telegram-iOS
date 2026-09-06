@@ -2320,6 +2320,10 @@ public final class MessageInputPanelComponent: Component {
                 if stickerButtonView.superview == nil {
                     self.addSubview(stickerButtonView)
                 }
+                // VoiceOver: кнопка стикеров/эмодзи без метки.
+                stickerButtonView.isAccessibilityElement = true
+                stickerButtonView.accessibilityLabel = component.strings.ChatSettings_Stickers
+                stickerButtonView.accessibilityTraits = .button
                 let stickerIconFrame = CGRect(origin: CGPoint(x: fieldIconNextX - stickerButtonSize.width, y: fieldBackgroundFrame.maxY - 4.0 - stickerButtonSize.height), size: stickerButtonSize)
                 transition.setPosition(view: stickerButtonView, position: stickerIconFrame.center)
                 transition.setBounds(view: stickerButtonView, bounds: CGRect(origin: CGPoint(), size: stickerIconFrame.size))

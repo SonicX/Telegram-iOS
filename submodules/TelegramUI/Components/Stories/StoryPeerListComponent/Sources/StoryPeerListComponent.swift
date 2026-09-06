@@ -573,6 +573,96 @@ public final class StoryPeerListComponent: Component {
         public func scrollToTop() {
             self.scrollView.setContentOffset(CGPoint(), animated: true)
         }
+
+        /// VoiceOver: кнопка-заголовок свёрнутой полосы (для сравнения цели).
+        public var accessibilityCollapsedButton: UIView {
+            return self.collapsedButton
+        }
+
+        /// VoiceOver: истории отдаёт наружу список чатов (как свои ведущие
+        /// пуловые элементы перед «Поиском»); сырые кнопки в полосе при этом
+        /// прячем, иначе VO читал бы каждую историю дважды.
+        public var accessibilityItemsExposedExternally: Bool = false {
+            didSet {
+                if self.accessibilityItemsExposedExternally != oldValue {
+                    self.scrollContainerView.accessibilityElementsHidden = self.accessibilityItemsExposedExternally
+                    self.collapsedButton.isAccessibilityElement = !self.accessibilityItemsExposedExternally
+                    for (_, visibleItem) in self.visibleItems {
+                        if let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View {
+                            itemView.accessibilityExposedExternally = self.accessibilityItemsExposedExternally
+                        }
+                    }
+                }
+            }
+        }
+
+        public struct AccessibilityItem {
+            public let peerId: EnginePeer.Id
+            public let view: UIView
+            public let label: String
+            public let value: String?
+        }
+
+        /// VoiceOver: истории развёрнутой полосы слева направо (пусто, если
+        /// полоса свёрнута).
+        public func accessibilityItems() -> [AccessibilityItem] {
+            guard let component = self.component, component.unlocked else {
+                return []
+            }
+            var result: [AccessibilityItem] = []
+            for itemSet in self.sortedItems {
+                guard let visibleItem = self.visibleItems[itemSet.peer.id], let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View else {
+                    continue
+                }
+                guard let descriptor = itemView.accessibilityDescriptor, let target = itemView.accessibilityFocusTarget(), target.window != nil, !target.isHidden, target.alpha > 0.01 else {
+                    continue
+                }
+                result.append(AccessibilityItem(peerId: itemSet.peer.id, view: target, label: descriptor.label, value: descriptor.value))
+            }
+            return result
+        }
+
+        /// VoiceOver: кнопка истории конкретного пира в развёрнутой полосе.
+        public func accessibilityFocusTargetView(peerId: EnginePeer.Id) -> UIView? {
+            return self.accessibilityItems().first(where: { $0.peerId == peerId })?.view
+        }
+
+        /// VoiceOver: цель фокуса после «в начало» по вкладке «Чаты» — первая
+        /// история развёрнутой полосы; у свёрнутой — кнопка-заголовок.
+        public func accessibilityFocusTargetView() -> UIView? {
+            guard let component = self.component else {
+                return nil
+            }
+            if component.unlocked {
+                for itemSet in self.sortedItems {
+                    guard let visibleItem = self.visibleItems[itemSet.peer.id], let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View else {
+                        continue
+                    }
+                    if let target = itemView.accessibilityFocusTarget(), !target.isHidden, target.alpha > 0.01 {
+                        return target
+                    }
+                }
+                return nil
+            }
+            if let collapsed = self.accessibilityCollapsedItem() {
+                return collapsed.view
+            }
+            return nil
+        }
+
+        /// VoiceOver: кнопка-заголовок СВЁРНУТОЙ полосы (заголовок списка с
+        /// мини-аватарками историй); nil, когда полоса развёрнута. Список
+        /// чатов ставит её ведущим элементом перед «Поиском», чтобы свайп
+        /// назад с «Поиска» приходил на неё.
+        public func accessibilityCollapsedItem() -> (view: UIView, label: String)? {
+            guard let component = self.component, !component.unlocked else {
+                return nil
+            }
+            guard self.collapsedButton.isUserInteractionEnabled, !self.collapsedButton.isHidden, self.collapsedButton.alpha > 0.01, self.collapsedButton.window != nil else {
+                return nil
+            }
+            return (self.collapsedButton, component.title)
+        }
         
         public func scrollViewDidScroll(_ scrollView: UIScrollView) {
             if !self.ignoreScrolling {
@@ -1170,6 +1260,7 @@ public final class StoryPeerListComponent: Component {
                 )
                 
                 if let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View {
+                    itemView.accessibilityExposedExternally = self.accessibilityItemsExposedExternally
                     if itemView.superview == nil {
                         self.scrollContainerView.addSubview(itemView)
                         self.scrollContainerView.addSubview(itemView.backgroundContainer)
@@ -1310,6 +1401,7 @@ public final class StoryPeerListComponent: Component {
                 )
                 
                 if let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View {
+                    itemView.accessibilityExposedExternally = self.accessibilityItemsExposedExternally
                     if itemView.superview == nil {
                         itemView.isUserInteractionEnabled = false
                         self.scrollContainerView.addSubview(itemView)
@@ -1677,7 +1769,9 @@ public final class StoryPeerListComponent: Component {
             // VoiceOver: collapsedButton накрывает заголовок списка чатов с
             // мини-аватарками сторис («панель со статусами»). Без метки VO
             // объявлял просто «кнопка» — пользователь не слышал, что выбрано.
-            self.collapsedButton.isAccessibilityElement = true
+            // Когда истории отдаёт наружу список чатов, сырая кнопка-заголовок
+            // тоже прячется: она идёт в массив списка ведущим элементом.
+            self.collapsedButton.isAccessibilityElement = !self.accessibilityItemsExposedExternally
             self.collapsedButton.accessibilityLabel = component.title
             self.collapsedButton.accessibilityTraits = .header
 

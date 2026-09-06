@@ -4046,6 +4046,10 @@ public final class StoryItemSetContainerComponent: Component {
                 
                 transition.setFrame(view: self.closeButton, frame: closeButtonFrame)
                 transition.setAlpha(view: self.closeButton, alpha: (component.hideUI || self.isEditingStory || component.isEmbeddedInCamera) ? 0.0 : 1.0)
+                // VoiceOver: кнопки шапки истории без меток объявлялись
+                // просто «кнопка» (тестировщики: «включить звук и другие»).
+                self.closeButton.accessibilityLabel = component.strings.Common_Close
+                self.closeButton.accessibilityTraits = .button
                 transition.setFrame(view: self.closeButtonIconView, frame: CGRect(origin: CGPoint(x: floor((closeButtonFrame.width - image.size.width) * 0.5), y: floor((closeButtonFrame.height - image.size.height) * 0.5)), size: image.size))
                 headerRightOffset -= 51.0
             }
@@ -4088,6 +4092,8 @@ public final class StoryItemSetContainerComponent: Component {
                 if moreButtonView.superview == nil {
                     self.controlsClippingView.addSubview(moreButtonView)
                 }
+                moreButtonView.accessibilityLabel = component.strings.Common_More
+                moreButtonView.accessibilityTraits = .button
                 moreButtonView.isUserInteractionEnabled = !component.slice.item.storyItem.isPending
                 transition.setFrame(view: moreButtonView, frame: CGRect(origin: CGPoint(x: headerRightOffset - moreButtonSize.width, y: 2.0), size: moreButtonSize))
                 transition.setAlpha(view: moreButtonView, alpha: component.slice.item.storyItem.isPending ? 0.5 : 1.0)
@@ -4157,6 +4163,10 @@ public final class StoryItemSetContainerComponent: Component {
                 }
                 transition.setFrame(view: soundButtonView, frame: CGRect(origin: CGPoint(x: headerRightOffset - soundButtonSize.width, y: 2.0), size: soundButtonSize))
                 transition.setAlpha(view: soundButtonView, alpha: soundAlpha)
+                // Метка по состоянию: со звуком — «Выключить звук», без — «Включить».
+                soundButtonView.isAccessibilityElement = soundAlpha > 0.01
+                soundButtonView.accessibilityLabel = soundButtonState ? component.strings.Conversation_Unmute : component.strings.Conversation_Mute
+                soundButtonView.accessibilityTraits = .button
                 
                 if isVideo {
                     headerRightOffset -= soundButtonSize.width + 13.0

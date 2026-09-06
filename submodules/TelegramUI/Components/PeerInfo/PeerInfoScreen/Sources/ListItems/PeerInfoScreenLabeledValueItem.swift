@@ -278,6 +278,17 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
         self.contextSourceNode.contentNode.addSubnode(self.iconButtonNode)
         
         self.addSubnode(self.activateArea)
+        // VoiceOver: явная активация. Синтезированный тап по центру фрейма в
+        // этом экране до кнопки строки не доходил (тестировщики: «Мой
+        // профиль», «Уведомления» не открывались), у ActionItem такое
+        // замыкание уже было.
+        self.activateArea.activate = { [weak self] in
+            guard let self, let pressed = self.selectionNode.pressed else {
+                return false
+            }
+            pressed()
+            return true
+        }
         
         self.expandButonNode.addTarget(self, action: #selector(self.expandPressed), forControlEvents: .touchUpInside)
         self.expandButonNode.highligthedChanged = { [weak self] highlighted in

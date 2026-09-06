@@ -790,6 +790,38 @@ public final class MessageInputActionButtonComponent: Component {
                 transition.setScale(view: micButton, scale: microphoneAlpha == 0.0 ? 0.01 : 1.0)
             }
             
+            // VoiceOver: кнопка без метки объявлялась просто «кнопка»
+            // (истории: «Отправить», «Нравится», вложения, запись). Метка — по
+            // режиму; элемент — сама вьюшка, активация штатная.
+            let accessibilityLabelText: String?
+            switch component.mode {
+            case .none, .captionUp, .captionDown:
+                accessibilityLabelText = nil
+            case .send, .stars:
+                accessibilityLabelText = component.strings.MediaPicker_Send
+            case .apply:
+                accessibilityLabelText = component.strings.Common_Done
+            case .voiceInput, .unavailableVoiceInput:
+                accessibilityLabelText = component.strings.VoiceOver_Chat_RecordModeVoiceMessage
+            case .videoInput, .removeVideoInput:
+                accessibilityLabelText = component.strings.VoiceOver_Chat_RecordModeVideoMessage
+            case .delete:
+                accessibilityLabelText = component.strings.Common_Delete
+            case .attach:
+                accessibilityLabelText = component.strings.Conversation_InputMenu
+            case .forward, .repost:
+                accessibilityLabelText = component.strings.Conversation_ContextMenuForward
+            case .more:
+                accessibilityLabelText = component.strings.Common_More
+            case .like:
+                accessibilityLabelText = component.strings.VoiceOver_MessageContextReactions
+            case .close:
+                accessibilityLabelText = component.strings.Common_Close
+            }
+            self.isAccessibilityElement = accessibilityLabelText != nil
+            self.accessibilityLabel = accessibilityLabelText
+            self.accessibilityTraits = .button
+            
             return availableSize
         }
 
