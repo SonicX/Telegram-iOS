@@ -124,6 +124,7 @@ final class SGStoryWarningComponent: Component {
             let navigationStripTopInset: CGFloat = 15.0
             
             let closeButtonSize = CGSize(width: 50.0, height: 64.0)
+            self.closeButton.accessibilityLabel = component.strings.Common_Close
             self.closeButton.frame = CGRect(origin: CGPoint(x: availableSize.width - closeButtonSize.width, y: navigationStripTopInset + topInset), size: closeButtonSize)
             
             var authorName = i18n("Stories.Warning.Author", component.strings.baseLanguageCode)

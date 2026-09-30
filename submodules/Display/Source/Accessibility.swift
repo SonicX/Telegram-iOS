@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import os
 import AsyncDisplayKit
 import SwiftSignalKit
 
@@ -20,6 +21,7 @@ public func voAccessibilityLog(_ message: @autoclosure () -> String) {
     if voVerboseAccessibilityLogging {
         let text = message()
         print(text)
+        voSystemLog(text)
         voDiagnosticsSink?(text)
     }
 }
@@ -29,11 +31,24 @@ public func voAccessibilityLog(_ message: @autoclosure () -> String) {
 /// Debug → Send Logs. Без подключения диагностика идёт только в консоль.
 public var voDiagnosticsSink: ((String) -> Void)?
 
-/// Диагностический принт [VO-DIAG]: в консоль + в файловый лог (если подключён).
+/// Диагностический принт [VO-DIAG]: в консоль + в файловый лог (если подключён)
+/// + в системный журнал устройства.
 public func voDiagLog(_ message: @autoclosure () -> String) {
     let text = message()
     print(text)
+    voSystemLog(text)
     voDiagnosticsSink?(text)
+}
+
+private let voSystemLogObject = OSLog(subsystem: "Swiftgram.VoiceOver", category: "VO")
+
+/// `print` без подключённого отладчика никуда не попадает, поэтому VO-логи
+/// дублируем в системный журнал: их видно вживую с устройства по кабелю
+/// (`scripts/device-logs.sh`, Console.app) — нужно для iPhone на iOS 16,
+/// который Xcode 27 не умеет запускать под отладчиком.
+@inline(__always)
+private func voSystemLog(_ text: String) {
+    os_log("%{public}@", log: voSystemLogObject, type: .default, text)
 }
 
 /// Описание реального VO-элемента, который `ListView` дописывает ПОСЛЕ

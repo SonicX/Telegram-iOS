@@ -798,6 +798,9 @@ final class StoryContentCaptionComponent: Component {
                             transition.animateAlpha(view: view, from: 0.0, to: 1.0)
                         }
                         view.frame = forwardInfoPanelFrame
+                        // VoiceOver: плашка «репост от …» — кнопка без метки.
+                        view.accessibilityLabel = text.isEmpty ? authorName : "\(authorName), \(text)"
+                        view.accessibilityTraits = .button
                     }
                 }
             } else if let forwardInfoPanel = self.forwardInfoPanel {

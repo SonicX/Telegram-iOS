@@ -166,6 +166,33 @@ public final class PlainButtonComponent: Component {
             }
             component.action()
         }
+
+        // VoiceOver: кнопка — сама элемент доступности и глушит содержимое,
+        // поэтому без явной метки объявлялась просто «кнопка» (истории: шапка
+        // автора и др.). Если метка не задана снаружи — берём метку содержимого.
+        override public var accessibilityLabel: String? {
+            get {
+                if let label = super.accessibilityLabel, !label.isEmpty {
+                    return label
+                }
+                return self.content.view?.accessibilityLabel
+            }
+            set {
+                super.accessibilityLabel = newValue
+            }
+        }
+
+        override public var accessibilityValue: String? {
+            get {
+                if let value = super.accessibilityValue, !value.isEmpty {
+                    return value
+                }
+                return self.content.view?.accessibilityValue
+            }
+            set {
+                super.accessibilityValue = newValue
+            }
+        }
         
         override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
             if self.isHidden || self.alpha == 0.0 {

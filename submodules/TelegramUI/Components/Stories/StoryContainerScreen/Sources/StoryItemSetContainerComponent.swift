@@ -4283,6 +4283,18 @@ public final class StoryItemSetContainerComponent: Component {
                     }
                     
                     privacyIconTransition.setFrame(view: closeFriendIconView, frame: closeFriendIconFrame)
+                    // VoiceOver: иконка приватности без метки — «кнопка».
+                    switch storyPrivacyIcon {
+                    case .closeFriends:
+                        closeFriendIconView.accessibilityLabel = component.strings.Story_Privacy_CategoryCloseFriends
+                    case .contacts:
+                        closeFriendIconView.accessibilityLabel = component.strings.Story_Privacy_CategoryContacts
+                    case .selectedContacts:
+                        closeFriendIconView.accessibilityLabel = component.strings.Story_Privacy_CategorySelectedContacts
+                    case .everyone:
+                        closeFriendIconView.accessibilityLabel = component.strings.Story_Privacy_CategoryEveryone
+                    }
+                    closeFriendIconView.accessibilityTraits = .button
                     headerRightOffset -= 44.0
                 }
             } else if let closeFriendIcon = self.privacyIcon {
@@ -4328,6 +4340,8 @@ public final class StoryItemSetContainerComponent: Component {
                     }
                     
                     pictureInPictureIconTransition.setFrame(view: pictureInPictureIconView, frame: pictureInPictureIconFrame)
+                    pictureInPictureIconView.accessibilityLabel = component.strings.Gallery_VoiceOver_PictureInPicture
+                    pictureInPictureIconView.accessibilityTraits = .button
                     headerRightOffset -= 44.0
                 }
             } else if let pictureInPictureIcon = self.pictureInPictureIcon {
@@ -4480,6 +4494,10 @@ public final class StoryItemSetContainerComponent: Component {
                         animateIn = true
                     }
                     transition.setFrame(view: view, frame: CGRect(origin: CGPoint(x: 12.0, y: component.isEmbeddedInCamera ? 17.0 - UIScreenPixel : 18.0), size: leftInfoItemSize))
+                    // VoiceOver: аватар дублирует шапку автора (тот же переход
+                    // в профиль), но объявлялся пустой «кнопкой» — прячем.
+                    view.isAccessibilityElement = false
+                    view.accessibilityElementsHidden = true
                     
                     if animateIn, !isFirstTime, !transition.animation.isImmediate {
                         view.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)

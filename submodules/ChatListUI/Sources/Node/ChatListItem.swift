@@ -1440,7 +1440,12 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         return nil
                     }
                     var result = ""
-                    if item.context.account.peerId == chatMainPeer.id {
+                    if peerData.customMessageListData == nil, let threadInfo = peerData.threadInfo {
+                        // VoiceOver: строка ТЕМЫ форума — читаем название темы, как на
+                        // экране. Раньше читалось название группы, одинаковое у всех
+                        // тем: «попробуй догадайся, в какую тему попадёшь».
+                        result += threadInfo.info.title
+                    } else if item.context.account.peerId == chatMainPeer.id {
                         result += item.presentationData.strings.DialogList_SavedMessages
                     } else {
                         result += chatMainPeer.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
@@ -1510,6 +1515,11 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         let (_, initialHideAuthor, messageText, _, _) = chatListItemStrings(strings: item.presentationData.strings, nameDisplayOrder: item.presentationData.nameDisplayOrder, dateTimeFormat: item.presentationData.dateTimeFormat, contentSettings: item.context.currentContentSettings.with { $0 }, messages: peerData.messages, chatPeer: peerData.peer, accountPeerId: item.context.account.peerId, isPeerGroup: false)
                         if message.flags.contains(.Incoming), !initialHideAuthor, let author = message.author, case .user = author {
                             result += "\n\(item.presentationData.strings.VoiceOver_ChatList_MessageFrom(author.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)).string)"
+                        }
+                        // Форум в общем списке: на экране под названием группы
+                        // видна тема последнего сообщения — читаем и её.
+                        if peerData.threadInfo == nil, case let .channel(channel) = peerData.peer.chatMainPeer, channel.isForum, let associatedThreadInfo = message.associatedThreadInfo, !associatedThreadInfo.title.isEmpty {
+                            result += "\n\(associatedThreadInfo.title)"
                         }
                         if !message.flags.contains(.Incoming), let combinedReadState = peerData.combinedReadState, combinedReadState.isOutgoingMessageIndexRead(message.index) {
                             result += "\n\(item.presentationData.strings.VoiceOver_ChatList_MessageRead)"
@@ -3833,7 +3843,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 customActions.append(ChatListItemAccessibilityCustomAction(name: option.title, target: nil, selector: #selector(ChatListItemNode.performLocalAccessibilityCustomAction(_:)), key: option.key))
             }
             
-            return (layout, { [weak self] synchronousLoads, animated in
+            return (layout, { [weak self = self] synchronousLoads, animated in
                 if let strongSelf = self {
                     strongSelf.layoutParams = (item, first, last, firstWithHeader, nextIsPinned, params, countersSize)
                     strongSelf.currentItemHeight = itemHeight

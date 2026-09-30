@@ -2788,7 +2788,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                                 readySignals = currentReadySignals
                             }
                             
-                            let beginReplay = { [weak self] in
+                            let beginReplay = { [weak self = self] in
                                 if let strongSelf = self {
                                     strongSelf.replayOperations(animated: animated, animateAlpha: options.contains(.AnimateAlpha), animateCrossfade: options.contains(.AnimateCrossfade), animateFullTransition: options.contains(.AnimateFullTransition), customAnimationTransition: updateSizeAndInsets?.customAnimationTransition, synchronous: options.contains(.Synchronous), synchronousLoads: options.contains(.PreferSynchronousResourceLoading), animateTopItemVerticalOrigin: options.contains(.AnimateTopItemPosition), operations: updatedOperations, requestItemInsertionAnimationsIndices: options.contains(.RequestItemInsertionAnimations) ? insertedIndexSet : Set(), scrollToItem: scrollToItem, additionalScrollDistance: additionalScrollDistance, updateSizeAndInsets: updateSizeAndInsets, stationaryItemIndex: stationaryItemIndex, updateOpaqueState: updateOpaqueState, forceInvertOffsetDirection: options.contains(.InvertOffsetDirection), completion: {
                                         if options.contains(.PreferSynchronousDrawing) {
@@ -6004,6 +6004,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// raises the keyboard itself). Leave nil to always recover focus.
     public var accessibilityIsLegitimateFocusEscape: ((Any) -> Bool)?
 
+    /// VO-диагностика: вызывается при каждом системном фокусе на элементе
+    /// списка с локальным индексом элемента. История чата по нему ловит
+    /// «прыжки» курсора через несколько сообщений за один свайп.
+    public var accessibilityDidFocusItemAtLocalIndex: ((Int) -> Void)?
+
     // ВРЕМЕННАЯ VO-диагностика: печать каждого перехода фокуса (глобальный
     // observer, ставится один раз при первом didLoad любого ListView).
     // Убрать после стабилизации списка чатов.
@@ -6778,6 +6783,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.accessibilityLastFocusedScreenMidY = focusedData.frame.isNull ? nil : focusedData.frame.midY
         self.accessibilityLastSystemFocusedIndex = toIndex
         self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
+        if let didFocusItem = self.accessibilityDidFocusItemAtLocalIndex,
+           let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? FocusTrackingAccessibilityElement,
+           let localIndex = focusedElement.pinnedLocalIndex {
+            didFocusItem(localIndex)
+        }
         // Был ли фокус на ПОСЛЕДНЕМ элементе массива (дальше по свайпу вперёд
         // элементов нет). Отличает настоящий «свайп за новейшее сообщение»
         // (нужен forward-escape-редирект на панель ввода) от ошибочного

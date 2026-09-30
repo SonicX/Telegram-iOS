@@ -509,6 +509,15 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     var areContentAnimationsEnabled: Bool = false
     
     private var historyView: ChatHistoryView?
+    
+    /// VO-диагностика «прыжков» курсора: последний сфокусированный элемент ленты.
+    private struct VoFocusJumpState {
+        let stableId: UInt64
+        let timestamp: Double
+        let entriesCount: Int
+        let description: String
+    }
+    private var voFocusJumpLastState: VoFocusJumpState?
     public var originalHistoryView: MessageHistoryView? {
         return self.historyView?.originalView
     }
@@ -1106,6 +1115,14 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // centre (the "random message after 3-finger scroll" the user
         // reported). We speak the day of the top visible message so the user
         // hears where in time the scroll landed.
+        // VO-диагностика: жалоба «курсор убегает вперёд через непрочитанные»
+        // не воспроизводится по заказу — ловим в поле: каждый переход фокуса
+        // через несколько сообщений сразу пишется в лог [VO-DIAG][JUMP]
+        // (тестировщик отправляет «Отправить логи»).
+        self.accessibilityDidFocusItemAtLocalIndex = { [weak self] localIndex in
+            self?.voDetectFocusJump(localIndex: localIndex)
+        }
+        
         self.accessibilityScrollPositionAnnouncement = { [weak self] in
             guard let self else { return nil }
             guard let message = self.topVisibleMessageForAccessibility() else { return nil }
@@ -7069,6 +7086,47 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
     /// coordinates and picking the smallest `minY` is unambiguous. Used by
     /// the 3-finger-scroll date announcement so VoiceOver reports the date
     /// of the topmost visible message (what the user just scrolled up to).
+    private func voDetectFocusJump(localIndex: Int) {
+        guard let historyView = (self.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView else {
+            return
+        }
+        // filteredEntries — от старых к новым; локальный индекс 0 — самое новое.
+        let entries = historyView.filteredEntries
+        let position = entries.count - 1 - localIndex
+        guard position >= 0 && position < entries.count else {
+            return
+        }
+        let entry = entries[position]
+        let now = CACurrentMediaTime()
+        let description = voFocusJumpDescription(entry)
+        let previous = self.voFocusJumpLastState
+        self.voFocusJumpLastState = VoFocusJumpState(stableId: entry.stableId, timestamp: now, entriesCount: entries.count, description: description)
+        
+        guard let previous, previous.stableId != entry.stableId else {
+            return
+        }
+        let dt = String(format: "%.2f", now - previous.timestamp)
+        guard let previousPosition = entries.firstIndex(where: { $0.stableId == previous.stableId }) else {
+            voDiagLog("[VO-DIAG][JUMP] prev-gone dt=\(dt)s entries \(previous.entriesCount)→\(entries.count) from=\(previous.description) to=\(description)")
+            return
+        }
+        let distance = position - previousPosition
+        guard abs(distance) > 1 else {
+            return
+        }
+        let range = (min(position, previousPosition) + 1) ..< max(position, previousPosition)
+        var skippedMessages = 0
+        for skipped in entries[range] {
+            switch skipped {
+            case .MessageEntry, .MessageGroupEntry:
+                skippedMessages += 1
+            default:
+                break
+            }
+        }
+        voDiagLog("[VO-DIAG][JUMP] dir=\(distance > 0 ? "forward" : "back") skipped=\(abs(distance) - 1) msgs=\(skippedMessages) dt=\(dt)s entries \(previous.entriesCount)→\(entries.count) from=\(previous.description) to=\(description)")
+    }
+    
     func topVisibleMessageForAccessibility() -> Message? {
         let clip = self.accessibilityClippingFrameInScreenCoordinates()
         var bestMessage: Message?
@@ -7652,5 +7710,32 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             }
         }
         return nil
+    }
+}
+
+
+/// Краткое описание элемента ленты для VO-логов — без текста сообщения.
+private func voFocusJumpDescription(_ entry: ChatHistoryEntry) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    func time(_ timestamp: Int32) -> String {
+        return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp)))
+    }
+    switch entry {
+    case let .MessageEntry(message, _, _, _, _, _):
+        return "msg#\(message.id.id)@\(time(message.timestamp))"
+    case let .MessageGroupEntry(_, messages, _):
+        if let first = messages.first?.0 {
+            return "group#\(first.id.id)@\(time(first.timestamp))"
+        }
+        return "group"
+    case .UnreadEntry:
+        return "unread-separator"
+    case .ReplyCountEntry:
+        return "reply-count"
+    case .ChatInfoEntry:
+        return "chat-info"
+    case .SearchEntry:
+        return "search"
     }
 }

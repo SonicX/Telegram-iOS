@@ -1410,6 +1410,85 @@ public final class ChatInputTextView: ChatInputTextViewImpl, UITextViewDelegate,
         let result = super.hitTest(point, with: event)
         return result
     }
+
+    // VoiceOver: при наборе текста не было доступа к «Скопировать/Вставить/
+    // Вырезать/Выбрать все» — системный ротор «Правка» до поля не доходил.
+    // Отдаём их явными действиями VO (свайп вверх/вниз), только применимые
+    // сейчас. Действия идут через те же copy:/paste:/cut:/selectAll:, что и
+    // меню, поэтому вставка форматированного текста/медиа работает как обычно.
+    override public var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            var actions = super.accessibilityCustomActions ?? []
+            guard self.isFirstResponder else {
+                return actions.isEmpty ? nil : actions
+            }
+            let hasText = !(self.attributedText?.string.isEmpty ?? true)
+            let hasSelection = self.selectedRange.length > 0
+            let isAllSelected = hasText && self.selectedRange.location == 0 && self.selectedRange.length == (self.attributedText?.length ?? 0)
+
+            func add(_ key: String, _ action: Selector, _ perform: @escaping () -> Void) {
+                guard self.canPerformAction(action, withSender: nil) else {
+                    return
+                }
+                actions.append(UIAccessibilityCustomAction(name: chatInputStandardEditActionTitle(key), actionHandler: { _ in
+                    perform()
+                    return true
+                }))
+            }
+
+            if hasText && !isAllSelected {
+                add("Select All", #selector(UIResponderStandardEditActions.selectAll(_:)), { [weak self] in
+                    self?.selectAll(nil)
+                })
+            }
+            if hasSelection {
+                add("Copy", #selector(UIResponderStandardEditActions.copy(_:)), { [weak self] in
+                    self?.copy(nil)
+                })
+                add("Cut", #selector(UIResponderStandardEditActions.cut(_:)), { [weak self] in
+                    self?.cut(nil)
+                })
+                // Снять выделение, поставив курсор на его границу — VO-пользователю
+                // иначе трудно выйти из выделения в нужное место.
+                actions.append(UIAccessibilityCustomAction(name: "В начало выделенной строки", actionHandler: { [weak self] _ in
+                    return self?.collapseSelectionForAccessibility(toStart: true) ?? false
+                }))
+                actions.append(UIAccessibilityCustomAction(name: "В конец выделенной строки", actionHandler: { [weak self] _ in
+                    return self?.collapseSelectionForAccessibility(toStart: false) ?? false
+                }))
+            }
+            add("Paste", #selector(UIResponderStandardEditActions.paste(_:)), { [weak self] in
+                self?.paste(nil)
+            })
+            return actions.isEmpty ? nil : actions
+        }
+        set {
+            super.accessibilityCustomActions = newValue
+        }
+    }
+
+    private func collapseSelectionForAccessibility(toStart: Bool) -> Bool {
+        let range = self.selectedRange
+        guard range.length > 0 else {
+            return false
+        }
+        let location = toStart ? range.location : range.location + range.length
+        // Через selectedTextRange, чтобы делегат получил обычное
+        // «selection changed» и панель ввода обновила своё состояние.
+        if let position = self.position(from: self.beginningOfDocument, offset: location) {
+            self.selectedTextRange = self.textRange(from: position, to: position)
+        } else {
+            self.selectedRange = NSRange(location: location, length: 0)
+        }
+        UIAccessibility.post(notification: .announcement, argument: toStart ? "Курсор в начале выделения" : "Курсор в конце выделения")
+        return true
+    }
+}
+
+/// Системное (UIKit) название стандартного действия правки — «Select All»,
+/// «Copy», «Cut», «Paste» — в языке системы, как в обычном меню.
+public func chatInputStandardEditActionTitle(_ key: String) -> String {
+    return Bundle(for: UIView.self).localizedString(forKey: key, value: key, table: nil)
 }
 
 private let quoteIcon: UIImage = {

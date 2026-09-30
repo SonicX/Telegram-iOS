@@ -358,6 +358,10 @@ public final class StoryFooterPanelComponent: Component {
                 transition.setFrame(view: statusButton, frame: statusButtonFrame)
                 
                 transition.setAlpha(view: statusButton, alpha: 1.0 - sideContentFraction)
+                // VoiceOver: кольцо прогресса + «Загрузка...»; тап отменяет загрузку.
+                statusButton.accessibilityLabel = component.strings.Settings_CancelUpload
+                statusButton.accessibilityValue = "\(component.strings.Story_Footer_Uploading) \(Int(max(0.0, min(1.0, self.uploadProgress)) * 100.0))%"
+                statusButton.accessibilityTraits = .button
                 
                 avatarsAlpha = 0.0
             } else {
@@ -805,6 +809,8 @@ public final class StoryFooterPanelComponent: Component {
                     likeStatsTransition.setPosition(view: likeButtonView, position: likeButtonFrame.center)
                     likeStatsTransition.setBounds(view: likeButtonView, bounds: CGRect(origin: CGPoint(), size: likeButtonFrame.size))
                     likeStatsTransition.setAlpha(view: likeButtonView, alpha: 1.0 - component.expandFraction)
+                    // VoiceOver: счётчик вложен в кнопку и не читается — отдаём значением.
+                    likeButtonView.accessibilityValue = reactionCount != 0 ? "\(reactionCount)" : nil
                     
                     rightContentOffset -= likeButtonSize.width + 14.0
                     
@@ -910,6 +916,7 @@ public final class StoryFooterPanelComponent: Component {
                         forwardStatsTransition.setPosition(view: repostButtonView, position: repostButtonFrame.center)
                         forwardStatsTransition.setBounds(view: repostButtonView, bounds: CGRect(origin: CGPoint(), size: repostButtonFrame.size))
                         forwardStatsTransition.setAlpha(view: repostButtonView, alpha: 1.0 - component.expandFraction)
+                        repostButtonView.accessibilityValue = forwardCount != 0 ? "\(forwardCount)" : nil
                         
                         rightContentOffset -= repostButtonSize.width + 14.0
                         
@@ -1000,6 +1007,24 @@ public final class StoryFooterPanelComponent: Component {
             transition.setFrame(view: self.viewStatsButton, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: statsButtonWidth, height: baseHeight)))
             self.viewStatsButton.isUserInteractionEnabled = component.expandFraction == 0.0
             
+            // VoiceOver: кнопка списка просмотров — прозрачная область поверх
+            // аватаров и счётчиков, без метки. Текст — из тех же счётчиков.
+            var viewStatsAccessibilityParts: [String] = []
+            if viewCount != 0 {
+                viewStatsAccessibilityParts.append(component.strings.Story_Footer_Views(Int32(viewCount)))
+            } else if component.displayViews && !component.isChannel {
+                viewStatsAccessibilityParts.append(component.strings.Story_Footer_NoViews)
+            }
+            if reactionCount != 0 && !component.isChannel {
+                viewStatsAccessibilityParts.append("\(component.strings.Story_ViewList_TitleReactions): \(reactionCount)")
+            }
+            if forwardCount != 0 && !component.isChannel {
+                viewStatsAccessibilityParts.append("\(component.strings.Conversation_ContextMenuForward): \(forwardCount)")
+            }
+            self.viewStatsButton.isAccessibilityElement = !component.storyItem.isPending && !viewStatsAccessibilityParts.isEmpty
+            self.viewStatsButton.accessibilityLabel = viewStatsAccessibilityParts.joined(separator: ", ")
+            self.viewStatsButton.accessibilityTraits = displayViewLists ? .button : .staticText
+            
             let isPending = component.storyItem.isPending
             self.viewsIconView.isHidden = isPending
             self.viewStatsCountText.isHidden = isPending
@@ -1037,6 +1062,9 @@ public final class StoryFooterPanelComponent: Component {
                 
                 transition.setAlpha(view: deleteButtonView, alpha: 1.0 - sideContentFraction)
                 transition.setScale(view: deleteButtonView, scale: CGFloat(1.0).interpolate(to: CGFloat(0.1), amount: sideContentFraction))
+                // VoiceOver: иконка корзины без метки.
+                deleteButtonView.accessibilityLabel = component.storyItem.isPending ? component.strings.Settings_CancelUpload : component.strings.Common_Delete
+                deleteButtonView.accessibilityTraits = .button
                 
                 if component.isChannel {
                     deleteButtonView.isHidden = true

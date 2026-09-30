@@ -809,8 +809,11 @@ public final class MessageInputActionButtonComponent: Component {
                 accessibilityLabelText = component.strings.Common_Delete
             case .attach:
                 accessibilityLabelText = component.strings.Conversation_InputMenu
-            case .forward, .repost:
-                accessibilityLabelText = component.strings.Conversation_ContextMenuForward
+            case .forward:
+                accessibilityLabelText = component.strings.VoiceOver_MessageContextShare
+            case .repost:
+                // В подвале истории рядом стоят обе — различаем метки.
+                accessibilityLabelText = component.strings.Share_RepostStory.replacingOccurrences(of: "\n", with: " ")
             case .more:
                 accessibilityLabelText = component.strings.Common_More
             case .like:

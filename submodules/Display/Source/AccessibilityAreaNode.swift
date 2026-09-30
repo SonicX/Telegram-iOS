@@ -27,6 +27,19 @@ public final class AccessibilityAreaNode: ASDisplayNode {
             return self.areaNode?.accessibilityActivate() ?? super.accessibilityActivate()
         }
 
+        override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+            get {
+                if let provider = self.areaNode?.customActionsProvider {
+                    let actions = provider()
+                    return actions.isEmpty ? nil : actions
+                }
+                return super.accessibilityCustomActions
+            }
+            set {
+                super.accessibilityCustomActions = newValue
+            }
+        }
+
         override func accessibilityElementDidBecomeFocused() {
             super.accessibilityElementDidBecomeFocused()
             self.areaNode?.accessibilityElementDidBecomeFocused()
@@ -53,6 +66,10 @@ public final class AccessibilityAreaNode: ASDisplayNode {
     public var increment: (() -> Void)?
     public var decrement: (() -> Void)?
     public var focused: (() -> Void)?
+    /// Действия VO, вычисляемые в момент запроса (а не на раскладке) — когда
+    /// их доступность зависит от меняющегося состояния (буфер обмена, текст).
+    /// Если задан, заменяет `accessibilityCustomActions`.
+    public var customActionsProvider: (() -> [UIAccessibilityCustomAction])?
     
     override public init() {
         super.init()

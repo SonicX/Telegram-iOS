@@ -2795,7 +2795,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         return (phoneNumber, entry?.get(ApplicationSpecificCounterNotice.self)?.value)
                     }
                     |> deliverOnMainQueue
-                ).startStandalone(next: { [weak self] phoneNumber, value in
+                ).startStandalone(next: { [weak self = self] phoneNumber, value in
                     guard let strongSelf = self else {
                         return
                     }
@@ -4006,7 +4006,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     return nil
                 }
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Check"), color: theme.contextMenu.primaryColor)
-            }, action: { [weak sourceController] _, a in
+            }, action: { [weak sourceController = sourceController] _, a in
                 a(.default)
                 
                 guard let sourceController = sourceController, let navigationController = sourceController.navigationController as? NavigationController else {
@@ -4042,7 +4042,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     return nil
                 }
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Check"), color: theme.contextMenu.primaryColor)
-            }, action: { [weak sourceController] _, a in
+            }, action: { [weak sourceController = sourceController] _, a in
                 a(.default)
 
                 guard let sourceController = sourceController, let navigationController = sourceController.navigationController as? NavigationController else {
@@ -4074,7 +4074,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             
             items.append(.action(ContextMenuActionItem(text: strings.GroupInfo_Title, icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Groups"), color: theme.contextMenu.primaryColor)
-            }, action: { [weak sourceController] _, f in
+            }, action: { [weak sourceController = sourceController] _, f in
                 f(.default)
                 
                 let _ = (context.engine.data.get(
@@ -4091,7 +4091,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             if channel.hasPermission(.inviteMembers) {
                 items.append(.action(ContextMenuActionItem(text: strings.GroupInfo_AddParticipant, icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/AddUser"), color: theme.contextMenu.primaryColor)
-                }, action: { [weak sourceController] _, f in
+                }, action: { [weak sourceController = sourceController] _, f in
                     f(.default)
                     
                     let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
@@ -4971,7 +4971,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             
             let _ = (combineLatest(self.chatListDisplayNode.mainContainerNode.currentItemNode.contentsReady |> take(1), self.context.account.postbox.tailChatListView(groupId: .root, count: 16, summaryComponents: ChatListEntrySummaryComponents(components: [:])) |> take(1))
             |> deliverOnMainQueue).startStandalone(next: { [weak self] _, chatListView in
-                Task { @MainActor in
+                Task<Void, Never> { @MainActor in
                     guard let strongSelf = self else {
                         return
                     }
@@ -5000,8 +5000,9 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                             // VoiceOver: строка поиска — первый элемент обхода полосы
                             // фильтров (см. accessibilityLeadingElementProvider).
                             if let filterContainerNode = filterContainerNode as? ChatListSearchFiltersContainerNode {
-                                filterContainerNode.accessibilityLeadingElementProvider = { [weak strongSelf] in
-                                    return strongSelf?.chatListDisplayNode.searchDisplayController?.accessibilitySearchBarViews ?? []
+                                // self здесь — внешний weak-захват (Optional), сильной ссылки нет.
+                                filterContainerNode.accessibilityLeadingElementProvider = {
+                                    return self?.chatListDisplayNode.searchDisplayController?.accessibilitySearchBarViews ?? []
                                 }
                             }
                         }

@@ -3353,9 +3353,25 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.textInputAccessibilityArea.accessibilityLabel = inputAccessibilityLabel
         self.textInputAccessibilityArea.accessibilityValue = inputAccessibilityValue.isEmpty ? nil : inputAccessibilityValue
         self.textInputAccessibilityArea.accessibilityTraits = self.textInputNode?.textView.accessibilityTraits ?? []
-        self.textInputAccessibilityArea.accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: interfaceState.strings.Common_Close, target: self, selector: #selector(self.performHideKeyboardAccessibilityCustomAction(_:)))
-        ]
+        // VoiceOver: «Выбрать все / Скопировать / Вырезать / Вставить» свайпом
+        // вверх/вниз прямо на поле, без поднятия клавиатуры. В режиме набора
+        // те же действия отдаёт сам UITextView (ChatInputTextView), но там
+        // вертикальные свайпы двигают курсор и действия доступны только через
+        // ротор «Действия».
+        // Список собирается в момент запроса VO: доступность пунктов зависит
+        // от текста в поле и содержимого буфера обмена.
+        let strings = interfaceState.strings
+        self.textInputAccessibilityArea.customActionsProvider = { [weak self] in
+            guard let self else {
+                return []
+            }
+            return self.inputEditAccessibilityActions(strings: strings) + [
+                UIAccessibilityCustomAction(name: strings.Common_Close, target: self, selector: #selector(self.performHideKeyboardAccessibilityCustomAction(_:)))
+            ]
+        }
+        self.composeAccessibilityArea.customActionsProvider = { [weak self] in
+            return self?.inputEditAccessibilityActions(strings: strings) ?? []
+        }
         self.hideKeyboardAccessibilityArea.accessibilityLabel = interfaceState.strings.Common_Close
         self.hideKeyboardAccessibilityArea.accessibilityHint = interfaceState.strings.VoiceOver_Keyboard
 
@@ -5637,6 +5653,79 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                     UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
                 }
             }
+        }
+    }
+    
+    private enum InputEditAccessibilityAction {
+        case selectAll
+        case copy
+        case cut
+        case paste
+    }
+    
+    private func inputEditAccessibilityActions(strings: PresentationStrings) -> [UIAccessibilityCustomAction] {
+        if self.sendingTextDisabled {
+            return []
+        }
+        var result: [UIAccessibilityCustomAction] = []
+        func add(_ key: String, _ action: InputEditAccessibilityAction) {
+            result.append(UIAccessibilityCustomAction(name: chatInputStandardEditActionTitle(key), actionHandler: { [weak self] _ in
+                return self?.performInputEditAccessibilityAction(action, strings: strings) ?? false
+            }))
+        }
+        // Только применимые сейчас: текстовые — если в поле есть текст,
+        // «Вставить» — если в буфере есть что вставить.
+        if self.inputTextState.inputText.length != 0 {
+            add("Select All", .selectAll)
+            add("Copy", .copy)
+            add("Cut", .cut)
+        }
+        let pasteboard = UIPasteboard.general
+        if pasteboard.hasStrings || pasteboard.hasImages || pasteboard.hasURLs {
+            add("Paste", .paste)
+        }
+        return result
+    }
+    
+    private func performInputEditAccessibilityAction(_ action: InputEditAccessibilityAction, strings: PresentationStrings) -> Bool {
+        let inputText = self.inputTextState.inputText
+        switch action {
+        case .copy, .cut:
+            // Без выделения берём весь черновик — клавиатуру не поднимаем.
+            guard inputText.length != 0 else {
+                return false
+            }
+            storeInputTextInPasteboard(inputText)
+            if case .cut = action {
+                self.interfaceInteraction?.updateTextInputStateAndMode { _, inputMode in
+                    return (ChatTextInputState(inputText: NSAttributedString()), inputMode)
+                }
+            }
+            UIAccessibility.post(notification: .announcement, argument: strings.Conversation_TextCopied)
+            return true
+        case .selectAll, .paste:
+            // Нужны активное поле и курсор: поднимаем клавиатуру (курсор VO
+            // встаёт на поле), затем выполняем штатную команду поля.
+            guard !self.sendingTextDisabled else {
+                return false
+            }
+            self.ensureFocused()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let textView = self.textInputNode?.textView, textView.isFirstResponder else {
+                    return
+                }
+                switch action {
+                case .selectAll:
+                    textView.selectAll(nil)
+                case .paste:
+                    if textView.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil) {
+                        textView.paste(nil)
+                    }
+                default:
+                    break
+                }
+            }
+            return true
         }
     }
     
