@@ -384,7 +384,7 @@ public func standaloneColorPickerController(
         colorPickerController.pushController = { controller in
             push(controller)
         }
-        colorPickerController.dismissControllers = { [weak controller] in
+        colorPickerController.dismissControllers = { [weak controller = controller] in
             controller?.dismiss(animated: true)
         }
         colorPickerController.openGallery = openGallery

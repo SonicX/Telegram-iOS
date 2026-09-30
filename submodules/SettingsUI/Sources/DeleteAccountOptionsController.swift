@@ -444,7 +444,7 @@ public func deleteAccountOptionsController(context: AccountContext, navigationCo
     }
     replaceTopControllerImpl = { [weak navigationController] c, complex in
         if complex {
-            navigationController?.pushViewController(c, completion: { [weak navigationController, weak controller, weak c] in
+            navigationController?.pushViewController(c, completion: { [weak navigationController, weak controller = controller, weak c] in
                 if let navigationController = navigationController {
                     let controllers = navigationController.viewControllers.filter { $0 !== controller }
                     c?.navigationPresentation = .modal

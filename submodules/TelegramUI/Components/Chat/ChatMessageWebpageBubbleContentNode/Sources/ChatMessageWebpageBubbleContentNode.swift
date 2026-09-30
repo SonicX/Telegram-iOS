@@ -589,7 +589,7 @@ public final class ChatMessageWebpageBubbleContentNode: ChatMessageBubbleContent
                 return (refinedWidth, { boundingWidth in
                     let (size, apply) = finalizeLayout(boundingWidth)
                     
-                    return (size, { [weak self] animation, synchronousLoads, applyInfo in
+                    return (size, { [weak self = self] animation, synchronousLoads, applyInfo in
                         guard let self else {
                             return
                         }
@@ -603,7 +603,7 @@ public final class ChatMessageWebpageBubbleContentNode: ChatMessageBubbleContent
                             do {
                                 //animation.animator.updateScale(layer: self.contentNode.layer, scale: 0.9, completion: nil)
                                 animation.animator.updatePosition(layer: self.contentNode.layer, position: updatedPosition, completion: nil)
-                                animation.animator.updateAlpha(layer: self.contentNode.layer, alpha: 0.0, completion: { [weak contentNode] _ in
+                                animation.animator.updateAlpha(layer: self.contentNode.layer, alpha: 0.0, completion: { [weak contentNode = contentNode] _ in
                                     contentNode?.removeFromSupernode()
                                 })
                             }

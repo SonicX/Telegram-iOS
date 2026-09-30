@@ -1491,7 +1491,7 @@ public final class StarsTransactionsScreen: ViewControllerComponentContainer {
                                         timeout: nil
                                     ),
                                     elevatedLayout: false,
-                                    action: { [weak self] action in
+                                    action: { [weak self = self] action in
                                         if case .undo = action, let navigationController = self?.navigationController as? NavigationController {
                                             let _ = (context.engine.data.get(
                                                 TelegramEngine.EngineData.Item.Peer.Peer(id: peerId)

@@ -983,7 +983,7 @@ public final class ChatInlineSearchResultsListComponent: Component {
                             editing: ContactsPeerItemEditing(editable: false, editing: false, revealed: false),
                             index: nil,
                             header: displayMessagesHeader ? ChatListSearchItemHeader(type: .chats, theme: listPresentationData.theme, strings: listPresentationData.strings) : nil,
-                            action: { [weak self] peer in
+                            action: { [weak self = self] peer in
                                 self?.listNode.clearHighlightAnimated(true)
                                 
                                 if case let .peer(peer?, _) = peer {

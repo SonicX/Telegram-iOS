@@ -1402,7 +1402,7 @@ public class ChatMessagePollBubbleContentNode: ChatMessageBubbleContentNode {
                     let buttonSubmitActiveTextFrame = CGRect(origin: CGPoint(x: floor((resultSize.width - buttonSubmitActiveTextLayout.size.width) / 2.0), y: optionsButtonSpacing), size: buttonSubmitActiveTextLayout.size)
                     let buttonViewResultsTextFrame = CGRect(origin: CGPoint(x: floor((resultSize.width - buttonViewResultsTextLayout.size.width) / 2.0), y: optionsButtonSpacing), size: buttonViewResultsTextLayout.size)
                     
-                    return (resultSize, { [weak self] animation, synchronousLoad, _ in
+                    return (resultSize, { [weak self = self] animation, synchronousLoad, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             strongSelf.poll = poll

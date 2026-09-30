@@ -439,7 +439,7 @@ final class ChatHistoryPreloadManager {
                         key = .messageOfInterestHole(location: .peer(peerId: peerId, threadId: threadId), namespace: Namespaces.Message.Cloud, count: 50)
                     }
                     view.disposable.set((self.postbox.combinedView(keys: [key])
-                    |> deliverOn(self.queue)).start(next: { [weak self] next in
+                    |> deliverOn(self.queue)).start(next: { [weak self = self] next in
                         if let strongSelf = self, let value = next.views[key] as? MessageOfInterestHolesView {
                             if let view = strongSelf.views[index.entity] {
                                 let previousHole = view.currentHole

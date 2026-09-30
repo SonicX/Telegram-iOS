@@ -549,7 +549,7 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                     self.activeRemoteVideoSource = remoteVideo
                 } else {
                     let firstVideoFrameSignal = Signal<Never, NoError> { subscriber in
-                        return remoteVideo.addOnUpdated { [weak remoteVideo] in
+                        return remoteVideo.addOnUpdated { [weak remoteVideo = remoteVideo] in
                             guard let remoteVideo else {
                                 subscriber.putCompletion()
                                 return
@@ -584,7 +584,7 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                     self.activeLocalVideoSource = localVideo
                 } else {
                     let firstVideoFrameSignal = Signal<Never, NoError> { subscriber in
-                        return localVideo.addOnUpdated { [weak localVideo] in
+                        return localVideo.addOnUpdated { [weak localVideo = localVideo] in
                             guard let localVideo else {
                                 subscriber.putCompletion()
                                 return

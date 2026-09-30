@@ -180,7 +180,7 @@ public class ItemListDatePickerItemNode: ListViewItemNode, ItemListItemNode {
                 insets = itemListNeighborsGroupedInsets(neighbors, params)
             }
             
-            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self] animation in
+            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self = self] animation in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

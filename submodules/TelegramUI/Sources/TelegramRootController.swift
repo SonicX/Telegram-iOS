@@ -453,7 +453,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
                         } else {
                             return nil
                         }
-                    }, completion: { [weak self] results, commit in
+                    }, completion: { [weak self = self] results, commit in
                         guard let self else {
                             dismissCameraImpl?()
                             commit({})

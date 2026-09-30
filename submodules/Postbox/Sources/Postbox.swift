@@ -3733,7 +3733,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -3755,7 +3755,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -3855,7 +3855,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -3877,7 +3877,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -3909,7 +3909,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -3945,7 +3945,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4033,7 +4033,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4056,7 +4056,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4078,7 +4078,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4129,7 +4129,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4151,7 +4151,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4177,7 +4177,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {
@@ -4275,7 +4275,7 @@ final class PostboxImpl {
             }
             return peerIndices
         }).start(next: { peerIndices in
-            disposable.set(ActionDisposable { [weak self] in
+            disposable.set(ActionDisposable { [weak self = self] in
                 queue.async {
                     guard let `self` = self else {
                         return
@@ -4559,7 +4559,7 @@ final class PostboxImpl {
                 subscriber.putNext(next)
             })
             
-            return ActionDisposable { [weak self] in
+            return ActionDisposable { [weak self = self] in
                 disposable.dispose()
                 if let strongSelf = self {
                     strongSelf.queue.async {

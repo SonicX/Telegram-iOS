@@ -209,7 +209,7 @@ class VoiceChatParticipantStatusNode: ASDisplayNode {
             var contentSize = textLayout.size
             contentSize.width += (iconSize.width + spacing) * CGFloat(icons.count)
             
-            return (contentSize, { [weak self] in
+            return (contentSize, { [weak self = self] in
                 guard let strongSelf = self else {
                     return
                 }
@@ -891,7 +891,7 @@ class VoiceChatParticipantItemNode: ItemListRevealOptionsItemNode {
                 }
             }
                         
-            return (layout, { [weak self] synchronousLoad, animated in
+            return (layout, { [weak self = self] synchronousLoad, animated in
                 if let strongSelf = self {
                     let hadItem = strongSelf.layoutParams?.0 != nil
                     strongSelf.layoutParams = (item, params, first, last)

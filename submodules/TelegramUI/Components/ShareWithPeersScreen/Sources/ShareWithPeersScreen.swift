@@ -3023,7 +3023,7 @@ final class ShareWithPeersScreenComponent: Component {
                                     }))
                                     
                                     let _ = (peers
-                                    |> deliverOnMainQueue).start(next: { [weak controller, weak component] peers in
+                                    |> deliverOnMainQueue).start(next: { [weak controller = controller, weak component = component] peers in
                                         guard let controller, let component else {
                                             return
                                         }

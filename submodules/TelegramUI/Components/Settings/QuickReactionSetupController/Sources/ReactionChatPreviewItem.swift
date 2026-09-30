@@ -356,7 +356,7 @@ class ReactionChatPreviewItemNode: ListViewItemNode {
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             let layoutSize = layout.size
             
-            return (layout, { [weak self] animation in
+            return (layout, { [weak self = self] animation in
                 if let strongSelf = self {
                     if let previousItem = strongSelf.item, previousItem.reaction != item.reaction {
                         if let standaloneReactionAnimation = strongSelf.standaloneReactionAnimation {

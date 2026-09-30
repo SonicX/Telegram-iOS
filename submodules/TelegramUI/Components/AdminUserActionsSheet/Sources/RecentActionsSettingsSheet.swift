@@ -562,7 +562,7 @@ private final class RecentActionsSettingsSheetComponent: Component {
                     )))
                 ], spacing: 7.0))
                 
-                let toggleAction: () -> Void = { [weak self] in
+                let toggleAction: () -> Void = { [weak self = self] in
                     guard let self else {
                         return
                     }
@@ -603,7 +603,7 @@ private final class RecentActionsSettingsSheetComponent: Component {
                     )),
                     icon: .none,
                     accessory: nil,
-                    action: { [weak self] _ in
+                    action: { [weak self = self] _ in
                         guard let self else {
                             return
                         }
@@ -642,7 +642,7 @@ private final class RecentActionsSettingsSheetComponent: Component {
                 for actionType in actionTypes {
                     let actionItemTitle: String = actionType.title(isGroup: isGroup, strings: environment.strings)
                     
-                    let subItemToggleAction: () -> Void = { [weak self] in
+                    let subItemToggleAction: () -> Void = { [weak self = self] in
                         guard let self else {
                             return
                         }

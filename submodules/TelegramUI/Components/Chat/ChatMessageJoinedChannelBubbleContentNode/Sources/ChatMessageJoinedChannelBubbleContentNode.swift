@@ -215,7 +215,7 @@ public class ChatMessageJoinedChannelBubbleContentNode: ChatMessageBubbleContent
                 }
                 
                 return (contentSize.width, { boundingWidth in
-                    return (contentSize, { [weak self] animation, synchronousLoads, info in
+                    return (contentSize, { [weak self = self] animation, synchronousLoads, info in
                         if let strongSelf = self {
                             let themeUpdated = strongSelf.item?.presentationData.theme !== item.presentationData.theme
                             strongSelf.item = item
@@ -347,7 +347,7 @@ public class ChatMessageJoinedChannelBubbleContentNode: ChatMessageBubbleContent
                                 presentationData: presentationData,
                                 content: .premiumPaywall(title: nil, text: item.presentationData.strings.Chat_ChannelRecommendation_PremiumTooltip, customUndoText: nil, timeout: nil, linkAction: nil),
                                 elevatedLayout: false,
-                                action: { [weak self] action in
+                                action: { [weak self = self] action in
                                     if case .info = action {
                                         if let self, let item = self.item {
                                             let controller = context.sharedContext.makePremiumIntroController(context: context, source: .ads, forceDark: false, dismissed: nil)

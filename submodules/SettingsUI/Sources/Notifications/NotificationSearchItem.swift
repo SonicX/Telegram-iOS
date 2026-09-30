@@ -117,7 +117,7 @@ class NotificationSearchItemNode: ListViewItemNode {
             
             let layout = ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: 44.0), insets: UIEdgeInsets())
             
-            return (layout, { [weak self] animated in
+            return (layout, { [weak self = self] animated in
                 if let strongSelf = self {
                     let transition: ContainedViewLayoutTransition
                     if animated {

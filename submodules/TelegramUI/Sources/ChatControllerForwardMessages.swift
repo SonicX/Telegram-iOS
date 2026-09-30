@@ -55,7 +55,7 @@ extension ChatControllerImpl {
                 attemptSelectionImpl?(peer, reason)
             }, multipleSelection: true, forwardedMessageIds: messages.map { $0.id }, selectForumThreads: true))
             let context = self.context
-            attemptSelectionImpl = { [weak self, weak controller] peer, reason in
+            attemptSelectionImpl = { [weak self = self, weak controller] peer, reason in
                 guard let strongSelf = self, let controller = controller else {
                     return
                 }
@@ -101,7 +101,7 @@ extension ChatControllerImpl {
                     }), in: .current)
                 }
             }
-            controller.multiplePeersSelected = { [weak self, weak controller] peers, peerMap, messageText, mode, forwardOptions, _ in
+            controller.multiplePeersSelected = { [weak self = self, weak controller] peers, peerMap, messageText, mode, forwardOptions, _ in
                 let peerIds = peers.map { $0.id }
                 
                 let _ = (context.engine.data.get(
@@ -350,7 +350,7 @@ extension ChatControllerImpl {
                     }
                 })
             }
-            controller.peerSelected = { [weak self, weak controller] peer, threadId in
+            controller.peerSelected = { [weak self = self, weak controller] peer, threadId in
                 guard let strongSelf = self, let strongController = controller else {
                     return
                 }

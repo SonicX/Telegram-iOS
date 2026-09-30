@@ -144,12 +144,12 @@ extension PeerInfoScreenImpl {
                         peerType = .user
                     }
                     let controller = AvatarEditorScreen(context: self.context, inputData: keyboardInputData.get(), peerType: peerType, markup: emojiMarkup)
-                    controller.imageCompletion = { [weak self] image, commit in
+                    controller.imageCompletion = { [weak self = self] image, commit in
                         resultImage = image
                         self?.updateProfilePhoto(image, mode: mode, uploadStatus: uploadStatusPromise)
                         commit()
                     }
-                    controller.videoCompletion = { [weak self] image, url, values, markup, commit in
+                    controller.videoCompletion = { [weak self = self] image, url, values, markup, commit in
                         resultImage = image
                         self?.updateProfileVideo(image, video: nil, values: nil, markup: markup, mode: mode, uploadStatus: uploadStatusPromise)
                         commit()
@@ -192,7 +192,7 @@ extension PeerInfoScreenImpl {
                         }
                         return nil
                     },
-                    willComplete: { [weak self, weak parentController] image, isVideo, commit in
+                    willComplete: { [weak self = self, weak parentController = parentController] image, isVideo, commit in
                         if let self, let confirmationAlert, let image {
                             let controller = photoUpdateConfirmationController(context: self.context, peer: peer, image: image, text: isVideo ? confirmationAlert.videoText : confirmationAlert.photoText, doneTitle: confirmationAlert.action, commit: {
                                 commit()
@@ -202,7 +202,7 @@ extension PeerInfoScreenImpl {
                             commit()
                         }
                     },
-                    completion: { [weak self] results, commit in
+                    completion: { [weak self = self] results, commit in
                         guard let result = results.first else {
                             return
                         }
@@ -535,7 +535,7 @@ extension PeerInfoScreenImpl {
                         let tempFile = EngineTempBox.shared.tempFile(fileName: "video.mp4")
                         let videoExport = MediaEditorVideoExport(postbox: context.account.postbox, subject: exportSubject, configuration: configuration, outputPath: tempFile.path, textScale: 2.0)
                         let _ = (videoExport.status
-                        |> deliverOnMainQueue).startStandalone(next: { [weak self] status in
+                        |> deliverOnMainQueue).startStandalone(next: { [weak self = self] status in
                             guard let self else {
                                 return
                             }

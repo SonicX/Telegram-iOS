@@ -644,7 +644,7 @@ public class ChatMessageInteractiveInstantVideoNode: ASDisplayNode {
             let principalGraphics = PresentationResourcesChat.principalGraphics(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper, bubbleCorners: item.presentationData.chatBubbleCorners)
             let viewOnceIconImage = principalGraphics.radialIndicatorViewOnceIcon
                         
-            return (result, { [weak self] layoutData, animation in
+            return (result, { [weak self = self] layoutData, animation in
                 if let strongSelf = self {
                     strongSelf.item = item
                     strongSelf.videoFrame = displayVideoFrame
@@ -1716,7 +1716,7 @@ public class ChatMessageInteractiveInstantVideoNode: ASDisplayNode {
                 sizeAndApplyLayout = node.asyncLayout()(item, width, displaySize, maximumDisplaySize, scaleProgress, statusType, automaticDownload, avatarInset)
                 createdNode = node
             }
-            return (sizeAndApplyLayout.0, { [weak node] layoutData, transition in
+            return (sizeAndApplyLayout.0, { [weak node = node] layoutData, transition in
                 sizeAndApplyLayout.1(layoutData, transition)
                 if let createdNode = createdNode {
                     return createdNode

@@ -389,12 +389,12 @@ public func legacyAttachmentMenu(
                 } else {
                     let process: (Bool) -> Void = { convert in
                         let signals = TGMediaAssetsController.resultSignals(for: carouselItem.selectionContext, editingContext: carouselItem.editingContext, intent: intent, currentItem: currentItem, storeAssets: true, convertToJpeg: convert, descriptionGenerator: legacyAssetPickerItemGenerator(), saveEditedPhotos: saveEditedPhotos)
-                        sendMessagesWithSignals(signals, silentPosting, scheduleTime, isFromPicker ? nil : { [weak carouselItem] uniqueId in
+                        sendMessagesWithSignals(signals, silentPosting, scheduleTime, isFromPicker ? nil : { [weak carouselItem = carouselItem] uniqueId in
                             if let carouselItem = carouselItem {
                                 return carouselItem.getItemSnapshot(uniqueId)
                             }
                             return nil
-                        }, { [weak controller] in
+                        }, { [weak controller = controller] in
                             controller?.dismiss(animated: true)
                         })
                     }

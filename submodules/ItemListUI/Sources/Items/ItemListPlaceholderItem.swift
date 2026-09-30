@@ -137,7 +137,7 @@ public class ItemListPlaceholderItemNode: ListViewItemNode, ItemListItemNode {
                     insets = itemListNeighborsGroupedInsets(neighbors, params)
             }
             
-            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self] in
+            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

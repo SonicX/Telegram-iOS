@@ -2017,7 +2017,7 @@ public final class ChatMessageInteractiveMediaNode: ASDisplayNode, GalleryItemTr
                                             continuePlayingWithoutSoundOnLostAudioSession: isInlinePlayableVideo,
                                             placeholderColor: emptyColor,
                                             captureProtected: message.isCopyProtected() || isExtendedMedia,
-                                            storeAfterDownload: { [weak context] in
+                                            storeAfterDownload: { [weak context = context] in
                                                 guard let context, let peerId else {
                                                     return
                                                 }

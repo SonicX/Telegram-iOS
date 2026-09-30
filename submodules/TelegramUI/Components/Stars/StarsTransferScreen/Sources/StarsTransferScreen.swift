@@ -237,7 +237,7 @@ private final class SheetContent: CombinedComponent {
                             }
                             |> take(1)
                             |> deliverOnMainQueue).start(next: { _ in
-                                Queue.mainQueue().after(0.1, { [weak self] in
+                                Queue.mainQueue().after(0.1, { [weak self = self] in
                                     if let self, let balance = self.balance, balance < StarsAmount(value: self.invoice.totalAmount, nanos: 0) {
                                         self.inProgress = false
                                         self.updated()
@@ -599,7 +599,7 @@ private final class SheetContent: CombinedComponent {
                                     purpose: purpose,
                                     targetPeerId: nil,
                                     customTheme: nil,
-                                    completion: { [weak starsContext] stars in
+                                    completion: { [weak starsContext = starsContext] stars in
                                         guard let starsContext else {
                                             return
                                         }

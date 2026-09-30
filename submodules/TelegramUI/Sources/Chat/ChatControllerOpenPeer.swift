@@ -183,7 +183,7 @@ extension ChatControllerImpl {
                                 } else {
                                     peerSignal = self.context.account.postbox.loadedPeerWithId(peer.id) |> map(Optional.init)
                                 }
-                                self.navigationActionDisposable.set((peerSignal |> take(1) |> deliverOnMainQueue).startStrict(next: { [weak self] peer in
+                                self.navigationActionDisposable.set((peerSignal |> take(1) |> deliverOnMainQueue).startStrict(next: { [weak self = self] peer in
                                     if let strongSelf = self, let peer = peer {
                                         var mode: PeerInfoControllerMode = .generic
                                         if let _ = fromMessage, let chatPeerId = chatPeerId {
@@ -219,14 +219,14 @@ extension ChatControllerImpl {
                                     let _ = (ChatInterfaceState.update(engine: self.context.engine, peerId: peer.id, threadId: nil, { currentState in
                                         return currentState.withUpdatedComposeInputState(textInputState)
                                     })
-                                    |> deliverOnMainQueue).startStandalone(completed: { [weak self] in
+                                    |> deliverOnMainQueue).startStandalone(completed: { [weak self = self] in
                                         if let strongSelf = self, let navigationController = strongSelf.effectiveNavigationController {
                                             strongSelf.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: strongSelf.context, chatLocation: .peer(peer), subject: subject, updateTextInputState: textInputState, peekData: peekData))
                                         }
                                     })
                                 } else {
                                     let _ = (requireAgeVerification(context: self.context, peer: peer)
-                                    |> deliverOnMainQueue).start(next: { [weak self] require in
+                                    |> deliverOnMainQueue).start(next: { [weak self = self] require in
                                         guard let self else {
                                             return
                                         }
@@ -262,7 +262,7 @@ extension ChatControllerImpl {
                         case let .chat(textInputState, _, _):
                             if let textInputState = textInputState {
                                 let controller = self.context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: self.context, updatedPresentationData: self.updatedPresentationData, requestPeerType: peerTypes.flatMap { $0.requestPeerTypes }, selectForumThreads: true))
-                                controller.peerSelected = { [weak self, weak controller] peer, threadId in
+                                controller.peerSelected = { [weak self = self, weak controller] peer, threadId in
                                     let peerId = peer.id
                                     
                                     if let strongSelf = self, let strongController = controller {

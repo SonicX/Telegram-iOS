@@ -381,7 +381,7 @@ public class ItemListExpandableSwitchItemNode: ListViewItemNode, ItemListItemNod
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             let layoutSize = layout.size
             
-            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self] animation in
+            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self = self] animation in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

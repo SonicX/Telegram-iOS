@@ -906,7 +906,7 @@ public func dataAndStorageController(context: AccountContext, focusOnItemTag: Da
         let update = {
             let _ = (contentSettingsConfiguration.get()
             |> take(1)
-            |> deliverOnMainQueue).start(next: { [weak contentSettingsConfiguration] settings in
+            |> deliverOnMainQueue).start(next: { [weak contentSettingsConfiguration = contentSettingsConfiguration] settings in
                 if var settings = settings {
                     settings.sensitiveContentEnabled = value
                     contentSettingsConfiguration?.set(.single(settings))

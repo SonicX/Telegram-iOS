@@ -323,7 +323,7 @@ final class ChatTranslationPanelNode: ASDisplayNode {
                             context: self.context,
                             languages: languages, back: { [weak c] in
                                 c?.popItems()
-                            }, selectLanguage: { [weak self, weak c] language in
+                            }, selectLanguage: { [weak self = self, weak c] language in
                                 c?.dismiss(completion: {
                                     guard let strongSelf = self else {
                                         return
@@ -340,7 +340,7 @@ final class ChatTranslationPanelNode: ASDisplayNode {
             
             items.append(.action(ContextMenuActionItem(text: doNotTranslateTitle, icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Restrict"), color: theme.contextMenu.primaryColor)
-            }, action: { [weak self] c, _ in
+            }, action: { [weak self = self] c, _ in
                 c?.dismiss(completion: nil)
                 
                 self?.interfaceInteraction?.addDoNotTranslateLanguage(translationState.fromLang)
@@ -348,7 +348,7 @@ final class ChatTranslationPanelNode: ASDisplayNode {
             
             items.append(.action(ContextMenuActionItem(text: presentationData.strings.Conversation_Translation_Hide, icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Clear"), color: theme.contextMenu.primaryColor)
-            }, action: { [weak self] c, _ in
+            }, action: { [weak self = self] c, _ in
                 c?.dismiss(completion: nil)
                 
                 self?.interfaceInteraction?.hideTranslationPanel()

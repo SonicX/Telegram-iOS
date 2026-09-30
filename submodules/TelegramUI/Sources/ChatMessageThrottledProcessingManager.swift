@@ -57,7 +57,7 @@ final class ChatMessageThrottledProcessingManager {
                 let timer = SwiftSignalKit.Timer(timeout: self.delay, repeat: false, completion: {
                     completionImpl?()
                 }, queue: self.queue)
-                completionImpl = { [weak self, weak timer] in
+                completionImpl = { [weak self = self, weak timer] in
                     if let strongSelf = self {
                         if let timer = timer, strongSelf.timer === timer {
                             strongSelf.timer = nil

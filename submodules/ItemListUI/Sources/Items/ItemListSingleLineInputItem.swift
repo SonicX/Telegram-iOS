@@ -294,7 +294,7 @@ public class ItemListSingleLineInputItemNode: ListViewItemNode, UITextFieldDeleg
             
             let attributedPlaceholderText = NSAttributedString(string: item.placeholder, font: Font.regular(item.presentationData.fontSize.itemListBaseFontSize), textColor: item.presentationData.theme.list.itemPlaceholderTextColor)
             
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

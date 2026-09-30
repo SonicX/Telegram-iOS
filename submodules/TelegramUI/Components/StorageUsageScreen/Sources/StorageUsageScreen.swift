@@ -3285,7 +3285,7 @@ final class StorageUsageScreenComponent: Component {
                         gesture: nil
                     )
                     sourceView.setHasAssociatedMenu(true)
-                    contextController.dismissed = { [weak sourceView] in
+                    contextController.dismissed = { [weak sourceView = sourceView] in
                         sourceView?.setHasAssociatedMenu(false)
                     }
                     presentInGlobalOverlay?(contextController)

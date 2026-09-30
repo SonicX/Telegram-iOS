@@ -517,7 +517,7 @@ final class ComposeTodoScreenComponent: Component {
                     transition.setFrame(view: inputMediaNode.view, frame: targetFrame, completion: { [weak inputMediaNode] _ in
                         if let inputMediaNode {
                             Queue.mainQueue().after(0.3) {
-                                inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode] _ in
+                                inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode = inputMediaNode] _ in
                                     inputMediaNode?.view.removeFromSuperview()
                                 })
                             }
@@ -878,7 +878,7 @@ final class ComposeTodoScreenComponent: Component {
                     characterLimit: component.initialData.maxTodoItemLength,
                     canReorder: isEnabled,
                     emptyLineHandling: .notAllowed,
-                    returnKeyAction: { [weak self] in
+                    returnKeyAction: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -894,7 +894,7 @@ final class ComposeTodoScreenComponent: Component {
                             }
                         }
                     },
-                    backspaceKeyAction: { [weak self] in
+                    backspaceKeyAction: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -914,7 +914,7 @@ final class ComposeTodoScreenComponent: Component {
                     },
                     selection: nil,
                     inputMode: self.currentInputMode,
-                    toggleInputMode: { [weak self] in
+                    toggleInputMode: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -926,14 +926,14 @@ final class ComposeTodoScreenComponent: Component {
                         }
                         self.state?.updated(transition: .spring(duration: 0.4))
                     },
-                    deleteAction: canDelete ? { [weak self] in
+                    deleteAction: canDelete ? { [weak self = self] in
                         guard let self else {
                             return
                         }
                         self.todoItems.removeAll(where: { $0.id == optionId })
                         self.state?.updated(transition: .spring(duration: 0.4))
                     } : nil,
-                    paste: { [weak self] data in
+                    paste: { [weak self = self] data in
                         guard let self else {
                             return
                         }

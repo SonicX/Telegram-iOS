@@ -1740,7 +1740,7 @@ public func standaloneStateManager(
                                 |> map { network -> AccountStateManager? in
                                     Logger.shared.log("StandaloneStateManager", "received network")
                                     
-                                    postbox.mediaBox.fetchResource = { [weak postbox] resource, intervals, parameters -> Signal<MediaResourceDataFetchResult, MediaResourceDataFetchError> in
+                                    postbox.mediaBox.fetchResource = { [weak postbox = postbox] resource, intervals, parameters -> Signal<MediaResourceDataFetchResult, MediaResourceDataFetchError> in
                                         guard let postbox = postbox else {
                                             return .never()
                                         }

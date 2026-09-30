@@ -1297,7 +1297,7 @@ final class MediaEditorScreenComponent: Component {
                 transition.setFrame(view: inputMediaNode.view, frame: targetFrame, completion: { [weak inputMediaNode] _ in
                     if let inputMediaNode {
                         Queue.mainQueue().after(0.2) {
-                            inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.3, removeOnCompletion: false, completion: { [weak inputMediaNode] _ in
+                            inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.3, removeOnCompletion: false, completion: { [weak inputMediaNode = inputMediaNode] _ in
                                 inputMediaNode?.view.removeFromSuperview()
                             })
                         }
@@ -3382,7 +3382,7 @@ public final class MediaEditorScreenImpl: ViewController, MediaEditorScreen, UID
                     stickerItems
                 ) |> map { emoji, stickers -> StickerPickerInput in
                     return StickerPickerInputData(emoji: emoji, stickers: stickers, gifs: nil)
-                } |> afterNext { [weak self] _ in
+                } |> afterNext { [weak self = self] _ in
                     if let self {
                         self.controller?.checkPostingAvailability()
                     }
@@ -5483,7 +5483,7 @@ public final class MediaEditorScreenImpl: ViewController, MediaEditorScreen, UID
                         let controller = context.sharedContext.makePremiumIntroController(context: context, source: .storiesLinks, forceDark: true, dismissed: {})
                         replaceImpl?(controller)
                     }, dismissed: {})
-                    replaceImpl = { [weak self, weak demoController] c in
+                    replaceImpl = { [weak self = self, weak demoController] c in
                         demoController?.dismiss(animated: true, completion: {
                             guard let self else {
                                 return

@@ -330,7 +330,7 @@ public final class PendingMessageManager {
                     }
                     return peerIdsWithDeliveredMessages
                 }
-                |> deliverOn(self.queue)).start(next: { [weak self] peerIdsWithDeliveredMessages in
+                |> deliverOn(self.queue)).start(next: { [weak self = self] peerIdsWithDeliveredMessages in
                     guard let strongSelf = self else {
                         return
                     }

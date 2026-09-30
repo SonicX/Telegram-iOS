@@ -414,7 +414,7 @@ public class ChatMessageMediaBubbleContentNode: ChatMessageBubbleContentNode {
                     
                     let layoutSize = CGSize(width: layoutWidth, height: imageLayoutSize.height)
                     
-                    return (layoutSize, { [weak self] animation, synchronousLoads, _ in
+                    return (layoutSize, { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             strongSelf.media = selectedMedia

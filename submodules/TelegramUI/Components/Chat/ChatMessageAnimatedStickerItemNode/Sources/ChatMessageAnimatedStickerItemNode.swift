@@ -2438,7 +2438,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                             
                             if shouldPlay {
                                 let _ = (appConfiguration
-                                |> deliverOnMainQueue).startStandalone(next: { [weak self] appConfiguration in
+                                |> deliverOnMainQueue).startStandalone(next: { [weak self = self] appConfiguration in
                                     guard let strongSelf = self else {
                                         return
                                     }

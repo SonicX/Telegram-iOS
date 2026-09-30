@@ -1297,7 +1297,7 @@ public class ItemListPeerItemNode: ItemListRevealOptionsItemNode, ItemListItemNo
                 currentDisabledOverlayNode = nil
             }
             
-            return (layout, { [weak self] synchronousLoad, animated in
+            return (layout, { [weak self = self] synchronousLoad, animated in
                 if let strongSelf = self {
                     strongSelf.layoutParams = (item, params, neighbors, headerAtTop)
                     

@@ -893,7 +893,7 @@ private final class CameraScreenComponent: CombinedComponent {
             
             let startRecording = {
                 self.resultDisposable.set((camera.startRecording()
-                |> deliverOnMainQueue).start(next: { [weak self] recordingData in
+                |> deliverOnMainQueue).start(next: { [weak self = self] recordingData in
                     if let self, let controller = self.getController() {
                         controller.updateCameraState({ $0.updatedDuration(recordingData.duration) }, transition: .easeInOut(duration: 0.1))
                         if recordingData.duration > 59.0 {

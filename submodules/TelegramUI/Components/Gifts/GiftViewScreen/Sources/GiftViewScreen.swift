@@ -395,7 +395,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                         return false
                     }
                     |> take(1)
-                    |> deliverOnMainQueue).start(next: { [weak navigationController] _ in
+                    |> deliverOnMainQueue).start(next: { [weak navigationController = navigationController] _ in
                         if let profileController = context.sharedContext.makePeerInfoController(
                             context: context,
                             updatedPresentationData: nil,
@@ -537,7 +537,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                                 customAction: nil
                             ),
                             elevatedLayout: !(lastController is ChatController),
-                            action: { [weak navigationController] action in
+                            action: { [weak navigationController = navigationController] action in
                                 if case .undo = action, let navigationController, let giftsPeerId {
                                     let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: giftsPeerId))
                                     |> deliverOnMainQueue).start(next: { [weak navigationController] peer in
@@ -827,7 +827,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                         purpose: .removeOriginalDetailsStarGift(requiredStars: price),
                         targetPeerId: nil,
                         customTheme: nil,
-                        completion: { [weak self, weak starsContext] stars in
+                        completion: { [weak self, weak starsContext = starsContext] stars in
                             guard let self, let starsContext else {
                                 return
                             }
@@ -1387,7 +1387,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                 
                 if let reference = arguments.reference, case .unique = arguments.gift, let togglePinnedToTop = controller.togglePinnedToTop, let pinnedToTop = arguments.pinnedToTop {
                     items.append(.action(ContextMenuActionItem(text: pinnedToTop ? strings.PeerInfo_Gifts_Context_Unpin : strings.PeerInfo_Gifts_Context_Pin , icon: { theme in generateTintedImage(image: UIImage(bundleImageName: pinnedToTop ? "Chat/Context Menu/Unpin" : "Chat/Context Menu/Pin"), color: theme.contextMenu.primaryColor) }, action: { [weak self] c, f in
-                        c?.dismiss(completion: { [weak self, weak controller] in
+                        c?.dismiss(completion: { [weak self, weak controller = controller] in
                             guard let self, let controller else {
                                 return
                             }
@@ -1701,7 +1701,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                     let finalPrice = acceptedPrice ?? resellAmount
                     self.buyDisposable = (buyGiftImpl(uniqueGift.slug, recipientPeerId, finalPrice)
                     |> deliverOnMainQueue).start(
-                        error: { [weak self] error in
+                        error: { [weak self = self] error in
                             guard let self, let controller = self.getController() else {
                                 return
                             }
@@ -1760,7 +1760,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                                 controller.present(alertController, in: .window(.root))
                             }
                         },
-                        completed: { [weak self] in
+                        completed: { [weak self = self] in
                             guard let self, let controller = self.getController() as? GiftViewScreen else {
                                 return
                             }
@@ -1802,7 +1802,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                                     
                                     Queue.mainQueue().after(0.5, {
                                         let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: recipientPeerId))
-                                        |> deliverOnMainQueue).start(next: { [weak navigationController] peer in
+                                        |> deliverOnMainQueue).start(next: { [weak navigationController = navigationController] peer in
                                             if let peer, let lastController = navigationController?.viewControllers.last as? ViewController, let animationFile {
                                                 let resultController = UndoOverlayController(
                                                     presentationData: presentationData,
@@ -1843,7 +1843,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                         let _ = (self.starsTopUpOptionsPromise.get()
                          |> filter { $0 != nil }
                          |> take(1)
-                         |> deliverOnMainQueue).startStandalone(next: { [weak self] options in
+                         |> deliverOnMainQueue).startStandalone(next: { [weak self = self] options in
                             guard let self, let controller = self.getController() else {
                                 return
                             }
@@ -1854,7 +1854,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                                 purpose: .buyStarGift(requiredStars: resellAmount.amount.value),
                                 targetPeerId: nil,
                                 customTheme: nil,
-                                completion: { [weak self, weak starsContext] stars in
+                                completion: { [weak self, weak starsContext = starsContext] stars in
                                     guard let self, let starsContext else {
                                         return
                                     }
@@ -1897,7 +1897,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                         controller.push(BalanceNeededScreen(
                             context: self.context,
                             amount: needed,
-                            buttonAction: { [weak self] in
+                            buttonAction: { [weak self = self] in
                                 guard let self else {
                                     return
                                 }
@@ -2058,7 +2058,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                 }
             
                 self.upgradeDisposable = (upgradeGiftImpl(formId, self.keepOriginalInfo)
-                |> deliverOnMainQueue).start(next: { [weak self, weak starsContext] result in
+                |> deliverOnMainQueue).start(next: { [weak self, weak starsContext = starsContext] result in
                     guard let self, let controller = self.getController() as? GiftViewScreen else {
                         return
                     }
@@ -2138,7 +2138,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                             purpose: .upgradeStarGift(requiredStars: price),
                             targetPeerId: nil,
                             customTheme: nil,
-                            completion: { [weak self, weak starsContext] stars in
+                            completion: { [weak self, weak starsContext = starsContext] stars in
                                 guard let self, let starsContext else {
                                     return
                                 }
@@ -2229,7 +2229,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                 }
                 
                 self.upgradeDisposable = (signal
-                |> deliverOnMainQueue).start(next: { [weak self, weak controller, weak starsContext] result in
+                |> deliverOnMainQueue).start(next: { [weak self, weak controller = controller, weak starsContext] result in
                     guard let self else {
                         return
                     }
@@ -2306,7 +2306,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                         purpose: .upgradeStarGift(requiredStars: price),
                         targetPeerId: nil,
                         customTheme: nil,
-                        completion: { [weak self, weak starsContext] stars in
+                        completion: { [weak self, weak starsContext = starsContext] stars in
                             guard let self, let starsContext else {
                                 return
                             }
@@ -2390,7 +2390,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                         purpose: .starGiftOffer(requiredStars: price.amount.value),
                         targetPeerId: nil,
                         customTheme: nil,
-                        completion: { [weak self, weak starsContext] stars in
+                        completion: { [weak self, weak starsContext = starsContext] stars in
                             guard let self, let starsContext else {
                                 return
                             }

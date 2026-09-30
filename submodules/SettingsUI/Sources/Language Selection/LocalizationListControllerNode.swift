@@ -424,7 +424,7 @@ final class LocalizationListControllerNode: ViewControllerTracingNode {
                     return nil
                 }
             }
-            |> deliverOnMainQueue).start(next: { [weak self] info in
+            |> deliverOnMainQueue).start(next: { [weak self = self] info in
                 if revealedCodeValue == id {
                     revealedCodeValue = nil
                     revealedCode.set(.single(nil))

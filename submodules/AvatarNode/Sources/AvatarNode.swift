@@ -563,7 +563,7 @@ public final class AvatarNode: ASDisplayNode {
                 animationNode.frame = CGRect(x: floor((self.bounds.width - size.width) / 2.0) + 1.0, y: floor((self.bounds.height - size.height) / 2.0), width: size.width, height: size.height)
                 Queue.mainQueue().after(0.15, {
                     animationNode.play()
-                    animationNode.completion = { [weak animationNode, weak animationBackgroundNode] in
+                    animationNode.completion = { [weak animationNode = animationNode, weak animationBackgroundNode = animationBackgroundNode] in
                         animationNode?.removeFromSupernode()
                         animationBackgroundNode?.removeFromSupernode()
                     }

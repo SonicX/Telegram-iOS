@@ -207,7 +207,7 @@ public final class PresentationContext {
                     if let view = strongSelf.view, let layout = strongSelf.layout {
                         let (updatedControllerLayout, updatedControllerFrame) = strongSelf.layoutForController(containerLayout: layout, controller: controller)
                         
-                        (controller as? UIViewController)?.navigation_setDismiss({ [weak controller] in
+                        (controller as? UIViewController)?.navigation_setDismiss({ [weak controller = controller] in
                             if let strongSelf = self, let controller = controller {
                                 strongSelf.dismiss(controller)
                             }

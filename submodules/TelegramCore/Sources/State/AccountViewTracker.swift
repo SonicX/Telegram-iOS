@@ -456,7 +456,7 @@ public final class AccountViewTracker {
                                         })
                                     }
                                 }
-                            }).start(completed: { [weak self] in
+                            }).start(completed: { [weak self = self] in
                                 if let strongSelf = self {
                                     strongSelf.queue.async {
                                         strongSelf.webpageDisposables.removeValue(forKey: messageId)
@@ -464,7 +464,7 @@ public final class AccountViewTracker {
                                 }
                             })
                         } else if messageId.namespace == Namespaces.Message.Cloud {
-                            self.webpageDisposables[messageId] = fetchWebpage(account: account, messageId: messageId, threadId: threadId).start(completed: { [weak self] in
+                            self.webpageDisposables[messageId] = fetchWebpage(account: account, messageId: messageId, threadId: threadId).start(completed: { [weak self = self] in
                                 if let strongSelf = self {
                                     strongSelf.queue.async {
                                         strongSelf.webpageDisposables.removeValue(forKey: messageId)
@@ -632,7 +632,7 @@ public final class AccountViewTracker {
             if let account = self.account {
                 for holeId in addedHoleIds {
                     if self.visibleCallListHoleDisposables[holeId] == nil {
-                        self.visibleCallListHoleDisposables[holeId] = fetchCallListHole(network: account.network, postbox: account.postbox, accountPeerId: account.peerId, holeIndex: holeId).start(completed: { [weak self] in
+                        self.visibleCallListHoleDisposables[holeId] = fetchCallListHole(network: account.network, postbox: account.postbox, accountPeerId: account.peerId, holeIndex: holeId).start(completed: { [weak self = self] in
                             if let strongSelf = self {
                                 strongSelf.queue.async {
                                     strongSelf.visibleCallListHoleDisposables.removeValue(forKey: holeId)
@@ -810,13 +810,13 @@ public final class AccountViewTracker {
                             }
                         }
                         |> switchToLatest)
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedViewCountDisposables.set(nil, forKey: disposableId)
                             }
                         }
                         |> deliverOn(self.queue)
-                        self.updatedViewCountDisposables.set(signal.start(next: { [weak self] updatedStates in
+                        self.updatedViewCountDisposables.set(signal.start(next: { [weak self = self] updatedStates in
                             guard let strongSelf = self else {
                                 return
                             }
@@ -913,7 +913,7 @@ public final class AccountViewTracker {
                             }
                         }
                         |> switchToLatest)
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedReactionsDisposables.set(nil, forKey: disposableId)
                             }
@@ -968,7 +968,7 @@ public final class AccountViewTracker {
                             }
                         }
                         |> switchToLatest)
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.seenLiveLocationDisposables.set(nil, forKey: disposableId)
                             }
@@ -1021,7 +1021,7 @@ public final class AccountViewTracker {
                                 return .complete()
                             }
                         }
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedExtendedMediaDisposables.set(nil, forKey: disposableId)
                             }
@@ -1119,7 +1119,7 @@ public final class AccountViewTracker {
                                 }
                             }
                         }
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedUnsupportedMediaDisposables.set(nil, forKey: disposableId)
                             }
@@ -1211,7 +1211,7 @@ public final class AccountViewTracker {
                                 }
                             }
                         }
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedUnsupportedMediaDisposables.set(nil, forKey: disposableId)
                             }
@@ -1291,7 +1291,7 @@ public final class AccountViewTracker {
                             return combineLatest(requests)
                             |> ignoreValues
                         }
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedUnsupportedMediaDisposables.set(nil, forKey: disposableId)
                             }
@@ -1355,7 +1355,7 @@ public final class AccountViewTracker {
                             return combineLatest(requests)
                             |> ignoreValues
                         }
-                        |> afterDisposed { [weak self] in
+                        |> afterDisposed { [weak self = self] in
                             self?.queue.async {
                                 self?.updatedUnsupportedMediaDisposables.set(nil, forKey: disposableId)
                             }
@@ -1457,7 +1457,7 @@ public final class AccountViewTracker {
                         return combineLatest(requests)
                         |> ignoreValues
                     }
-                    |> afterDisposed { [weak self] in
+                    |> afterDisposed { [weak self = self] in
                         self?.queue.async {
                             self?.updatedUnsupportedMediaDisposables.set(nil, forKey: disposableId)
                         }
@@ -1569,7 +1569,7 @@ public final class AccountViewTracker {
                         return combineLatest(requests)
                         |> ignoreValues
                     }
-                    |> afterDisposed { [weak self] in
+                    |> afterDisposed { [weak self = self] in
                         self?.queue.async {
                             self?.updatedUnsupportedMediaDisposables.set(nil, forKey: disposableId)
                         }
@@ -1752,7 +1752,7 @@ public final class AccountViewTracker {
                 return
             }
             let queue = self.queue
-            context.disposable.set(combineLatest(fetchAndUpdateSupplementalCachedPeerData(peerId: peerId, accountPeerId: account.peerId, network: account.network, postbox: account.postbox), _internal_fetchAndUpdateCachedPeerData(accountPeerId: account.peerId, peerId: peerId, network: account.network, postbox: account.postbox)).start(next: { [weak self] supplementalStatus, cachedStatus in
+            context.disposable.set(combineLatest(fetchAndUpdateSupplementalCachedPeerData(peerId: peerId, accountPeerId: account.peerId, network: account.network, postbox: account.postbox), _internal_fetchAndUpdateCachedPeerData(accountPeerId: account.peerId, peerId: peerId, network: account.network, postbox: account.postbox)).start(next: { [weak self = self] supplementalStatus, cachedStatus in
                 queue.async {
                     guard let strongSelf = self else {
                         return
@@ -1794,7 +1794,7 @@ public final class AccountViewTracker {
                     return
                 }
                 let queue = self.queue
-                context.disposable.set(combineLatest(fetchAndUpdateSupplementalCachedPeerData(peerId: peerId, accountPeerId: accountPeerId, network: account.network, postbox: account.postbox), _internal_fetchAndUpdateCachedPeerData(accountPeerId: account.peerId, peerId: peerId, network: account.network, postbox: account.postbox)).start(next: { [weak self] supplementalStatus, cachedStatus in
+                context.disposable.set(combineLatest(fetchAndUpdateSupplementalCachedPeerData(peerId: peerId, accountPeerId: accountPeerId, network: account.network, postbox: account.postbox), _internal_fetchAndUpdateCachedPeerData(accountPeerId: account.peerId, peerId: peerId, network: account.network, postbox: account.postbox)).start(next: { [weak self = self] supplementalStatus, cachedStatus in
                     queue.async {
                         guard let strongSelf = self else {
                             return

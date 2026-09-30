@@ -3542,7 +3542,7 @@ public func storyMediaPickerController(
             forCollage: forCollage,
             selectionContext: selectionContext,
             mainButtonState: nil,
-            mainButtonAction: { [weak selectionContext] in
+            mainButtonAction: { [weak selectionContext = selectionContext] in
                 if let selectionContext, let selectedItems = selectionContext.selectedItems() {
                     var results: [Any] = []
                     for item in selectedItems {
@@ -3553,7 +3553,7 @@ public func storyMediaPickerController(
                     multipleCompletion(results, false)
                 }
             },
-            secondaryButtonAction: { [weak selectionContext] in
+            secondaryButtonAction: { [weak selectionContext = selectionContext] in
                 if let selectionContext, let selectedItems = selectionContext.selectedItems() {
                     var results: [Any] = []
                     for item in selectedItems {

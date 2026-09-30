@@ -697,7 +697,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                     }
                     let buttonFrame = CGRect(origin: CGPoint(x: layoutConstants.text.bubbleInsets.right, y: layoutSize.height - 9.0 - buttonSize.height), size: buttonSize)
                     
-                    return (layoutSize, { [weak self] animation, synchronousLoads, _ in
+                    return (layoutSize, { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             if strongSelf.item == nil {
                                 strongSelf.animationNode.autoplay = true
@@ -1054,7 +1054,7 @@ private final class PeerButtonsStackNode: ASDisplayNode {
                     for i in 0 ..< buttonNodes.count {
                         let peer = peers[i]
                         let buttonNode = buttonNodes[i]
-                        buttonNode.pressed = { [weak targetNode] in
+                        buttonNode.pressed = { [weak targetNode = targetNode] in
                             targetNode?.openPeer(peer)
                         }
                         if buttonNode.supernode == nil {

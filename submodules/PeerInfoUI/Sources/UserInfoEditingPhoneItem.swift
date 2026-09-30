@@ -223,7 +223,7 @@ class UserInfoEditingPhoneItemNode: ItemListRevealOptionsItemNode, ItemListItemN
             
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
                     strongSelf.layoutParams = params

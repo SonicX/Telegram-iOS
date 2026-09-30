@@ -284,7 +284,7 @@ public class InfoItemNode: ListViewItemNode {
             let contentSize = CGSize(width: params.width, height: titleLayout.size.height + textLayout.size.height + 38.0 + verticalInset * 2.0)
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

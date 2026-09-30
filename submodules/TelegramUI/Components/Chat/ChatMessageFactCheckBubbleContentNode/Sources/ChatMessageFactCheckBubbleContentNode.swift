@@ -486,7 +486,7 @@ public class ChatMessageFactCheckBubbleContentNode: ChatMessageBubbleContentNode
                     boundingSize.width += layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right
                     boundingSize.height += layoutConstants.text.bubbleInsets.top + layoutConstants.text.bubbleInsets.bottom
                     
-                    return (boundingSize, { [weak self] animation, _, info in
+                    return (boundingSize, { [weak self = self] animation, _, info in
                         if let strongSelf = self {
                             info?.setInvertOffsetDirection()
                             

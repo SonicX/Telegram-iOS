@@ -245,7 +245,7 @@ func passcodeOptionsController(context: AccountContext) -> ViewController {
                     transaction.setAccessChallengeData(challenge)
                 }).start()
                 
-                let _ = (passcodeOptionsDataPromise.get() |> take(1)).start(next: { [weak passcodeOptionsDataPromise] data in
+                let _ = (passcodeOptionsDataPromise.get() |> take(1)).start(next: { [weak passcodeOptionsDataPromise = passcodeOptionsDataPromise] data in
                     passcodeOptionsDataPromise?.set(.single(data.withUpdatedAccessChallenge(challenge)))
                 })
                 
@@ -319,7 +319,7 @@ func passcodeOptionsController(context: AccountContext) -> ViewController {
         var items: [ActionSheetItem] = []
         let setAction: (Int32?) -> Void = { value in
             let _ = (passcodeOptionsDataPromise.get()
-            |> take(1)).start(next: { [weak passcodeOptionsDataPromise] data in
+            |> take(1)).start(next: { [weak passcodeOptionsDataPromise = passcodeOptionsDataPromise] data in
                 passcodeOptionsDataPromise?.set(.single(data.withUpdatedPresentationSettings(data.presentationSettings.withUpdatedAutolockTimeout(value))))
                 
                 let _ = updatePresentationPasscodeSettingsInteractively(accountManager: context.sharedContext.accountManager, { current in
@@ -353,7 +353,7 @@ func passcodeOptionsController(context: AccountContext) -> ViewController {
             ])])
         presentControllerImpl?(actionSheet, ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
     }, changeTouchId: { value in
-        let _ = (passcodeOptionsDataPromise.get() |> take(1)).start(next: { [weak passcodeOptionsDataPromise] data in
+        let _ = (passcodeOptionsDataPromise.get() |> take(1)).start(next: { [weak passcodeOptionsDataPromise = passcodeOptionsDataPromise] data in
             passcodeOptionsDataPromise?.set(.single(data.withUpdatedPresentationSettings(data.presentationSettings.withUpdatedEnableBiometrics(value))))
             
             let _ = updatePresentationPasscodeSettingsInteractively(accountManager: context.sharedContext.accountManager, { current in

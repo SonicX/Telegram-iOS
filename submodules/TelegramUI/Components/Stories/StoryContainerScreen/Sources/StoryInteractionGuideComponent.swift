@@ -369,7 +369,7 @@ private final class GuideItemComponent: Component {
                 if component.isPlaying && !self.isPlaying {
                     self.isPlaying = true
                     Queue.mainQueue().justDispatch {
-                        let completionBlock = { [weak self] in
+                        let completionBlock = { [weak self = self] in
                             guard let self else {
                                 return
                             }
@@ -379,7 +379,7 @@ private final class GuideItemComponent: Component {
                             }
                         }
                                                 
-                        view.playOnce(force: true, completion: { [weak view] in
+                        view.playOnce(force: true, completion: { [weak view = view] in
                             view?.playOnce(force: true, completion: {
                                 completionBlock()
                             })

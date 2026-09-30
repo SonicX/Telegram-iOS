@@ -1060,7 +1060,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
                 return
             }
             if #available(iOS 14.0, *), contentType == "text/html" {
-                self.webView.createWebArchiveData { [weak self] result in
+                self.webView.createWebArchiveData { [weak self = self] result in
                     guard let self, case let .success(data) = result else {
                         return
                     }

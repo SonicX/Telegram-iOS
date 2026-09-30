@@ -387,7 +387,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
             transition.setFrame(view: inputMediaNode.view, frame: targetFrame, completion: { [weak inputMediaNode] _ in
                 if let inputMediaNode {
                     Queue.mainQueue().after(0.3) {
-                        inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode] _ in
+                        inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode = inputMediaNode] _ in
                             inputMediaNode?.view.removeFromSuperview()
                         })
                     }
@@ -1014,7 +1014,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                 return
             }
             let peer = component.slice.effectivePeer
-            let _ = (legacyEnqueueGifMessage(account: component.context.account, data: data) |> deliverOnMainQueue).start(next: { [weak self, weak view] message in
+            let _ = (legacyEnqueueGifMessage(account: component.context.account, data: data) |> deliverOnMainQueue).start(next: { [weak self, weak view = view] message in
                 if let self, let view {
                     self.sendMessages(view: view, peer: peer, messages: [message])
                 }
@@ -1106,7 +1106,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                 if isVideo {
                     if self.videoRecorderValue == nil {
                         if let currentInputPanelFrame = view.inputPanel.view?.frame {
-                            self.videoRecorder.set(.single(legacyInstantVideoController(theme: defaultDarkPresentationTheme, forStory: true, panelFrame: view.convert(currentInputPanelFrame, to: nil), context: component.context, peerId: peer.id, slowmodeState: nil, hasSchedule: true, send: { [weak self, weak view] videoController, message in
+                            self.videoRecorder.set(.single(legacyInstantVideoController(theme: defaultDarkPresentationTheme, forStory: true, panelFrame: view.convert(currentInputPanelFrame, to: nil), context: component.context, peerId: peer.id, slowmodeState: nil, hasSchedule: true, send: { [weak self = self, weak view] videoController, message in
                                 guard let self, let view else {
                                     return
                                 }
@@ -1132,10 +1132,10 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                                         self.sendMessages(view: view, peer: peer, messages: [updatedMessage])
                                     })
                                 })
-                            }, displaySlowmodeTooltip: { [weak self] view, rect in
+                            }, displaySlowmodeTooltip: { [weak self = self] view, rect in
                                 //self?.interfaceInteraction?.displaySlowmodeTooltip(view, rect)
                                 let _ = self
-                            }, presentSchedulePicker: { [weak self, weak view] done in
+                            }, presentSchedulePicker: { [weak self = self, weak view] done in
                                 guard let self, let view else {
                                     return
                                 }
@@ -1154,7 +1154,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
             } else {
                 if let audioRecorderValue = self.audioRecorderValue {
                     let _ = (audioRecorderValue.takenRecordedData()
-                    |> deliverOnMainQueue).start(next: { [weak self, weak view] data in
+                    |> deliverOnMainQueue).start(next: { [weak self = self, weak view] data in
                         guard let self, let view, let component = view.component else {
                             return
                         }
@@ -1470,7 +1470,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                 text: inputText,
                 minAmount: Int(minAmount),
                 currentAmount: currentAmount,
-                completion: { [weak self, weak view] amount, _ in
+                completion: { [weak self = self, weak view] amount, _ in
                     guard let self, let view else {
                         return
                     }
@@ -1956,7 +1956,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                             }
                             let message: EnqueueMessage = .message(text: "", attributes: messageAttributes, inlineStickers: [:], mediaReference: mediaReference, threadId: nil, replyToMessageId: nil, replyToStoryId: focusedStoryId, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
                             let _ = (enqueueMessages(account: component.context.account, peerId: peer.id, messages: [message.withUpdatedReplyToMessageId(nil)])
-                            |> deliverOnMainQueue).start(next: { [weak self, weak view] messageIds in
+                            |> deliverOnMainQueue).start(next: { [weak self = self, weak view] messageIds in
                                 if let self, let view {
                                     Queue.mainQueue().after(0.3) {
                                         self.presentMessageSentTooltip(view: view, peer: peer, messageId: messageIds.first.flatMap { $0 })
@@ -2280,7 +2280,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
             self.presentWebSearch(view: view, activateOnDisplay: activateOnDisplay, present: { [weak controller] c, a in
                 controller?.present(c, in: .current)
                 if let webSearchController = c as? WebSearchController {
-                    webSearchController.searchingUpdated = { [weak mediaGroups] searching in
+                    webSearchController.searchingUpdated = { [weak mediaGroups = mediaGroups] searching in
                         if let mediaGroups = mediaGroups, mediaGroups.isNodeLoaded {
                             let transition = ContainedViewLayoutTransition.animated(duration: 0.2, curve: .easeInOut)
                             transition.updateAlpha(node: mediaGroups.displayNode, alpha: searching ? 0.0 : 1.0)
@@ -3519,7 +3519,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                         }), in: .window(.root))
                     }
                 }
-            }, dismissed: { [weak self, weak view] in
+            }, dismissed: { [weak self = self, weak view = view] in
                 guard let self, let view else {
                     return
                 }
@@ -3804,14 +3804,14 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
             return
         case let .link(_, url):
             let action = {
-                let _ = openUserGeneratedUrl(context: component.context, peerId: component.slice.effectivePeer.id, url: url, concealed: false, skipUrlAuth: false, skipConcealedAlert: false, forceDark: true, present: { [weak controller] c in
+                let _ = openUserGeneratedUrl(context: component.context, peerId: component.slice.effectivePeer.id, url: url, concealed: false, skipUrlAuth: false, skipConcealedAlert: false, forceDark: true, present: { [weak controller = controller] c in
                     controller?.present(c, in: .window(.root))
-                }, openResolved: { [weak self, weak view] resolved in
+                }, openResolved: { [weak self = self, weak view = view] resolved in
                     guard let self, let view else {
                         return
                     }
                     self.openResolved(view: view, result: resolved, forceExternal: false, concealed: false)
-                }, alertDisplayUpdated: { [weak self, weak view] alertController in
+                }, alertDisplayUpdated: { [weak self = self, weak view = view] alertController in
                     guard let self, let view else {
                         return
                     }
@@ -3831,14 +3831,14 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
         case let .starGift(_, slug):
             useGesturePosition = true
             let action = {
-                let _ = openUserGeneratedUrl(context: component.context, peerId: nil, url: "https://t.me/nft/\(slug)", concealed: false, skipUrlAuth: false, skipConcealedAlert: false, forceDark: true, present: { [weak controller] c in
+                let _ = openUserGeneratedUrl(context: component.context, peerId: nil, url: "https://t.me/nft/\(slug)", concealed: false, skipUrlAuth: false, skipConcealedAlert: false, forceDark: true, present: { [weak controller = controller] c in
                     controller?.present(c, in: .window(.root))
-                }, openResolved: { [weak self, weak view] resolved in
+                }, openResolved: { [weak self = self, weak view = view] resolved in
                     guard let self, let view else {
                         return
                     }
                     self.openResolved(view: view, result: resolved, forceExternal: false, concealed: false)
-                }, alertDisplayUpdated: { [weak self, weak view] alertController in
+                }, alertDisplayUpdated: { [weak self = self, weak view = view] alertController in
                     guard let self, let view else {
                         return
                     }
@@ -4058,7 +4058,7 @@ final class StoryItemSetContainerSendMessage: @unchecked(Sendable) {
                 myPeer: (sendAsPeer?.peer).flatMap(EnginePeer.init),
                 reactSubject: .liveStream(peerId: peerId, storyId: focusedItem.storyItem.id, minAmount: Int(minAmount), liveChatMessageParams: LiveChatMessageParams(appConfig: component.context.currentAppConfiguration.with({ $0 })), availableSendAsPeers: component.isEmbeddedInCamera ? [] : (self.sendAsData?.availablePeers.map({ EnginePeer($0.peer) }) ?? []), isDisplayOnly: component.isEmbeddedInCamera),
                 topPeers: topPeers,
-                completion: { [weak self, weak view] amount, privacy, _, _ in
+                completion: { [weak self = self, weak view] amount, privacy, _, _ in
                     guard let self, let view else {
                         return
                     }

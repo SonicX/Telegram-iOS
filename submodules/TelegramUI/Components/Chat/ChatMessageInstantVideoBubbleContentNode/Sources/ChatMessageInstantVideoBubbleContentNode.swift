@@ -311,7 +311,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
                         finalSize = CGSize(width: boundingWidth, height: videoFrame.height + 2.0)
                     }
                     
-                    return (finalSize, { [weak self] animation, synchronousLoads, applyInfo in
+                    return (finalSize, { [weak self = self] animation, synchronousLoads, applyInfo in
                         if let strongSelf = self {
                             strongSelf.item = item
                             strongSelf.isExpanded = isExpanded

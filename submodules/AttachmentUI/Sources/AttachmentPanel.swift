@@ -1272,7 +1272,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
                         emojiViewProvider: textInputPanelNode.emojiViewProvider,
                         completion: {
                         },
-                        sendMessage: { [weak textInputPanelNode] mode, messageEffect in
+                        sendMessage: { [weak textInputPanelNode = textInputPanelNode] mode, messageEffect in
                             switch mode {
                             case .generic:
                                 textInputPanelNode?.sendMessage(.generic, messageEffect)
@@ -1282,7 +1282,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
                                 textInputPanelNode?.sendMessage(.whenOnline, messageEffect)
                             }
                         },
-                        schedule: { [weak textInputPanelNode] messageEffect in
+                        schedule: { [weak textInputPanelNode = textInputPanelNode] messageEffect in
                             textInputPanelNode?.sendMessage(.schedule, messageEffect)
                         },
                         editPrice: { [weak strongSelf] price in
@@ -1821,7 +1821,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
             let targetInputFrame = CGRect(x: inputTransition.menuButtonNode.frame.maxX, y: 0.0, width: inputNodeSnapshotView.frame.width - inputTransition.menuButtonNode.frame.maxX, height: inputNodeSnapshotView.frame.height)
             inputNodeSnapshotView.frame = targetInputFrame.offsetBy(dx: targetInputFrame.width, dy: self.mainButtonNode.position.y - inputNodeSnapshotView.frame.height / 2.0)
             self.view.addSubview(inputNodeSnapshotView)
-            transition.updateFrame(layer: inputNodeSnapshotView.layer, frame: targetInputFrame, completion: { [weak inputNodeSnapshotView, weak menuIconSnapshotView, weak menuTextSnapshotView, weak self] _ in
+            transition.updateFrame(layer: inputNodeSnapshotView.layer, frame: targetInputFrame, completion: { [weak inputNodeSnapshotView = inputNodeSnapshotView, weak menuIconSnapshotView, weak menuTextSnapshotView, weak self = self] _ in
                 inputNodeSnapshotView?.removeFromSuperview()
                 self?.animatingTransition = false
                 

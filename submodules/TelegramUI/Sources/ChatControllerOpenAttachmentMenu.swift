@@ -717,7 +717,7 @@ extension ChatControllerImpl {
                                 }
                                 let _ = (self.context.engine.messages.addBotToAttachMenu(botId: bot.peer.id, allowWrite: allowWrite)
                                 |> deliverOnMainQueue).startStandalone(error: { _ in
-                                }, completed: { [weak controller] in
+                                }, completed: { [weak controller = controller] in
                                     controller?.refresh()
                                 })
                             },
@@ -1282,7 +1282,7 @@ extension ChatControllerImpl {
             self?.presentWebSearch(editingMessage: false, attachment: true, activateOnDisplay: activateOnDisplay, present: { [weak controller] c, a in
                 controller?.present(c, in: .current)
                 if let webSearchController = c as? WebSearchController {
-                    webSearchController.searchingUpdated = { [weak mediaGroups] searching in
+                    webSearchController.searchingUpdated = { [weak mediaGroups = mediaGroups] searching in
                         if let mediaGroups = mediaGroups, mediaGroups.isNodeLoaded {
                             let transition = ContainedViewLayoutTransition.animated(duration: 0.2, curve: .easeInOut)
                             transition.updateAlpha(node: mediaGroups.displayNode, alpha: searching ? 0.0 : 1.0)

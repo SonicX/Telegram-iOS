@@ -1178,7 +1178,7 @@ final class PeerInfoPaneContainerNode: ASDisplayNode, ASGestureRecognizerDelegat
             Queue.mainQueue().after(0.15) {
                 self.didJustReorderTabs = true
                 let _ = (self.context.engine.peers.setMainProfileTab(peerId: self.peerId, tab: tab)
-                |> deliverOnMainQueue).start(completed: { [weak self] in
+                |> deliverOnMainQueue).start(completed: { [weak self = self] in
                     guard let self else {
                         return
                     }

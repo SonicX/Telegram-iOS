@@ -2382,7 +2382,7 @@ public class PremiumBoostLevelsScreen: ViewController {
                                 guard let peer, let controller else {
                                     return
                                 }
-                                let replaceController = replaceBoostConfirmationController(context: context, fromPeers: [occupiedPeer], toPeer: peer, commit: { [weak self] in
+                                let replaceController = replaceBoostConfirmationController(context: context, fromPeers: [occupiedPeer], toPeer: peer, commit: { [weak self = self] in
                                     self?.currentMyBoostCount += 1
                                     self?.myBoostCount += 1
                                     let _ = (context.engine.peers.applyChannelBoost(peerId: peerId, slots: [boost.slot])

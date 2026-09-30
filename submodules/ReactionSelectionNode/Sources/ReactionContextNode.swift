@@ -2958,7 +2958,7 @@ public final class ReactionContextNode: ASDisplayNode, ASScrollViewDelegate {
             
             DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + min(5.0, maxDuration * UIView.animationDurationFactor()), execute: {
                 if self.didTriggerExpandedReaction {
-                    self.animateFromItemNodeToReaction(itemNode: itemNode, targetView: targetView, hideNode: hideNode, completion: { [weak self] in
+                    self.animateFromItemNodeToReaction(itemNode: itemNode, targetView: targetView, hideNode: hideNode, completion: { [weak self = self] in
                         if let strongSelf = self, strongSelf.didTriggerExpandedReaction, let addStandaloneReactionAnimation = addStandaloneReactionAnimation {
                             let standaloneReactionAnimation = StandaloneReactionAnimation(genericReactionEffect: strongSelf.genericReactionEffect)
                             

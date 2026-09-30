@@ -516,7 +516,7 @@ class VoiceChatFullscreenParticipantItemNode: ItemListRevealOptionsItemNode {
                             
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
                         
-            return (layout, { [weak self] synchronousLoad, animated in
+            return (layout, { [weak self = self] synchronousLoad, animated in
                 if let strongSelf = self {
                     let hadItem = strongSelf.layoutParams?.0 != nil
                     strongSelf.layoutParams = (item, params, first, last)

@@ -330,7 +330,7 @@ private final class ThemeCarouselThemeItemIconNode: ListViewItemNode {
                     animatedStickerNode.transform = CATransform3DMakeScale(scale, scale, 1.0)
                     animatedStickerNode.layer.animateSpring(from: 1.0 as NSNumber, to: scale as NSNumber, keyPath: "transform.scale", duration: 0.45)
                     
-                    animatedStickerNode.completed = { [weak animatedStickerNode, weak self] _ in
+                    animatedStickerNode.completed = { [weak animatedStickerNode = animatedStickerNode, weak self = self] _ in
                         guard let item = self?.item, item.selected else {
                             return
                         }
@@ -784,7 +784,7 @@ public class ThemeCarouselThemeItemNode: ListViewItemNode, ItemListItemNode {
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             let layoutSize = layout.size
 
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
                     strongSelf.layoutParams = params

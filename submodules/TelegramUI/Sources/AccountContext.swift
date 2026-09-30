@@ -862,7 +862,7 @@ public final class AccountContextImpl: AccountContext {
                 }
                 
                 let _ = (dataInput
-                |> deliverOnMainQueue).start(next: { [weak self] peer, current in
+                |> deliverOnMainQueue).start(next: { [weak self = self] peer, current in
                     guard let strongSelf = self else {
                         return
                     }

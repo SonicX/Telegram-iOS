@@ -1344,13 +1344,13 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
                                 self.contentMedia?.removeFromSupernode()
                                 self.contentMedia = contentMedia
                                 
-                                contentMedia.activatePinch = { [weak controllerInteraction] sourceNode in
+                                contentMedia.activatePinch = { [weak controllerInteraction = controllerInteraction] sourceNode in
                                     guard let controllerInteraction else {
                                         return
                                     }
                                     controllerInteraction.activateMessagePinch(sourceNode)
                                 }
-                                contentMedia.playMessageEffect = { [weak controllerInteraction] message in
+                                contentMedia.playMessageEffect = { [weak controllerInteraction = controllerInteraction] message in
                                     guard let controllerInteraction else {
                                         return
                                     }
@@ -1362,7 +1362,7 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
                                     }
                                     self.openMedia?(mode)
                                 }
-                                contentMedia.updateMessageReaction = { [weak controllerInteraction] message, value, force, sourceView in
+                                contentMedia.updateMessageReaction = { [weak controllerInteraction = controllerInteraction] message, value, force, sourceView in
                                     guard let controllerInteraction else {
                                         return
                                     }

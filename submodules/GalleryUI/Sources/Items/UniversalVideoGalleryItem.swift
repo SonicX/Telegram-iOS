@@ -2976,7 +2976,7 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                             if let overlayNode = overlayNode, let overlaySupernode = overlayNode.supernode {
                                 return GalleryTransitionArguments(transitionNode: (overlayNode, overlayNode.bounds, { [weak overlayNode] in
                                     return (overlayNode?.view.snapshotContentTree(), nil)
-                                }), addToTransitionSurface: { [weak context, weak overlaySupernode, weak overlayNode] view in
+                                }), addToTransitionSurface: { [weak context = context, weak overlaySupernode, weak overlayNode] view in
                                     guard let context = context, let overlayNode = overlayNode else {
                                         return
                                     }
@@ -2998,7 +2998,7 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                                 if let overlayNode = overlayNode, let overlaySupernode = overlayNode.supernode {
                                     return GalleryTransitionArguments(transitionNode: (overlayNode, overlayNode.bounds, { [weak overlayNode] in
                                         return (overlayNode?.view.snapshotContentTree(), nil)
-                                    }), addToTransitionSurface: { [weak context, weak overlaySupernode, weak overlayNode] view in
+                                    }), addToTransitionSurface: { [weak context = context, weak overlaySupernode, weak overlayNode] view in
                                         guard let context = context, let overlayNode = overlayNode else {
                                             return
                                         }
@@ -3663,7 +3663,7 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                                     
                                     items.append(.action(ContextMenuActionItem(text: title, textLayout: .secondLineWithValue(fileSizeString), icon: { _ in
                                         return nil
-                                    }, action: { [weak self] c, _ in
+                                    }, action: { [weak self = self] c, _ in
                                         c?.dismiss(result: .default, completion: nil)
                                         
                                         guard let self else {

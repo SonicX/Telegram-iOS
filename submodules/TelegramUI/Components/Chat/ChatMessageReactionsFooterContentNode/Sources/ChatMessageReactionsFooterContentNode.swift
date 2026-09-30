@@ -644,7 +644,7 @@ public final class ChatMessageReactionsFooterContentNode: ChatMessageBubbleConte
                     boundingSize.width += layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right
                     boundingSize.height += topOffset + 2.0
                     
-                    return (boundingSize, { [weak self] animation, synchronousLoad, _ in
+                    return (boundingSize, { [weak self = self] animation, synchronousLoad, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             

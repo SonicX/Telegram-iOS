@@ -2168,7 +2168,7 @@ private final class PremiumIntroScreenContentComponent: CombinedComponent {
                             iconName: perk.iconName
                         ))), false),
                         accessory: accountContext != nil ? .arrow : nil,
-                        action: { [weak state] _ in
+                        action: { [weak state = state] _ in
                             guard let accountContext else {
                                 return
                             }
@@ -2357,7 +2357,7 @@ private final class PremiumIntroScreenContentComponent: CombinedComponent {
                             foregroundColor: .white,
                             iconName: perk.iconName
                         ))), false),
-                        action: { [weak state] _ in
+                        action: { [weak state = state] _ in
                             guard let accountContext else {
                                 return
                             }
@@ -2568,7 +2568,7 @@ private final class PremiumIntroScreenContentComponent: CombinedComponent {
                             file: nil
                         )))),
                         accessory: nil,
-                        action: { [weak state] view in
+                        action: { [weak state = state] view in
                             guard let view = view as? ListActionItemComponent.View, let iconView = view.iconView else {
                                 return
                             }
@@ -2707,7 +2707,7 @@ private final class PremiumIntroScreenContentComponent: CombinedComponent {
                             maximumNumberOfLines: 1
                         ))),
                     ], alignment: .left, spacing: 2.0)),
-                    accessory: .toggle(ListActionItemComponent.Toggle(style: .regular, isOn: state.adsEnabled, action: { [weak state] value in
+                    accessory: .toggle(ListActionItemComponent.Toggle(style: .regular, isOn: state.adsEnabled, action: { [weak state = state] value in
                         guard let accountContext else {
                             return
                         }
@@ -2907,7 +2907,7 @@ private final class PremiumIntroScreenContentComponent: CombinedComponent {
                                     let _ = (signal
                                     |> deliverOnMainQueue).start(next: { resolvedUrl in
                                         context.sharedContext.openResolvedUrl(resolvedUrl, context: context, urlContext: .generic, navigationController: navigationController, forceExternal: false, forceUpdate: false, openPeer: { peer, navigation in
-                                        }, sendFile: nil, sendSticker: nil, sendEmoji: nil, requestMessageActionUrlAuth: nil, joinVoiceChat: nil, present: { [weak controller] c, arguments in
+                                        }, sendFile: nil, sendSticker: nil, sendEmoji: nil, requestMessageActionUrlAuth: nil, joinVoiceChat: nil, present: { [weak controller = controller] c, arguments in
                                             controller?.push(c)
                                         }, dismissInput: {}, contentContext: nil, progress: nil, completion: nil)
                                     })

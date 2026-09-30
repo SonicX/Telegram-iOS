@@ -394,7 +394,7 @@ private final class ThemeSettingsThemeItemIconNode : ListViewItemNode {
                     animatedStickerNode.transform = CATransform3DMakeScale(scale, scale, 1.0)
                     animatedStickerNode.layer.animateSpring(from: 1.0 as NSNumber, to: scale as NSNumber, keyPath: "transform.scale", duration: 0.45)
                     
-                    animatedStickerNode.completed = { [weak animatedStickerNode, weak self] _ in
+                    animatedStickerNode.completed = { [weak animatedStickerNode = animatedStickerNode, weak self = self] _ in
                         guard let item = self?.item, item.selected else {
                             return
                         }
@@ -1270,9 +1270,9 @@ private class ChatQrCodeScreenNode: ViewControllerTracingNode, ASScrollViewDeleg
             let themeCrossfadeDelay: Double = 0.25
             
             Queue.mainQueue().after(themeCrossfadeDelay) {
-                self.switchThemeIconAnimator = DisplayLinkAnimator(duration: themeCrossfadeDuration * UIView.animationDurationFactor(), from: 0.0, to: 1.0, update: { [weak self] value in
+                self.switchThemeIconAnimator = DisplayLinkAnimator(duration: themeCrossfadeDuration * UIView.animationDurationFactor(), from: 0.0, to: 1.0, update: { [weak self = self] value in
                     self?.animationNode.setColors(colors: interpolateColors(from: previousIconColors, to: newIconColors, fraction: value))
-                }, completion: { [weak self] in
+                }, completion: { [weak self = self] in
                     self?.switchThemeIconAnimator?.invalidate()
                     self?.switchThemeIconAnimator = nil
                 })

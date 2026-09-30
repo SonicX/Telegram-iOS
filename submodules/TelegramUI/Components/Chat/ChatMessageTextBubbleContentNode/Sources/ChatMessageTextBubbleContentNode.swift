@@ -774,7 +774,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     
                     boundingSize.height += topInset + bottomInset
                     
-                    return (boundingSize, { [weak self] animation, synchronousLoads, itemApply in
+                    return (boundingSize, { [weak self = self] animation, synchronousLoads, itemApply in
                         if let strongSelf = self {
                             strongSelf.item = item
                             if let updatedCachedChatMessageText = updatedCachedChatMessageText {

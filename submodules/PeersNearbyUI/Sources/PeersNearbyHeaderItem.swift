@@ -97,7 +97,7 @@ class PeersNearbyHeaderItemNode: ListViewItemNode {
             
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     if strongSelf.item == nil {
                         strongSelf.animationNode.setup(source: AnimatedStickerNodeLocalFileSource(name: "Compass"), width: 192, height: 192, playbackMode: .once, mode: .direct(cachePathPrefix: nil))

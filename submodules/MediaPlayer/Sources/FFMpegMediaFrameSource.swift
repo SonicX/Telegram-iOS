@@ -264,7 +264,7 @@ public final class FFMpegMediaFrameSource: NSObject, MediaFrameSource {
                 currentSemaphore.with({ $0 })?.with({ $0 })?.signal()
             })
             
-            self.performWithContext { [weak self] context in
+            self.performWithContext { [weak self = self] context in
                 let _ = currentSemaphore.swap(context.currentSemaphore)
                 
                 context.initializeState(postbox: postbox, userLocation: userLocation, resourceReference: resourceReference, tempFilePath: tempFilePath, limitedFileRange: limitedFileRange, streamable: streamable, isSeekable: isSeekable, video: video, preferSoftwareDecoding: preferSoftwareDecoding, fetchAutomatically: fetchAutomatically, maximumFetchSize: maximumFetchSize, storeAfterDownload: storeAfterDownload, isAudioVideoMessage: isAudioVideoMessage)

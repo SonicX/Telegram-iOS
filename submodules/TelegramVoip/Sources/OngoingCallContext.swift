@@ -1102,7 +1102,7 @@ public final class OngoingCallContext {
                     enableStunMarking: enableStunMarking,
                     logPath: logPath,
                     statsLogPath: tempStatsLogPath,
-                    sendSignalingData: { [weak callSessionManager] data in
+                    sendSignalingData: { [weak callSessionManager = callSessionManager] data in
                         queue.async {
                             guard let strongSelf = self else {
                                 return
@@ -1126,7 +1126,7 @@ public final class OngoingCallContext {
                 )
                 
                 strongSelf.contextRef = Unmanaged.passRetained(OngoingCallThreadLocalContextHolder(context))
-                context.stateChanged = { [weak callSessionManager] state, videoState, remoteVideoState, remoteAudioState, remoteBatteryLevel, _ in
+                context.stateChanged = { [weak callSessionManager = callSessionManager] state, videoState, remoteVideoState, remoteAudioState, remoteBatteryLevel, _ in
                     queue.async {
                         guard let strongSelf = self else {
                             return

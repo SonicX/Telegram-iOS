@@ -195,7 +195,7 @@ private final class WebBrowserItemNode: ListViewItemNode {
                 updateCheckImage = PresentationResourcesItemList.checkIconImage(item.presentationData.theme)
             }
 
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

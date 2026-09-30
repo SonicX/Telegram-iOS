@@ -969,11 +969,11 @@ public class AvatarGalleryController: ViewController, StandalonePresentableContr
             
             if replaceItems {
                 updatedEntries = normalizeEntries(updatedEntries)
-                self.galleryNode.pager.replaceItems(updatedEntries.map({ entry in PeerAvatarImageGalleryItem(context: self.context, peer: self.peer, presentationData: presentationData, entry: entry, sourceCorners: self.sourceCorners, delete: self.canDelete ? { [weak self] in
+                self.galleryNode.pager.replaceItems(updatedEntries.map({ entry in PeerAvatarImageGalleryItem(context: self.context, peer: self.peer, presentationData: presentationData, entry: entry, sourceCorners: self.sourceCorners, delete: self.canDelete ? { [weak self = self] in
                     self?.deleteEntry(entry)
-                } : nil, setMain: { [weak self] in
+                } : nil, setMain: { [weak self = self] in
                     self?.setMainEntry(entry)
-                }, edit: { [weak self] in
+                }, edit: { [weak self = self] in
                     self?.editEntry(entry)
                 }) }), centralItemIndex: focusOnItem, synchronous: true)
                 self.entries = updatedEntries

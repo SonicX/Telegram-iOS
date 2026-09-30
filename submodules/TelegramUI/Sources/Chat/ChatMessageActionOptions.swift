@@ -881,7 +881,7 @@ private func chatLinkOptions(selfController: ChatControllerImpl, sourceView: UIV
             f(.default)
         })))
         
-        items.append(.action(ContextMenuActionItem(text: selfController.presentationData.strings.Conversation_LinkOptionsCancel, textColor: .destructive, icon: { theme in return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Delete"), color: theme.contextMenu.destructiveColor) }, action: { [weak selfController, weak chatController] c, f in
+        items.append(.action(ContextMenuActionItem(text: selfController.presentationData.strings.Conversation_LinkOptionsCancel, textColor: .destructive, icon: { theme in return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Delete"), color: theme.contextMenu.destructiveColor) }, action: { [weak selfController, weak chatController = chatController] c, f in
             guard let selfController else {
                 return
             }

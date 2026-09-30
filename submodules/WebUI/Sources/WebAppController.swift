@@ -974,7 +974,7 @@ public final class WebAppController: ViewController, AttachmentContainable {
                 if previousLayout != nil && (previousLayout?.inputHeight ?? 0.0).isZero, let inputHeight = layout.inputHeight, inputHeight > 44.0, transition.isAnimated {
                     Queue.mainQueue().after(0.4, {
                         if let inputHeight = self.validLayout?.0.inputHeight, inputHeight > 44.0 {
-                            webView.scrollToActiveElement(layout: layout, completion: { [weak self] contentOffset in
+                            webView.scrollToActiveElement(layout: layout, completion: { [weak self = self] contentOffset in
                                 let _ = self
                             //    self?.targetContentOffset = contentOffset
                             }, transition: transition)
@@ -2890,7 +2890,7 @@ public final class WebAppController: ViewController, AttachmentContainable {
                             let url = URL(fileURLWithPath: tempFile.path)
                             try? FileManager.default.copyItem(at: resultUrl, to: url)
                             
-                            let pickerController = legacyICloudFilePicker(theme: self.presentationData.theme, mode: .export, url: url, documentTypes: [], forceDarkTheme: false, dismissed: {}, completion: { [weak self, weak controller] urls in
+                            let pickerController = legacyICloudFilePicker(theme: self.presentationData.theme, mode: .export, url: url, documentTypes: [], forceDarkTheme: false, dismissed: {}, completion: { [weak self, weak controller = controller] urls in
                                 guard let self, let controller, !urls.isEmpty else {
                                     return
                                 }
@@ -3820,7 +3820,7 @@ public final class WebAppController: ViewController, AttachmentContainable {
                 let _ = (cachedWebAppTermsPage(context: context)
                 |> deliverOnMainQueue).startStandalone(next: { resolvedUrl in
                     context.sharedContext.openResolvedUrl(resolvedUrl, context: context, urlContext: .generic, navigationController: navigationController, forceExternal: true, forceUpdate: false, openPeer: { peer, navigation in
-                    }, sendFile: nil, sendSticker: nil, sendEmoji: nil, requestMessageActionUrlAuth: nil, joinVoiceChat: nil, present: { [weak self] c, arguments in
+                    }, sendFile: nil, sendSticker: nil, sendEmoji: nil, requestMessageActionUrlAuth: nil, joinVoiceChat: nil, present: { [weak self = self] c, arguments in
                         self?.push(c)
                     }, dismissInput: {}, contentContext: nil, progress: nil, completion: nil)
                 })

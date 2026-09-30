@@ -403,7 +403,7 @@ public class ChatMessageContactBubbleContentNode: ChatMessageBubbleContentNode {
                         }
                     }
                     
-                    return (layoutSize, { [weak self] animation, synchronousLoads, _ in
+                    return (layoutSize, { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             strongSelf.contact = selectedContact

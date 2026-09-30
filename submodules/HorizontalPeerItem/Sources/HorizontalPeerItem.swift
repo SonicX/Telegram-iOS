@@ -233,7 +233,7 @@ public final class HorizontalPeerItemNode: ListViewItemNode {
                     strongSelf.peerNode.updateSelection(selected: item.isPeerSelected(item.peer.id), animated: false)
                     
                     if let contextAction = item.contextAction {
-                        strongSelf.peerNode.contextAction = { [weak item] node, gesture, location in
+                        strongSelf.peerNode.contextAction = { [weak item = item] node, gesture, location in
                             if let item = item {
                                 contextAction(item.peer, node, gesture, location)
                             }

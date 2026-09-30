@@ -170,7 +170,7 @@ public class SearchBarPlaceholderNode: ASDisplayNode {
             }
             
             let height = constrainedSize.height * expansionProgress
-            return (height, { [weak self] in
+            return (height, { [weak self = self] in
                 if let strongSelf = self {
                     let _ = labelApply()
                     

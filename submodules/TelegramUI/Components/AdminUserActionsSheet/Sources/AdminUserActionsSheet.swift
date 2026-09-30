@@ -726,7 +726,7 @@ private final class AdminUserActionsSheetComponent: Component {
                                 isExpanded: isExpanded
                             )),
                             effectAlignment: .center,
-                            action: { [weak self] in
+                            action: { [weak self = self] in
                                 guard let self else {
                                     return
                                 }
@@ -763,7 +763,7 @@ private final class AdminUserActionsSheetComponent: Component {
                     ], alignment: .left, spacing: 2.0)),
                     leftIcon: .check(ListActionItemComponent.LeftIcon.Check(
                         isSelected: !selectedPeers.isEmpty,
-                        toggle: { [weak self] in
+                        toggle: { [weak self = self] in
                             guard let self, let component = self.component else {
                                 return
                             }
@@ -803,7 +803,7 @@ private final class AdminUserActionsSheetComponent: Component {
                     )),
                     icon: .none,
                     accessory: accessory,
-                    action: { [weak self] _ in
+                    action: { [weak self = self] _ in
                         guard let self else {
                             return
                         }
@@ -867,7 +867,7 @@ private final class AdminUserActionsSheetComponent: Component {
                         title: EnginePeer(peer.peer).displayTitle(strings: environment.strings, displayOrder: .firstLast),
                         peer: EnginePeer(peer.peer),
                         selectionState: .editing(isSelected: selectedPeers.contains(peer.peer.id)),
-                        action: { [weak self] peer in
+                        action: { [weak self = self] peer in
                             guard let self else {
                                 return
                             }

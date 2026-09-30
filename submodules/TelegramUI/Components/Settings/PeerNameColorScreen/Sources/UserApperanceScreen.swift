@@ -496,7 +496,7 @@ final class UserAppearanceScreenComponent: Component {
                     let finalPrice = acceptedPrice ?? resellAmount
                     let signal = component.context.engine.payments.buyStarGift(slug: uniqueGift.slug, peerId: component.context.account.peerId, price: finalPrice)
                     self.buyDisposable = (signal
-                    |> deliverOnMainQueue).start(error: { [weak self, weak controller] error in
+                    |> deliverOnMainQueue).start(error: { [weak self = self, weak controller] error in
                         guard let self, let controller else {
                             return
                         }
@@ -554,7 +554,7 @@ final class UserAppearanceScreenComponent: Component {
                             let alertController = textAlertController(context: component.context, title: nil, text: presentationData.strings.Gift_Buy_ErrorUnknown, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})], parseMarkdown: true)
                             controller.present(alertController, in: .window(.root))
                         }
-                    }, completed: { [weak self] in
+                    }, completed: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -594,7 +594,7 @@ final class UserAppearanceScreenComponent: Component {
                             purpose: .buyStarGift(requiredStars: resellAmount.amount.value),
                             targetPeerId: nil,
                             customTheme: nil,
-                            completion: { [weak self, weak starsContext] stars in
+                            completion: { [weak self, weak starsContext = starsContext] stars in
                                 guard let self, let starsContext else {
                                     return
                                 }

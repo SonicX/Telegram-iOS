@@ -436,7 +436,7 @@ final class CameraOutput: NSObject {
         }
         
         return Signal { subscriber in
-            let timer = SwiftSignalKit.Timer(timeout: 0.033, repeat: true, completion: { [weak videoRecorder] in
+            let timer = SwiftSignalKit.Timer(timeout: 0.033, repeat: true, completion: { [weak videoRecorder = videoRecorder] in
                 let recordingData = CameraRecordingData(duration: videoRecorder?.duration ?? 0.0, filePath: outputFilePath)
                 subscriber.putNext(recordingData)
             }, queue: Queue.mainQueue())

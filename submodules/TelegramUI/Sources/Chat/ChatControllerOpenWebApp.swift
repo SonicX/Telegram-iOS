@@ -126,7 +126,7 @@ func openWebAppImpl(
           return .single(nil)
         }
     ).start(next: { appSettings, noticed, attachMenuBots, attachMenuBot in
-        let openWebView: (Bool) -> Void = { [weak parentController] justInstalled in
+        let openWebView: (Bool) -> Void = { [weak parentController = parentController] justInstalled in
             guard let parentController else {
                 return
             }

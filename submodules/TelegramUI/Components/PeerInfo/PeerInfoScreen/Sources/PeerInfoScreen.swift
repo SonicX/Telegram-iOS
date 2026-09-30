@@ -9845,7 +9845,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                         peer: peer,
                         verifierSettings: verifierSettings,
                         verifierIcon: verifierIcon,
-                        completion: {  [weak self, weak controller] in
+                        completion: {  [weak self = self, weak controller] in
                             guard let self else {
                                 return
                             }
@@ -9874,7 +9874,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                         peer: peer,
                         verifierSettings: verifierSettings,
                         verifierIcon: verifierIcon,
-                        apply: { [weak self, weak controller] value in
+                        apply: { [weak self = self, weak controller] value in
                             guard let self else {
                                 return
                             }
@@ -10488,7 +10488,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     }
                     
                     let contextMenuController = makeContextMenuController(actions: actions)
-                    controller.present(contextMenuController, in: .window(.root), with: ContextMenuControllerPresentationArguments(sourceNodeAndRect: { [weak self, weak sourceNode] in
+                    controller.present(contextMenuController, in: .window(.root), with: ContextMenuControllerPresentationArguments(sourceNodeAndRect: { [weak self, weak sourceNode = sourceNode] in
                         if let controller = self?.controller, let sourceNode = sourceNode {
                             var rect = sourceNode.bounds.insetBy(dx: 0.0, dy: 2.0)
                             if let sourceRect = sourceRect {
@@ -12261,7 +12261,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
             if let pane, case let .collection(id) = pane.currentCollection, let addressName = data.peer?.addressName, !addressName.isEmpty {
                 let shareAction: ContextMenuItem = .action(ContextMenuActionItem(text: strings.PeerInfo_Gifts_ShareCollection, icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Forward"), color: theme.contextMenu.primaryColor)
-                }, action: { [weak self] _, f in
+                }, action: { [weak self = self] _, f in
                     f(.default)
                     self?.openShareLink(url: "https://t.me/\(addressName)/c/\(id)")
                 }))
@@ -14864,7 +14864,7 @@ public final class PeerInfoScreenImpl: ViewController, PeerInfoScreen, KeyShortc
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Check"), color: .clear)
                 }
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Check"), color: theme.contextMenu.primaryColor)
-            }, iconPosition: .left, action: { [weak sourceController] _, a in
+            }, iconPosition: .left, action: { [weak sourceController = sourceController] _, a in
                 a(.default)
                 
                 guard let sourceController = sourceController, let navigationController = sourceController.navigationController as? NavigationController else {
@@ -14891,7 +14891,7 @@ public final class PeerInfoScreenImpl: ViewController, PeerInfoScreen, KeyShortc
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Check"), color: .clear)
                 }
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Check"), color: theme.contextMenu.primaryColor)
-            }, iconPosition: .left, action: { [weak sourceController] _, a in
+            }, iconPosition: .left, action: { [weak sourceController = sourceController] _, a in
                 a(.default)
                 
                 guard let sourceController = sourceController, let navigationController = sourceController.navigationController as? NavigationController else {

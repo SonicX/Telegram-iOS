@@ -69,7 +69,7 @@ class ChatListHoleItemNode: ListViewItemNode {
         return { item, params, first, last in
             let layout = ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: 0.0), insets: UIEdgeInsets())
             
-            return (layout, { [weak self] in
+            return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.relativePosition = (first, last)
                     

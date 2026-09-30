@@ -223,7 +223,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
             
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             
-            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self] in
+            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self = self] in
                 if let strongSelf = self {
                     let themeUpdated = strongSelf.item?.presentationData.theme !== item.presentationData.theme
                     strongSelf.item = item

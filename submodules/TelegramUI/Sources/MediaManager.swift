@@ -460,7 +460,7 @@ public final class MediaManagerImpl: NSObject, MediaManager {
             let disposable = MetaDisposable()
             
             self.queue.async {
-                let audioRecorder = ManagedAudioRecorderImpl(mediaManager: self, resumeData: resumeData, pushIdleTimerExtension: { [weak applicationBindings] in
+                let audioRecorder = ManagedAudioRecorderImpl(mediaManager: self, resumeData: resumeData, pushIdleTimerExtension: { [weak applicationBindings = applicationBindings] in
                     return applicationBindings?.pushIdleTimerExtension() ?? EmptyDisposable
                 }, beginWithTone: beginWithTone, beganWithTone: beganWithTone)
                 subscriber.putNext(audioRecorder)

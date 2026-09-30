@@ -596,7 +596,7 @@ extension MediaEditorScreenImpl {
                         orderedResults.append(item)
                     }
                 }
-                self.completion(orderedResults, { [weak self] finished in
+                self.completion(orderedResults, { [weak self = self] finished in
                     self?.node.animateOut(finished: true, saveDraft: false, completion: { [weak self] in
                         self?.dismiss()
                         Queue.mainQueue().justDispatch {

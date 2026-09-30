@@ -967,7 +967,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .presence, current: info.presence, globalSettings: info.globalSettings, updated: { updated, _, _, updatedGlobalSettings in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -990,7 +990,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .groupInvitations, current: info.groupInvitations, updated: { updated, _, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1027,7 +1027,7 @@ public func privacyAndSecurityController(
         }
         
         currentInfoDisposable.set((combineLatest(privacySignal, callsSignal)
-        |> deliverOnMainQueue).start(next: { [weak currentInfoDisposable] info, callSettings in
+        |> deliverOnMainQueue).start(next: { [weak currentInfoDisposable = currentInfoDisposable] info, callSettings in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .voiceCalls, current: info.voiceCalls, callSettings: (info.voiceCallsP2P, callSettings.0), voipConfiguration: callSettings.1, callIntegrationAvailable: CallKitIntegration.isAvailable, updated: { updated, updatedCallSettings, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable, let (updatedCallsPrivacy, updatedCallSettings) = updatedCallSettings  {
@@ -1058,7 +1058,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .profilePhoto, current: info.profilePhoto, requestPublicPhotoSetup: { completion in
                     requestPublicPhotoSetup?(completion)
@@ -1085,7 +1085,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .forwards, current: info.forwards, updated: { updated, _, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1108,7 +1108,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .phoneNumber, current: info.phoneNumber, phoneDiscoveryEnabled: info.phoneDiscoveryEnabled, updated: { updated, _, updatedDiscoveryEnabled, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1134,7 +1134,7 @@ public func privacyAndSecurityController(
         )
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] peer, info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] peer, info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .voiceMessages, current: info.voiceMessages, updated: { updated, _, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1157,7 +1157,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .bio, current: info.bio, updated: { updated, _, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1180,7 +1180,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .birthday, current: info.birthday, updated: { updated, _, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1203,7 +1203,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .savedMusic, current: info.savedMusic, updated: { updated, _, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
@@ -1308,7 +1308,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        updateAccountTimeoutDisposable.set(signal.start(next: { [weak updateAccountTimeoutDisposable] privacySettingsValue in
+        updateAccountTimeoutDisposable.set(signal.start(next: { [weak updateAccountTimeoutDisposable = updateAccountTimeoutDisposable] privacySettingsValue in
             if let _ = privacySettingsValue {
                 let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                 let controller = ActionSheetController(presentationData: presentationData)
@@ -1478,7 +1478,7 @@ public func privacyAndSecurityController(
         let signal = privacySettingsPromise.get()
         |> take(1)
         |> deliverOnMainQueue
-        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable = currentInfoDisposable] info in
             if let info = info {
                 pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .giftsAutoSave, current: info.giftsAutoSave, globalSettings: info.globalSettings, updated: { updated, _, _, updatedGlobalSettings in
                     if let currentInfoDisposable = currentInfoDisposable {

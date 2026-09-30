@@ -1548,16 +1548,16 @@ final class AvatarEditorScreenComponent: Component {
                         }
                         
                         if stickerPackId != 0 {
-                            controller.videoCompletion(combinedImage, tempUrl, values, markup, { [weak controller] in
+                            controller.videoCompletion(combinedImage, tempUrl, values, markup, { [weak controller = controller] in
                                 controller?.dismiss()
                             })
                         } else {
-                            controller.videoCompletion(combinedImage, tempUrl, values, markup, { [weak controller] in
+                            controller.videoCompletion(combinedImage, tempUrl, values, markup, { [weak controller = controller] in
                                 controller?.dismiss()
                             })
                         }
                     } else {
-                        controller.imageCompletion(combinedImage, { [weak controller] in
+                        controller.imageCompletion(combinedImage, { [weak controller = controller] in
                             controller?.dismiss()
                         })
                     }

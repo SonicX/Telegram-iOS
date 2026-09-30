@@ -599,7 +599,7 @@ final class ComposePollScreenComponent: Component {
                     transition.setFrame(view: inputMediaNode.view, frame: targetFrame, completion: { [weak inputMediaNode] _ in
                         if let inputMediaNode {
                             Queue.mainQueue().after(0.3) {
-                                inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode] _ in
+                                inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode = inputMediaNode] _ in
                                     inputMediaNode?.view.removeFromSuperview()
                                 })
                             }
@@ -931,7 +931,7 @@ final class ComposePollScreenComponent: Component {
                 
                 var optionSelection: ListComposePollOptionComponent.Selection?
                 if self.isQuiz {
-                    optionSelection = ListComposePollOptionComponent.Selection(isSelected: self.selectedQuizOptionId == optionId, toggle: { [weak self] in
+                    optionSelection = ListComposePollOptionComponent.Selection(isSelected: self.selectedQuizOptionId == optionId, toggle: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -958,7 +958,7 @@ final class ComposePollScreenComponent: Component {
                     characterLimit: component.initialData.maxPollOptionLength,
                     canReorder: true,
                     emptyLineHandling: .notAllowed,
-                    returnKeyAction: { [weak self] in
+                    returnKeyAction: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -974,7 +974,7 @@ final class ComposePollScreenComponent: Component {
                             }
                         }
                     },
-                    backspaceKeyAction: { [weak self] in
+                    backspaceKeyAction: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -994,7 +994,7 @@ final class ComposePollScreenComponent: Component {
                     },
                     selection: optionSelection,
                     inputMode: self.currentInputMode,
-                    toggleInputMode: { [weak self] in
+                    toggleInputMode: { [weak self = self] in
                         guard let self else {
                             return
                         }
@@ -1006,7 +1006,7 @@ final class ComposePollScreenComponent: Component {
                         }
                         self.state?.updated(transition: .spring(duration: 0.4))
                     },
-                    deleteAction: canDelete ? { [weak self] in
+                    deleteAction: canDelete ? { [weak self = self] in
                         guard let self else {
                             return
                         }

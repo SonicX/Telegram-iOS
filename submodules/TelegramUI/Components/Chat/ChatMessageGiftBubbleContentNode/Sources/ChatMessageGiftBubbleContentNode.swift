@@ -972,7 +972,7 @@ public class ChatMessageGiftBubbleContentNode: ChatMessageBubbleContentNode {
                 }
                 
                 return (backgroundSize.width, { boundingWidth in
-                    return (backgroundSize, { [weak self] animation, synchronousLoads, info in
+                    return (backgroundSize, { [weak self = self] animation, synchronousLoads, info in
                         if let strongSelf = self {
                             let isFirstTime = strongSelf.item == nil
                             

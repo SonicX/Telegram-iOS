@@ -539,7 +539,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 if let sponsorInfo = adAttribute.sponsorInfo {
                     subItems.append(.action(ContextMenuActionItem(text: sponsorInfo, textColor: .primary, textLayout: .multiline, textFont: .custom(font: Font.regular(floor(presentationData.listsFontSize.baseDisplaySize * 0.8)), height: nil, verticalOffset: nil), badge: nil, icon: { theme in
                         return nil
-                    }, iconSource: nil, action: { [weak controllerInteraction] c, _ in
+                    }, iconSource: nil, action: { [weak controllerInteraction = controllerInteraction] c, _ in
                         c?.dismiss(completion: {
                             UIPasteboard.general.string = sponsorInfo
                             
@@ -551,7 +551,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 if let additionalInfo = adAttribute.additionalInfo {
                     subItems.append(.action(ContextMenuActionItem(text: additionalInfo, textColor: .primary, textLayout: .multiline, textFont: .custom(font: Font.regular(floor(presentationData.listsFontSize.baseDisplaySize * 0.8)), height: nil, verticalOffset: nil), badge: nil, icon: { theme in
                         return nil
-                    }, iconSource: nil, action: { [weak controllerInteraction] c, _ in
+                    }, iconSource: nil, action: { [weak controllerInteraction = controllerInteraction] c, _ in
                         c?.dismiss(completion: {
                             UIPasteboard.general.string = additionalInfo
                             
@@ -588,7 +588,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                                 opaqueId: adAttribute.opaqueId,
                                 title: title,
                                 options: options,
-                                completed: { [weak interfaceInteraction] in
+                                completed: { [weak interfaceInteraction = interfaceInteraction] in
                                     guard let interfaceInteraction else {
                                         return
                                     }
@@ -1043,7 +1043,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         var hasRateTranscription = false
         if hasExpandedAudioTranscription, let audioTranscription = audioTranscription, !didRateAudioTranscription {
             hasRateTranscription = true
-            actions.insert(.custom(ChatRateTranscriptionContextItem(context: context, message: message, action: { [weak context] value in
+            actions.insert(.custom(ChatRateTranscriptionContextItem(context: context, message: message, action: { [weak context = context] value in
                 guard let context = context else {
                     return
                 }

@@ -303,7 +303,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                             isChannel = true
                         }
                         
-                        return Signal { [weak context] subscriber in
+                        return Signal { [weak context = context] subscriber in
                             guard let context = context, let callContextCache = context.cachedGroupCallContexts as? AccountGroupCallContextCacheImpl else {
                                 return EmptyDisposable
                             }
@@ -1087,7 +1087,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                 return (result, callJoinAsPeerId)
             }
             |> take(1)
-            |> deliverOnMainQueue).start(next: { [weak self] peers, callJoinAsPeerId in
+            |> deliverOnMainQueue).start(next: { [weak self = self] peers, callJoinAsPeerId in
                 guard let strongSelf = self else {
                     return
                 }

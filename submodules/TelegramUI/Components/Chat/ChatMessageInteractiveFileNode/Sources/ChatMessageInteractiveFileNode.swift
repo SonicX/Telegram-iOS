@@ -613,7 +613,7 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                         updateImageSignal = chatMessageImageFile(account: arguments.context.account, userLocation: .peer(arguments.message.id.peerId), fileReference: .message(message: MessageReference(arguments.message), media: arguments.file), thumbnail: true)
                     }
                     
-                    updatedFetchControls = FetchControls(fetch: { [weak self] userInitiated in
+                    updatedFetchControls = FetchControls(fetch: { [weak self = self] userInitiated in
                         if let strongSelf = self {
                             strongSelf.fetchDisposable.set(messageMediaFileInteractiveFetched(context: arguments.context, message: arguments.message, file: arguments.file, userInitiated: userInitiated).startStrict())
                         }
@@ -1079,7 +1079,7 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                         streamingCacheStatusFrame = CGRect()
                     }
                     
-                    return (fittedLayoutSize, { [weak self] synchronousLoads, animation, info in
+                    return (fittedLayoutSize, { [weak self = self] synchronousLoads, animation, info in
                         if let strongSelf = self {
                             strongSelf.context = arguments.context
                             strongSelf.presentationData = arguments.presentationData

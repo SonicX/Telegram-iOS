@@ -355,7 +355,7 @@ private class MediaGroupsAlbumGridItemNode: ListViewItemNode {
                         }
                         
                         let previousEntries = strongSelf.entries ?? []
-                        let transition = preparedTransition(action: { [weak item] collection in
+                        let transition = preparedTransition(action: { [weak item = item] collection in
                             item?.action(collection)
                         }, from: previousEntries, to: entries)
                         strongSelf.enqueueTransition(transition)

@@ -1892,7 +1892,7 @@ public final class MediaEditor {
                             options.isNetworkAccessAllowed = true
                             options.deliveryMode = .highQualityFormat
             
-                            PHImageManager.default().requestAVAsset(forVideo: asset, options: options, resultHandler: { [weak self] avAsset, _, _ in
+                            PHImageManager.default().requestAVAsset(forVideo: asset, options: options, resultHandler: { [weak self = self] avAsset, _, _ in
                                 guard let self, let avAsset else {
                                     subscriber.putCompletion()
                                     return

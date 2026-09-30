@@ -327,7 +327,7 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                 let backgroundSize = CGSize(width: width, height: textHeight + 140.0 + (fromYou || isGroupOrChannel ? 0.0 : 42.0))
                 
                 return (backgroundSize.width, { boundingWidth in
-                    return (backgroundSize, { [weak self] animation, synchronousLoads, _ in
+                    return (backgroundSize, { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             

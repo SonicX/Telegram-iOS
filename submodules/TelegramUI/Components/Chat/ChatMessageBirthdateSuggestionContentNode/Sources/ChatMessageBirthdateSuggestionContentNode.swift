@@ -205,7 +205,7 @@ public class ChatMessageBirthdateSuggestionContentNode: ChatMessageBubbleContent
                 }
                 
                 return (backgroundSize.width, { boundingWidth in
-                    return (backgroundSize, { [weak self] animation, synchronousLoads, _ in
+                    return (backgroundSize, { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             let isFirstTime = strongSelf.item == nil
                             strongSelf.item = item

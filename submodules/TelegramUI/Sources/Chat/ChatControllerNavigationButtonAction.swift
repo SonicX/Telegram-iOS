@@ -514,7 +514,7 @@ extension ChatControllerImpl {
                     let peerId = peer.id
                     
                     let _ = (strongSelf.context.engine.resources.collectCacheUsageStats(peerId: peer.id)
-                    |> deliverOnMainQueue).startStandalone(next: { [weak self, weak controller] result in
+                    |> deliverOnMainQueue).startStandalone(next: { [weak self, weak controller = controller] result in
                         controller?.dismiss()
                         
                         guard let strongSelf = self, case let .result(stats) = result, let categories = stats.media[peer.id] else {

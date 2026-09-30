@@ -230,7 +230,7 @@ public class InvisibleInkDustView: UIView {
                 
                 self.emitterSpotNode.layer.anchorPoint = CGPoint(x: position.x / self.emitterMaskNode.frame.width, y: position.y / self.emitterMaskNode.frame.height)
                 self.emitterSpotNode.position = position
-                self.emitterSpotNode.layer.animateScale(from: 0.3333, to: 10.5 + scaleAddition, duration: 0.55 + durationAddition, removeOnCompletion: false, completion: { [weak self] _ in
+                self.emitterSpotNode.layer.animateScale(from: 0.3333, to: 10.5 + scaleAddition, duration: 0.55 + durationAddition, removeOnCompletion: false, completion: { [weak self = self] _ in
                     self?.alpha = 0.0
                     self?.emitterNode.view.mask = nil
                     

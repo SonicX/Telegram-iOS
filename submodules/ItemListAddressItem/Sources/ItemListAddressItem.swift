@@ -217,7 +217,7 @@ public class ItemListAddressItemNode: ListViewItemNode {
             let contentSize = CGSize(width: params.width, height: max(textLayout.size.height + padding, imageSize.height + 14.0) + verticalInset * 2.0)
             
             let nodeLayout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
-            return (nodeLayout, { [weak self] animation in
+            return (nodeLayout, { [weak self = self] animation in
                 if let strongSelf = self {
                     let transition: ContainedViewLayoutTransition
                     if animation.isAnimated {

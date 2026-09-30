@@ -825,7 +825,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             }
         }, openSubscriptions: {
             if #available(iOS 15, *), let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                Task {
+                let _ = Task {
                     try await AppStore.showManageSubscriptions(in: scene)
                 }
             } else if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
@@ -1032,13 +1032,13 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             
             presentationDataPromise.set(sharedContext.presentationData)
             
-            sharedContext.presentGlobalController = { [weak self] c, a in
+            sharedContext.presentGlobalController = { [weak self = self] c, a in
                 guard let strongSelf = self else {
                     return
                 }
                 strongSelf.mainWindow.present(c, on: .root)
             }
-            sharedContext.presentCrossfadeController = { [weak self] in
+            sharedContext.presentCrossfadeController = { [weak self = self] in
                 guard let strongSelf = self else {
                     return
                 }
@@ -1365,7 +1365,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             if let context = context {
                 let presentationData = context.sharedContext.currentPresentationData.with({ $0 })
                 
-                let progressSignal = Signal<Never, NoError> { [weak self] subscriber in
+                let progressSignal = Signal<Never, NoError> { [weak self = self] subscriber in
                     let statusController = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: nil))
                     self?.mainWindow.present(statusController, on: .root)
                     return ActionDisposable { [weak statusController] in

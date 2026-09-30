@@ -701,7 +701,7 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
             case .languageSettings:
                 pushControllerImpl?(context.sharedContext.makeLocalizationListController(context: context))
             case .contentSettings:
-                let _ = (getSGSettingsURL(context: context) |> deliverOnMainQueue).start(next: { [weak context] url in
+                let _ = (getSGSettingsURL(context: context) |> deliverOnMainQueue).start(next: { [weak context = context] url in
                     guard let strongContext = context else {
                         return
                     }

@@ -2232,7 +2232,7 @@ extension ChatControllerImpl {
                 
                 strongSelf.updateChatPresentationInterfaceState(animated: true, interactive: interactive, { current in
                     return current.updatedSearch(current.search == nil ? ChatSearchData(domain: domain).withUpdatedQuery(query) : current.search?.withUpdatedDomain(domain).withUpdatedQuery(query))
-                }, completion: { [weak strongSelf] _ in
+                }, completion: { [weak strongSelf = strongSelf] _ in
                     guard let strongSelf else {
                         return
                     }

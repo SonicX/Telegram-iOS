@@ -1150,7 +1150,7 @@ public final class Network: NSObject, MTRequestMessageServiceDelegate {
             
             requestService.add(request)
             
-            return ActionDisposable { [weak requestService] in
+            return ActionDisposable { [weak requestService = requestService] in
                 requestService?.removeRequest(byInternalId: internalId)
             }
         }
@@ -1210,7 +1210,7 @@ public final class Network: NSObject, MTRequestMessageServiceDelegate {
             
             requestService.add(request)
             
-            return ActionDisposable { [weak requestService] in
+            return ActionDisposable { [weak requestService = requestService] in
                 requestService?.removeRequest(byInternalId: internalId)
             }
         }

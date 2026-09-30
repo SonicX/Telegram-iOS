@@ -554,7 +554,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
         let id = OSAtomicIncrement32(&self.nextId)
         let queue = self.queue
         queue.async {
-            self.holders.append(HolderRecord(id: id, audioSessionType: audioSessionType, control: ManagedAudioSessionControl(setupImpl: { [weak self] synchronous in
+            self.holders.append(HolderRecord(id: id, audioSessionType: audioSessionType, control: ManagedAudioSessionControl(setupImpl: { [weak self = self] synchronous in
                 let f: () -> Void = {
                     if let strongSelf = self {
                         for holder in strongSelf.holders {
@@ -571,7 +571,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                 } else {
                     queue.async(f)
                 }
-            }, activateImpl: { [weak self] completion in
+            }, activateImpl: { [weak self = self] completion in
                 if let strongSelf = self {
                     strongSelf.queue.async {
                         for holder in strongSelf.holders {
@@ -587,7 +587,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                         }
                     }
                 }
-            }, setOutputModeImpl: { [weak self] value in
+            }, setOutputModeImpl: { [weak self = self] value in
                 if let strongSelf = self {
                     strongSelf.queue.async {
                         for holder in strongSelf.holders {
@@ -603,7 +603,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                         }
                     }
                 }
-            }, setupAndActivateImpl: { [weak self] synchronous, completion in
+            }, setupAndActivateImpl: { [weak self = self] synchronous, completion in
                 queue.async {
                     let f: () -> Void = {
                         if let strongSelf = self {
@@ -623,7 +623,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                         queue.async(f)
                     }
                 }
-            }, setTypeImpl: { [weak self] audioSessionType, completion in
+            }, setTypeImpl: { [weak self = self] audioSessionType, completion in
                 queue.async {
                     if let strongSelf = self {
                         for holder in strongSelf.holders {
@@ -641,7 +641,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                     
                     completion()
                 }
-            }), activate: { [weak self] state in
+            }), activate: { [weak self = self] state in
                 manualActivate(state)
                 queue.async {
                     if let strongSelf = self {

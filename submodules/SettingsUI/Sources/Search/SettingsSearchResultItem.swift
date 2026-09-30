@@ -165,7 +165,7 @@ class SettingsSearchResultItemNode: ListViewItemNode {
             }
             let contentSize = CGSize(width: params.width, height: height)
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
-            return (layout, { [weak self] animated in
+            return (layout, { [weak self = self] animated in
                 if let strongSelf = self {
                     strongSelf.item = item
                     strongSelf.layoutParams = (params, neighbors)

@@ -260,7 +260,7 @@ class LocalizationListItemNode: ItemListRevealOptionsItemNode {
                 updateCheckImage = PresentationResourcesItemList.checkIconImage(item.presentationData.theme)
             }
             
-            return (layout, { [weak self] animated in
+            return (layout, { [weak self = self] animated in
                 if let strongSelf = self {
                     strongSelf.item = item
                     strongSelf.layoutParams = (params, neighbors)

@@ -254,7 +254,7 @@ public class ItemListReactionItemNode: ListViewItemNode, ItemListItemNode {
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             let layoutSize = layout.size
             
-            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self] animated in
+            return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self = self] animated in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

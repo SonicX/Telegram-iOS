@@ -8748,7 +8748,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             
             var cancelImpl: (() -> Void)?
             let presentationData = self.presentationData
-            let progressSignal = Signal<Never, NoError> { [weak self] subscriber in
+            let progressSignal = Signal<Never, NoError> { [weak self = self] subscriber in
                 if progress != nil {
                     return ActionDisposable {
                     }
@@ -8774,11 +8774,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                     progressDisposable.dispose()
                 }
             }
-            cancelImpl = { [weak self] in
+            cancelImpl = { [weak self = self] in
                 self?.resolvePeerByNameDisposable?.set(nil)
             }
             disposable.set((resolveSignal
-            |> deliverOnMainQueue).start(next: { [weak self] result in
+            |> deliverOnMainQueue).start(next: { [weak self = self] result in
                 guard let self else {
                     return
                 }
@@ -8833,7 +8833,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             }
             var cancelImpl: (() -> Void)?
             let presentationData = self.presentationData
-            let progressSignal = Signal<Never, NoError> { [weak self] subscriber in
+            let progressSignal = Signal<Never, NoError> { [weak self = self] subscriber in
                 let controller = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: {
                     cancelImpl?()
                 }))
@@ -8854,11 +8854,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                     progressDisposable.dispose()
                 }
             }
-            cancelImpl = { [weak self] in
+            cancelImpl = { [weak self = self] in
                 self?.resolvePeerByNameDisposable?.set(nil)
             }
             self.resolvePeerByNameDisposable?.set((resolveSignal
-            |> deliverOnMainQueue).start(next: { [weak self] peer in
+            |> deliverOnMainQueue).start(next: { [weak self = self] peer in
                 if let self, !hashtag.isEmpty {
                     if let _ = peerName, peer == nil {
                         self.present(textAlertController(context: self.context, title: nil, text: self.presentationInterfaceState.strings.Resolve_ChannelErrorNotFound, actions: [TextAlertAction(type: .defaultAction, title: self.presentationInterfaceState.strings.Common_OK, action: {})]), in: .window(.root))
@@ -9951,7 +9951,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                         TextAlertAction(
                             type: .defaultAction,
                             title: self.presentationData.strings.Conversation_StopVoiceMessagePauseAction,
-                            action: { [weak self] in
+                            action: { [weak self = self] in
                                 self?.stopMediaRecorder(pause: true)
                                 Queue.mainQueue().after(0.1) {
                                     action()
@@ -9982,7 +9982,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         if let _ = self.presentationInterfaceState.interfaceState.mediaDraftState {
             alertAction?()
             Queue.mainQueue().after(delay ? 0.2 : 0.0) {
-                self.present(textAlertController(context: self.context, updatedPresentationData: self.updatedPresentationData, title: nil, text: self.presentationData.strings.Conversation_DiscardRecordedVoiceMessageDescription, actions: [TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}), TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Conversation_DiscardRecordedVoiceMessageAction, action: { [weak self] in
+                self.present(textAlertController(context: self.context, updatedPresentationData: self.updatedPresentationData, title: nil, text: self.presentationData.strings.Conversation_DiscardRecordedVoiceMessageDescription, actions: [TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}), TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Conversation_DiscardRecordedVoiceMessageAction, action: { [weak self = self] in
                     self?.stopMediaRecorder()
                     Queue.mainQueue().after(0.1) {
                         action()

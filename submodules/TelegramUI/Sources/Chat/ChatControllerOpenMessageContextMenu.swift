@@ -246,7 +246,7 @@ extension ChatControllerImpl {
                                     }
                                 }
                                 
-                                let action = { [weak self] in
+                                let action = { [weak self = self] in
                                     guard let self else {
                                         return
                                     }

@@ -134,7 +134,7 @@ final class GlobalOverlayPresentationContext {
                     
                     strongSelf.controllers.append(controller)
                     if let view = strongSelf.currentPresentationView(underStatusBar: underStatusBar), let layout = strongSelf.layout {
-                        (controller as? UIViewController)?.navigation_setDismiss({ [weak controller] in
+                        (controller as? UIViewController)?.navigation_setDismiss({ [weak controller = controller] in
                             if let strongSelf = self, let controller = controller {
                                 strongSelf.dismiss(controller)
                             }

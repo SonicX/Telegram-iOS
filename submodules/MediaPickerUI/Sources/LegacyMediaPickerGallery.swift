@@ -283,7 +283,7 @@ func presentLegacyMediaPickerGallery(context: AccountContext, peer: EnginePeer?,
                 |> deliverOnMainQueue).start(next: { sendWhenOnlineAvailable in
                     let legacySheetController = LegacyController(presentation: .custom, theme: presentationData.theme, initialLayout: nil)
                     let sheetController = TGMediaPickerSendActionSheetController(context: legacyController.context, isDark: true, sendButtonFrame: model.interfaceView.doneButtonFrame, canSendSilently: hasSilentPosting, canSendWhenOnline: sendWhenOnlineAvailable && effectiveHasSchedule, canSchedule: effectiveHasSchedule, reminder: reminder, hasTimer: hasTimer)
-                    let dismissImpl = { [weak model] in
+                    let dismissImpl = { [weak model = model] in
                         model?.dismiss(true, false)
                         dismissAll()
                     }
@@ -292,7 +292,7 @@ func presentLegacyMediaPickerGallery(context: AccountContext, peer: EnginePeer?,
                             dismissImpl()
                         })
                     }
-                    sheetController.sendSilently = { [weak model] in
+                    sheetController.sendSilently = { [weak model = model] in
                         model?.interfaceView.onDismiss()
                         
                         completed(item.asset, true, nil, {

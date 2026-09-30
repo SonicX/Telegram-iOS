@@ -567,7 +567,7 @@ public class ItemListAvatarAndNameInfoItemNode: ListViewItemNode, ItemListItemNo
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             let layoutSize = layout.size
             
-            return (layout, { [weak self] animated, synchronousLoads in
+            return (layout, { [weak self = self] animated, synchronousLoads in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

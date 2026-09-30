@@ -536,7 +536,7 @@ func openResolvedUrlImpl(
                     textInputState = nil
                 }
                 
-                let updateControllers = { [weak navigationController] in
+                let updateControllers = { [weak navigationController = navigationController] in
                     guard let navigationController else {
                         return
                     }
@@ -1276,7 +1276,7 @@ func openResolvedUrlImpl(
                     let storyContent = SingleStoryContentContextImpl(context: context, storyId: StoryId(peerId: peerId, id: id), readGlobally: true)
                     let _ = (storyContent.state
                     |> take(1)
-                    |> deliverOnMainQueue).startStandalone(next: { [weak navigationController] _ in
+                    |> deliverOnMainQueue).startStandalone(next: { [weak navigationController = navigationController] _ in
                         let transitionIn: StoryContainerScreen.TransitionIn? = nil
                         
                         let storyContainerScreen = StoryContainerScreen(

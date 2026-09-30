@@ -278,7 +278,7 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
                         Queue.mainQueue().after(1.25) {
                             self.animationNode?.play()
                             
-                            let timer = SwiftSignalKit.Timer(timeout: self.animationLoopTime, repeat: true, completion: { [weak self] in
+                            let timer = SwiftSignalKit.Timer(timeout: self.animationLoopTime, repeat: true, completion: { [weak self = self] in
                                 self?.animationNode?.play()
                             }, queue: Queue.mainQueue())
                             self.animationTimer = timer
@@ -1047,7 +1047,7 @@ public final class SolidRoundedButtonView: UIView {
                         Queue.mainQueue().after(1.25) {
                             self.animationNode?.play()
                             
-                            let timer = SwiftSignalKit.Timer(timeout: self.animationLoopTime, repeat: true, completion: { [weak self] in
+                            let timer = SwiftSignalKit.Timer(timeout: self.animationLoopTime, repeat: true, completion: { [weak self = self] in
                                 self?.animationNode?.play()
                             }, queue: Queue.mainQueue())
                             self.animationTimer = timer

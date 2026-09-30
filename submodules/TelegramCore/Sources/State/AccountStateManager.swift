@@ -420,7 +420,7 @@ public final class AccountStateManager {
             self.queue.async {
                 if self.updateService == nil {
                     self.updateService = UpdateMessageService(peerId: self.accountPeerId)
-                    self.updateServiceDisposable.set(self.updateService!.pipe.signal().start(next: { [weak self] groups in
+                    self.updateServiceDisposable.set(self.updateService!.pipe.signal().start(next: { [weak self = self] groups in
                         if let strongSelf = self {
                             strongSelf.addUpdateGroups(groups)
                         }

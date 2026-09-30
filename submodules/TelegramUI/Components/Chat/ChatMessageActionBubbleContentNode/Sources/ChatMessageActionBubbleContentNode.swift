@@ -513,7 +513,7 @@ public class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                 }
                 
                 return (backgroundSize.width, { boundingWidth in
-                    return (CGSize(width: boundingWidth, height: backgroundSize.height + contentOuterInsets.top + contentOuterInsets.bottom), { [weak self] animation, synchronousLoads, _ in
+                    return (CGSize(width: boundingWidth, height: backgroundSize.height + contentOuterInsets.top + contentOuterInsets.bottom), { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             

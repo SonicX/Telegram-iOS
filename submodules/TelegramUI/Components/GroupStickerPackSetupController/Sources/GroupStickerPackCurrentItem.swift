@@ -334,7 +334,7 @@ class GroupStickerPackCurrentItemNode: ItemListRevealOptionsItemNode {
                 }
             }
             
-            return (layout, { [weak self] animated in
+            return (layout, { [weak self = self] animated in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

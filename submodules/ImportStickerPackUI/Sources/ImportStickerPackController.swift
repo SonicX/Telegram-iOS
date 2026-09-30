@@ -81,7 +81,7 @@ public final class ImportStickerPackController: ViewController, StandalonePresen
             if case .image = self.stickerPack.type.contentType {
             } else {
                 let _ = (self.context.account.postbox.loadedPeerWithId(self.context.account.peerId)
-                |> deliverOnMainQueue).start(next: { [weak self] peer in
+                |> deliverOnMainQueue).start(next: { [weak self = self] peer in
                     guard let strongSelf = self else {
                         return
                     }

@@ -198,7 +198,7 @@ extension ChatControllerImpl {
                         animationRenderer: self.controllerInteraction!.presentationContext.animationRenderer,
                         message: EngineMessage(message),
                         reaction: value, readStats: nil, back: nil, openPeer: { peer, hasReaction in
-                            dismissController?({ [weak self] in
+                            dismissController?({ [weak self = self] in
                                 guard let self else {
                                     return
                                 }

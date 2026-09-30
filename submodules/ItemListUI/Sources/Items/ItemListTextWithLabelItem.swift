@@ -220,7 +220,7 @@ public class ItemListTextWithLabelItemNode: ListViewItemNode {
             let (textLayout, textApply) = makeTextLayout(TextNodeLayoutArguments(attributedString: string, backgroundColor: nil, maximumNumberOfLines: item.multiline ? 0 : 1, truncationType: .end, constrainedSize: CGSize(width: params.width - leftOffset - leftInset - rightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             let contentSize = CGSize(width: params.width, height: textLayout.size.height + labelLayout.size.height + 22.0)
             let nodeLayout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
-            return (nodeLayout, { [weak self] animation in
+            return (nodeLayout, { [weak self = self] animation in
                 if let strongSelf = self {
                     let transition: ContainedViewLayoutTransition
                     if animation.isAnimated {

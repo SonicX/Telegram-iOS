@@ -425,7 +425,7 @@ public final class MediaBox {
                             let statusQueue = self.statusQueue
                             self.dataQueue.async {
                                 if let (fileContext, releaseContext) = self.fileContext(for: resourceId) {
-                                    let statusDisposable = fileContext.status(next: { [weak statusContext] value in
+                                    let statusDisposable = fileContext.status(next: { [weak statusContext = statusContext] value in
                                         statusQueue.async {
                                             if let current = self.statusContexts[resourceId], current === statusContext, current.status != value {
                                                 current.status = value
@@ -434,7 +434,7 @@ public final class MediaBox {
                                                 }
                                             }
                                         }
-                                    }, completed: { [weak statusContext] in
+                                    }, completed: { [weak statusContext = statusContext] in
                                         statusQueue.async {
                                             if let current = self.statusContexts[resourceId], current ===  statusContext {
                                                 current.subscribers.remove(index)
@@ -915,7 +915,7 @@ public final class MediaBox {
                 }
                 let index = context.subscribers.add(Void())
                 
-                disposable.set(ActionDisposable { [weak self, weak context] in
+                disposable.set(ActionDisposable { [weak self = self, weak context] in
                     dataQueue.async {
                         guard let strongSelf = self, let context = context, let currentContext = strongSelf.keepResourceContexts[id], currentContext === context else {
                             return
@@ -1073,7 +1073,7 @@ public final class MediaBox {
                                 |> map(Optional.init)
                             }
                             |> deliverOn(self.dataQueue)
-                            context.disposable.set(signal.startStrict(next: { [weak self, weak context] next in
+                            context.disposable.set(signal.startStrict(next: { [weak self = self, weak context] next in
                                 guard let strongSelf = self else {
                                     return
                                 }
@@ -1256,7 +1256,7 @@ public final class MediaBox {
                             let cacheStorageBox = self.cacheStorageBox
                             let signal = fetch()
                             |> deliverOn(self.dataQueue)
-                            context.disposable.set(signal.startStrict(next: { [weak self, weak context] next in
+                            context.disposable.set(signal.startStrict(next: { [weak self = self, weak context] next in
                                 guard let strongSelf = self else {
                                     return
                                 }

@@ -676,7 +676,7 @@ private final class GiftSetupScreenComponent: Component {
                         purpose: .starGift(peerId: component.peerId, requiredStars: finalPrice),
                         targetPeerId: nil,
                         customTheme: nil,
-                        completion: { [weak self, weak starsContext] stars in
+                        completion: { [weak self, weak starsContext = starsContext] stars in
                             guard let self, let starsContext else {
                                 return
                             }
@@ -817,7 +817,7 @@ private final class GiftSetupScreenComponent: Component {
                     transition.setFrame(view: inputMediaNode.view, frame: targetFrame, completion: { [weak inputMediaNode] _ in
                         if let inputMediaNode {
                             Queue.mainQueue().after(0.3) {
-                                inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode] _ in
+                                inputMediaNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.35, removeOnCompletion: false, completion: { [weak inputMediaNode = inputMediaNode] _ in
                                     inputMediaNode?.view.removeFromSuperview()
                                 })
                             }

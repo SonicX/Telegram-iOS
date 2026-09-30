@@ -60,7 +60,7 @@ public final class ChatMessageUnsupportedBubbleContentNode: ChatMessageBubbleCon
                     actionButtonSizeAndApply = (size, apply)
                     let adjustedBoundingSize = CGSize(width: refinedButtonWidth + insets.left + insets.right, height: insets.bottom + size.height)
                     
-                    return (adjustedBoundingSize, { [weak self] animation, synchronousLoads, _ in
+                    return (adjustedBoundingSize, { [weak self = self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             

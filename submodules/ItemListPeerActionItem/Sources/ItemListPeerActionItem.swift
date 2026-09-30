@@ -245,7 +245,7 @@ public final class ItemListPeerActionItemNode: ListViewItemNode {
             let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
             let layoutSize = layout.size
             
-            return (layout, { [weak self] animated in
+            return (layout, { [weak self = self] animated in
                 if let strongSelf = self {
                     strongSelf.item = item
                     

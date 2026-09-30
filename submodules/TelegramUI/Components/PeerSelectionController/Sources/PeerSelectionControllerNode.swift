@@ -570,7 +570,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                     }
                 }
                 
-                items.append(.action(ContextMenuActionItem(text: messagesCount == 1 ? presentationData.strings.Conversation_ForwardOptions_SendMessage : presentationData.strings.Conversation_ForwardOptions_SendMessages, icon: { theme in return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.contextMenu.primaryColor) }, action: { [weak self, weak chatController] c, f in
+                items.append(.action(ContextMenuActionItem(text: messagesCount == 1 ? presentationData.strings.Conversation_ForwardOptions_SendMessage : presentationData.strings.Conversation_ForwardOptions_SendMessages, icon: { theme in return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.contextMenu.primaryColor) }, action: { [weak self, weak chatController = chatController] c, f in
                     guard let strongSelf = self else {
                         return
                     }
@@ -786,7 +786,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         textInputPanelNode?.sendMessage(.schedule, messageEffect)
                     },
                     editPrice: { _ in },
-                    openPremiumPaywall: { [weak controller] c in
+                    openPremiumPaywall: { [weak controller = controller] c in
                         guard let controller else {
                             return
                         }

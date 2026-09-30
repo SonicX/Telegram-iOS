@@ -242,7 +242,7 @@ private class LegacyPaintStickerEntity: LegacyPaintEntity {
                 } else {
                     let _ = (self.imagePromise.get()
                     |> take(1)
-                    |> deliverOn(self.queue)).start(next: { [weak self] image in
+                    |> deliverOn(self.queue)).start(next: { [weak self = self] image in
                         if let strongSelf = self {
                             strongSelf.cachedCIImage = CIImage(image: image)
                             completion(strongSelf.cachedCIImage)

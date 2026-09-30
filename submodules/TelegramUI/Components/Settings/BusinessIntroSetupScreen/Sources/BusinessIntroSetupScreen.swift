@@ -179,7 +179,7 @@ final class BusinessIntroSetupScreenComponent: Component {
                         source: result,
                         intro: true,
                         transitionArguments: transitionView.flatMap { ($0, transitionRect, transitionImage) },
-                        completion: { [weak self] file, emoji, commit in
+                        completion: { [weak self = self] file, emoji, commit in
                             dismissImpl?()
                             
                             guard let self else {
