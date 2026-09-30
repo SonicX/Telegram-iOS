@@ -50,6 +50,47 @@ def apply_signing_settings(base_path, xcodeproj_path, target_name):
         print('apply-signing: пропущено из-за {}'.format(exception))
 
 
+def allow_legacy_deployment_target(base_path, xcodeproj_path):
+    """Xcode 27 отказывается собирать таргеты с IPHONEOS_DEPLOYMENT_TARGET = 13.0
+    (поддерживает 15.0+): «The iOS deployment target ... is set to 13.0, but the
+    range of supported deployment target versions is 15.0 to 27.0.x». Реальную
+    сборку делает bazel, которому эта проверка не нужна, поэтому отключаем её
+    в сгенерированном проекте, не поднимая минимальную версию приложения.
+
+    Идемпотентно; на старых Xcode настройка просто игнорируется.
+    """
+    pbxproj = os.path.join(base_path, xcodeproj_path, 'project.pbxproj')
+    if not os.path.isfile(pbxproj):
+        return
+    key = '__DIAGNOSE_INVALID_DEPLOYMENT_TARGET_AS_ERROR'
+    with open(pbxproj, 'r') as f:
+        lines = f.read().split('\n')
+    result = []
+    patched = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        result.append(line)
+        if line.strip() == 'isa = XCBuildConfiguration;' and i + 1 < len(lines) and lines[i + 1].strip() == 'buildSettings = {':
+            result.append(lines[i + 1])
+            j = i + 2
+            block = []
+            while j < len(lines) and lines[j].strip() != '};':
+                block.append(lines[j])
+                j += 1
+            block = [b for b in block if key not in b]
+            indent = '\t\t\t\t'
+            block.append('{}{} = NO;'.format(indent, key))
+            result.extend(block)
+            patched += 1
+            i = j
+            continue
+        i += 1
+    with open(pbxproj, 'w') as f:
+        f.write('\n'.join(result))
+    print('deployment-target: проверка Xcode отключена в {} конфигурациях'.format(patched))
+
+
 def generate_xcodeproj(build_environment: BuildEnvironment, disable_extensions, disable_provisioning_profiles, include_release, generate_dsym, bazel_app_arguments, target_name):
     run_fix_build_permissions(build_environment.base_path)
 
@@ -103,6 +144,7 @@ def generate_xcodeproj(build_environment: BuildEnvironment, disable_extensions, 
     # сами (значения берутся из .mobileprovision). Делается ДО открытия Xcode, чтобы
     # подпись «вставала на место» при каждой перегенерации без ручных правок.
     apply_signing_settings(build_environment.base_path, xcodeproj_path, target_name)
+    allow_legacy_deployment_target(build_environment.base_path, xcodeproj_path)
 
     return xcodeproj_path
 

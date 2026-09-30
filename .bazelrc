@@ -23,6 +23,11 @@ build --cxxopt=-Wno-error=enum-float-conversion
 build --cxxopt=-Wno-error=misleading-indentation
 build --cxxopt=-Wno-error=thread-safety-analysis
 build --cxxopt=-Wno-error=reorder-init-list
+# Xcode 27: libc++ SDK выдаёт #warning «The selected platform is no longer supported»
+# для min iOS 13 — под -Werror это ломало C++ (LottieCpp). Оставляем предупреждением.
+build --copt="-Wno-error=#warnings"
+build --cxxopt="-Wno-error=#warnings"
+build --objccopt="-Wno-error=#warnings"
 
 build --features=debug_prefix_map_pwd_is_dot
 build --features=swift.cacheable_swiftmodules
