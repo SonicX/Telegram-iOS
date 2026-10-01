@@ -2070,6 +2070,24 @@ xcode_provisioning_profile(
    provisioning_profile = ":Telegram_local_profile",
 )
 
+# Xcode 27 / iOS 27: приложение, собранное с SDK 27 без UIScene life cycle, не
+# запускается — UIKit падает на старте («UIScene life cycle is required for apps
+# built with this SDK», EXC_BREAKPOINT в UIApplication_RuntimeIssues). Telegram
+# пока на классическом AppDelegate-окне, поэтому до перехода на сцены записываем
+# в бинарник версию SDK 26 (LC_BUILD_VERSION): проверка смотрит именно на неё.
+# Убрать вместе с переходом на UIScene.
+config_setting(
+    name = "iosSimulatorBuild",
+    values = {"ios_multi_cpus": "sim_arm64"},
+)
+
+# ios_application сам передаёт linkopts компоновщику через -Wl, — поэтому
+# аргументы ld здесь без префикса.
+legacy_sdk_linkopts = select({
+    ":iosSimulatorBuild": ["-platform_version", "ios-simulator", minimum_os_version, "26.0"],
+    "//conditions:default": ["-platform_version", "ios", minimum_os_version, "26.0"],
+})
+
 ios_application(
     name = "Swiftgram",
     bundle_id = "{telegram_bundle_id}".format(
@@ -2077,6 +2095,7 @@ ios_application(
     ),
     families = ["iphone", "ipad"],
     minimum_os_version = minimum_os_version,
+    linkopts = legacy_sdk_linkopts,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
         "//conditions:default": ":Telegram_xcode_profile" if telegram_use_xcode_managed_codesigning else "@build_configuration//provisioning:Telegram.mobileprovision",
