@@ -32,6 +32,8 @@ private final class PeerInfoScreenDisclosureEncryptionKeyItemNode: PeerInfoScree
     private let arrowNode: ASImageNode
     private let bottomSeparatorNode: ASDisplayNode
     private let maskNode: ASImageNode
+    // VoiceOver: у строки «Ключ шифрования» не было ни роли, ни активации.
+    private let activateArea: AccessibilityAreaNode
     
     private var item: PeerInfoScreenDisclosureEncryptionKeyItem?
     
@@ -60,6 +62,8 @@ private final class PeerInfoScreenDisclosureEncryptionKeyItemNode: PeerInfoScree
         self.maskNode = ASImageNode()
         self.maskNode.isUserInteractionEnabled = false
         
+        self.activateArea = AccessibilityAreaNode()
+        
         super.init()
         
         bringToFrontForHighlightImpl = { [weak self] in
@@ -72,6 +76,15 @@ private final class PeerInfoScreenDisclosureEncryptionKeyItemNode: PeerInfoScree
         self.addSubnode(self.keyNode)
         self.addSubnode(self.arrowNode)
         self.addSubnode(self.maskNode)
+        
+        self.addSubnode(self.activateArea)
+        self.activateArea.activate = { [weak self] in
+            guard let self, let pressed = self.selectionNode.pressed else {
+                return false
+            }
+            pressed()
+            return true
+        }
     }
     
     override func update(context: AccountContext, width: CGFloat, safeInsets: UIEdgeInsets, presentationData: PresentationData, item: PeerInfoScreenItem, topItem: PeerInfoScreenItem?, bottomItem: PeerInfoScreenItem?, hasCorners: Bool, transition: ContainedViewLayoutTransition) -> CGFloat {
@@ -121,6 +134,11 @@ private final class PeerInfoScreenDisclosureEncryptionKeyItemNode: PeerInfoScree
         self.maskNode.image = hasCorners ? PresentationResourcesItemList.cornersImage(presentationData.theme, top: hasTopCorners, bottom: hasBottomCorners) : nil
         self.maskNode.frame = CGRect(origin: CGPoint(x: safeInsets.left, y: 0.0), size: CGSize(width: width - safeInsets.left - safeInsets.right, height: height))
         self.bottomSeparatorNode.isHidden = hasBottomCorners
+        
+        self.activateArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: height))
+        self.activateArea.accessibilityLabel = item.text
+        self.activateArea.accessibilityTraits = .button
+        self.textNode.isAccessibilityElement = false
         
         let highlightNodeOffset: CGFloat = topItem == nil ? 0.0 : UIScreenPixel
         self.selectionNode.update(size: CGSize(width: width, height: height + highlightNodeOffset), theme: presentationData.theme, transition: transition)

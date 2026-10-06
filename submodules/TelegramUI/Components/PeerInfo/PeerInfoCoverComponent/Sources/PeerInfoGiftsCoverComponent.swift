@@ -166,6 +166,52 @@ public final class PeerInfoGiftsCoverComponent: Component {
             }
         }
         
+        // VoiceOver: подарки в шапке — layer-ы без view, открывались только
+        // тапом по точке. Отдаём по элементу на каждый видимый подарок.
+        private var accessibilityElementCache: [ObjectIdentifier: PeerInfoGiftAccessibilityElement] = [:]
+        
+        public override var accessibilityElements: [Any]? {
+            get {
+                guard let component = self.component else {
+                    return nil
+                }
+                var validKeys = Set<ObjectIdentifier>()
+                var elements: [UIAccessibilityElement] = []
+                let sortedLayers = self.iconLayers.values.sorted(by: { $0.frame.minX < $1.frame.minX })
+                for iconLayer in sortedLayers {
+                    if iconLayer.opacity < 0.5 || iconLayer.frame.width < 1.0 {
+                        continue
+                    }
+                    let key = ObjectIdentifier(iconLayer)
+                    validKeys.insert(key)
+                    let element: PeerInfoGiftAccessibilityElement
+                    if let current = self.accessibilityElementCache[key] {
+                        element = current
+                    } else {
+                        element = PeerInfoGiftAccessibilityElement(accessibilityContainer: self)
+                        self.accessibilityElementCache[key] = element
+                    }
+                    switch iconLayer.gift.gift {
+                    case let .unique(gift):
+                        element.accessibilityLabel = "Подарок: \(gift.title) #\(gift.number)"
+                    case .generic:
+                        element.accessibilityLabel = "Подарок"
+                    }
+                    element.accessibilityTraits = .button
+                    element.accessibilityFrameInContainerSpace = iconLayer.frame
+                    let gift = iconLayer.gift
+                    element.activate = {
+                        component.action(gift)
+                    }
+                    elements.append(element)
+                }
+                self.accessibilityElementCache = self.accessibilityElementCache.filter { validKeys.contains($0.key) }
+                return elements
+            }
+            set {
+            }
+        }
+        
         public override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
             for (_, iconLayer) in self.iconLayers {
                 if iconLayer.frame.contains(point) {
@@ -456,6 +502,18 @@ private final class StarsEffectLayer: SimpleLayer {
         self.emitterLayer.emitterMode = .surface
         self.emitterLayer.frame = CGRect(origin: .zero, size: size)
         self.emitterLayer.emitterPosition = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
+    }
+}
+
+private final class PeerInfoGiftAccessibilityElement: UIAccessibilityElement {
+    var activate: (() -> Void)?
+
+    override func accessibilityActivate() -> Bool {
+        guard let activate = self.activate else {
+            return false
+        }
+        activate()
+        return true
     }
 }
 

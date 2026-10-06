@@ -828,6 +828,34 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
         self.activateArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: height))
         self.activateArea.accessibilityLabel = item.label
         self.activateArea.accessibilityValue = item.text
+        self.activateArea.accessibilityTraits = item.action != nil ? .button : .staticText
+        // VoiceOver: меню строки (копировать имя пользователя/телефон/описание)
+        // открывалось только долгим нажатием — даём VO-действие.
+        self.activateArea.customActionsProvider = { [weak self] in
+            guard let self, let item = self.item else {
+                return []
+            }
+            if let contextAction = item.contextAction {
+                return [UIAccessibilityCustomAction(name: "Открыть меню", actionHandler: { [weak self] _ in
+                    guard let self else {
+                        return false
+                    }
+                    contextAction(self.contextSourceNode, nil, nil)
+                    return true
+                })]
+            } else if let longTapAction = item.longTapAction {
+                return [UIAccessibilityCustomAction(name: "Открыть меню", actionHandler: { [weak self] _ in
+                    guard let self else {
+                        return false
+                    }
+                    longTapAction(self)
+                    return true
+                })]
+            }
+            return []
+        }
+        self.expandButonNode.accessibilityLabel = presentationData.strings.PeerInfo_BioExpand
+        self.expandButonNode.accessibilityTraits = .button
         
         let contentSize = CGSize(width: width, height: height)
         self.containerNode.frame = CGRect(origin: CGPoint(), size: contentSize)

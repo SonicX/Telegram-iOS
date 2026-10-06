@@ -611,7 +611,14 @@ final class StoryItemContentComponent: Component {
                                 if self.progressMode.mode != .play {
                                     return
                                 }
-                                
+                                // VoiceOver: фото/текстовая история не листается
+                                // сама по таймеру — VO не успевал её зачитать.
+                                // Переход — свайпом вверх/вниз по истории
+                                // (adjustable в StoryItemSetContainerComponent).
+                                if UIAccessibility.isVoiceOverRunning {
+                                    return
+                                }
+
                                 #if DEBUG && true
                                 let currentProgressTimerLimit: Double = 10.0
                                 #else

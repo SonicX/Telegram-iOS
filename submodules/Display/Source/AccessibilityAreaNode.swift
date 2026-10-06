@@ -14,6 +14,16 @@ public final class AccessibilityAreaNode: ASDisplayNode {
     private final class View: UIView {
         weak var areaNode: AccessibilityAreaNode?
 
+        // Касания должны проходить сквозь область к кнопке строки под ней.
+        // `AccessibilityAreaNode.hitTest` -> nil больше не вызывается: у node
+        // свой View (не _ASDisplayView), и UIKit спрашивает только его. Без
+        // этого прозрачная VO-область поверх строки забирала тап — в профиле/
+        // настройках строки не нажимались БЕЗ VoiceOver. VO находит элементы
+        // по accessibilityFrame, hitTest ему не нужен.
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            return nil
+        }
+
         override var accessibilityFrame: CGRect {
             get {
                 return self.areaNode?.resolvedAccessibilityFrame() ?? super.accessibilityFrame

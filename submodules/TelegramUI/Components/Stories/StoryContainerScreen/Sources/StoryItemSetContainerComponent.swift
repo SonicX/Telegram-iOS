@@ -327,10 +327,44 @@ public final class StoryItemSetContainerComponent: Component {
         }
     }
     
+    // VoiceOver: сама история — один регулируемый элемент «Фото, история 2
+    // из 5, <подпись>». Свайп вверх/вниз — следующая/предыдущая история
+    // (фото при VO сами не листаются, см. StoryItemContentComponent), «назад»
+    // двумя пальцами (escape) — закрыть просмотр.
+    final class AccessibleContentContainerView: UIView {
+        var accessibilityNavigate: ((NavigationDirection) -> Void)?
+        var accessibilityClose: (() -> Void)?
+        
+        override func accessibilityIncrement() {
+            self.accessibilityNavigate?(.next)
+        }
+        
+        override func accessibilityDecrement() {
+            self.accessibilityNavigate?(.previous)
+        }
+        
+        override func accessibilityActivate() -> Bool {
+            // Двойной тап по центру для зрячих — «следующая»; оставляем так же.
+            guard let accessibilityNavigate = self.accessibilityNavigate else {
+                return false
+            }
+            accessibilityNavigate(.next)
+            return true
+        }
+        
+        override func accessibilityPerformEscape() -> Bool {
+            guard let accessibilityClose = self.accessibilityClose else {
+                return false
+            }
+            accessibilityClose()
+            return true
+        }
+    }
+    
     final class VisibleItem {
         let externalState = StoryContentItem.ExternalState()
         let unclippedContainerView: UIView
-        let contentContainerView: UIView
+        let contentContainerView: AccessibleContentContainerView
         let contentTintLayer = SimpleLayer()
         var contentViewsShadowView: UIImageView?
         let view = ComponentView<StoryContentItem.Environment>()
@@ -344,7 +378,7 @@ public final class StoryItemSetContainerComponent: Component {
             self.unclippedContainerView = UIView()
             self.unclippedContainerView.isUserInteractionEnabled = false
             
-            self.contentContainerView = UIView()
+            self.contentContainerView = AccessibleContentContainerView()
             self.contentContainerView.clipsToBounds = true
             if #available(iOS 13.0, *) {
                 self.contentContainerView.layer.cornerCurve = .continuous
@@ -1759,6 +1793,7 @@ public final class StoryItemSetContainerComponent: Component {
                         }
 
                         view.setProgressMode(mode: itemProgressMode, isCentral: index == centralIndex && component.isCentral)
+                        self.updateContentAccessibility(visibleItem: visibleItem, item: item, isCentral: index == centralIndex && component.isCentral)
                         
                         var isChannel = false
                         var canShare = true
@@ -5547,6 +5582,41 @@ public final class StoryItemSetContainerComponent: Component {
                 self.privacyController = controller
                 self.updateIsProgressPaused()
             })
+        }
+        
+        private func updateContentAccessibility(visibleItem: VisibleItem, item: StoryContentItem, isCentral: Bool) {
+            guard let component = self.component else {
+                return
+            }
+            let contentView = visibleItem.contentContainerView
+            contentView.isAccessibilityElement = isCentral
+            contentView.accessibilityElementsHidden = !isCentral
+            guard isCentral else {
+                contentView.accessibilityNavigate = nil
+                contentView.accessibilityClose = nil
+                return
+            }
+            var labelParts: [String] = []
+            if case .file = item.storyItem.media {
+                labelParts.append(component.strings.Message_Video)
+            } else {
+                labelParts.append(component.strings.Message_Photo)
+            }
+            if let position = item.position, component.slice.totalCount > 1 {
+                labelParts.append("история \(position + 1) из \(component.slice.totalCount)")
+            }
+            if !item.storyItem.text.isEmpty {
+                labelParts.append(item.storyItem.text)
+            }
+            contentView.accessibilityLabel = labelParts.joined(separator: ", ")
+            contentView.accessibilityHint = "Свайп вверх или вниз — следующая или предыдущая история"
+            contentView.accessibilityTraits = .adjustable
+            contentView.accessibilityNavigate = { [weak self] direction in
+                self?.component?.navigate(direction)
+            }
+            contentView.accessibilityClose = { [weak self] in
+                self?.component?.close()
+            }
         }
         
         func navigateToMyStories() {

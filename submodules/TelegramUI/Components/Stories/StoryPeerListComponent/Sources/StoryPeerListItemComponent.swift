@@ -483,6 +483,23 @@ public final class StoryPeerListItemComponent: Component {
         return true
     }
     
+    // VoiceOver: кнопка, активируемая напрямую. HighlightTrackingButton не
+    // переопределяет accessibilityActivate → VO имитировал тап по центру
+    // СОХРАНЁННОЙ рамки элемента, а полоса к этому моменту могла сдвинуться
+    // (скролл, смена порядка/числа историй, разворот) — тап попадал в соседа,
+    // и «Моя история» открывала историю другого пользователя.
+    private final class AccessibilityActivatingButton: HighlightTrackingButton {
+        var accessibilityActivateAction: (() -> Void)?
+
+        override func accessibilityActivate() -> Bool {
+            guard let accessibilityActivateAction = self.accessibilityActivateAction else {
+                return false
+            }
+            accessibilityActivateAction()
+            return true
+        }
+    }
+    
     public final class View: UIView {
         let backgroundContainer: UIView
         
@@ -490,7 +507,15 @@ public final class StoryPeerListItemComponent: Component {
         private let containerNode: ContextControllerSourceNode
         private let extractedBackgroundView: UIImageView
         
-        private let button: HighlightTrackingButton
+        private let button: AccessibilityActivatingButton
+        
+        /// VoiceOver: «Добавить историю» (камера) для своего элемента, когда
+        /// истории уже есть и активация открывает просмотр, а не камеру.
+        public var accessibilityComposeAction: (() -> Void)? {
+            didSet {
+                self.updateAccessibilityCustomActions()
+            }
+        }
         private let titleContainer: UIView
         
         fileprivate var composeLayer: StoryComposeLayer?
@@ -537,7 +562,7 @@ public final class StoryPeerListItemComponent: Component {
             self.backgroundContainer = UIView()
             self.backgroundContainer.isUserInteractionEnabled = false
             
-            self.button = HighlightTrackingButton()
+            self.button = AccessibilityActivatingButton()
             
             self.titleContainer = UIView()
             self.titleContainer.isUserInteractionEnabled = false
@@ -1196,11 +1221,29 @@ public final class StoryPeerListItemComponent: Component {
                 accessibilityValueText = component.strings.StoryFeed_AddStory
             }
             self.button.accessibilityValue = accessibilityValueText
+            self.button.accessibilityActivateAction = { [weak self] in
+                self?.pressed()
+            }
+            self.updateAccessibilityCustomActions()
             self.accessibilityDescriptor = isAccessibleItem ? (label: titleString, value: accessibilityValueText) : nil
             
             return availableSize
         }
 
+        private func updateAccessibilityCustomActions() {
+            if let component = self.component, self.accessibilityComposeAction != nil, component.peer.id == component.context.account.peerId, component.hasItems {
+                self.button.accessibilityCustomActions = [UIAccessibilityCustomAction(name: component.strings.StoryFeed_ContextAddStory, actionHandler: { [weak self] _ in
+                    guard let self, let accessibilityComposeAction = self.accessibilityComposeAction else {
+                        return false
+                    }
+                    accessibilityComposeAction()
+                    return true
+                })]
+            } else {
+                self.button.accessibilityCustomActions = nil
+            }
+        }
+        
         /// VoiceOver: элемент, на который ставить курсор при переходе к
         /// полосе историй (nil, если элемент сейчас недоступен — полоса свёрнута).
         public func accessibilityFocusTarget() -> UIView? {

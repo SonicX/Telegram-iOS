@@ -291,6 +291,43 @@ public class InfoItemNode: ListViewItemNode {
                     strongSelf.accessibilityLabel = "\(item.title)\n\(attributedText.string)"
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: layout.contentSize.height))
                     strongSelf.activateArea.accessibilityLabel = strongSelf.accessibilityLabel
+                    // VoiceOver: ссылки в тексте баннера («Проверить номер»,
+                    // «Установить пароль» и т. п.) нажимались только тапом по
+                    // точке. Каждая ссылка — VO-действие; если ссылка одна,
+                    // ею же активируется весь баннер.
+                    var linkActions: [(title: String, url: String)] = []
+                    attributedText.enumerateAttribute(NSAttributedString.Key(rawValue: TelegramTextAttributes.URL), in: NSRange(location: 0, length: attributedText.length), options: []) { value, range, _ in
+                        if let url = value as? String {
+                            linkActions.append((attributedText.attributedSubstring(from: range).string, url))
+                        }
+                    }
+                    if item.linkAction != nil, !linkActions.isEmpty {
+                        strongSelf.activateArea.accessibilityTraits = linkActions.count == 1 ? .button : .staticText
+                        strongSelf.activateArea.accessibilityCustomActions = linkActions.map { link in
+                            return UIAccessibilityCustomAction(name: link.title, actionHandler: { [weak strongSelf] _ in
+                                guard let strongSelf, let item = strongSelf.item else {
+                                    return false
+                                }
+                                item.linkAction?(.tap(link.url))
+                                return true
+                            })
+                        }
+                        if linkActions.count == 1, let link = linkActions.first {
+                            strongSelf.activateArea.activate = { [weak strongSelf] in
+                                guard let strongSelf, let item = strongSelf.item else {
+                                    return false
+                                }
+                                item.linkAction?(.tap(link.url))
+                                return true
+                            }
+                        } else {
+                            strongSelf.activateArea.activate = nil
+                        }
+                    } else {
+                        strongSelf.activateArea.accessibilityTraits = .staticText
+                        strongSelf.activateArea.accessibilityCustomActions = nil
+                        strongSelf.activateArea.activate = nil
+                    }
                 
                     if let _ = updatedTheme {
                         strongSelf.topStripeNode.backgroundColor = itemSeparatorColor
@@ -350,6 +387,9 @@ public class InfoItemNode: ListViewItemNode {
                     
                     strongSelf.badgeNode.isHidden = item.isWarning
                     strongSelf.closeButton.isHidden = item.closeAction == nil
+                    // VoiceOver: крестик баннера звучал безымянной «кнопкой».
+                    strongSelf.closeButton.accessibilityLabel = item.presentationData.strings.Common_Close
+                    strongSelf.closeButton.accessibilityTraits = .button
                     
                     strongSelf.maskNode.image = hasCorners ? PresentationResourcesItemList.cornersImage(item.presentationData.theme, top: hasTopCorners, bottom: hasBottomCorners, glass: item.systemStyle == .glass) : nil
                     

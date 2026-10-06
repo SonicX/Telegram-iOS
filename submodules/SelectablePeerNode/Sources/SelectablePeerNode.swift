@@ -207,6 +207,13 @@ public final class SelectablePeerNode: ASDisplayNode {
         if case .repostIcon = overrideImage {
             self.avatarNode.playRepostAnimation()
         }
+
+        // VoiceOver: ячейка «Опубликовать в истории» в меню «Поделиться» не
+        // была элементом (или зачитывала имя прежнего чата переиспользованной
+        // ячейки) — метку ставил только setup(...) для обычных чатов.
+        self.isAccessibilityElement = true
+        self.accessibilityLabel = title.replacingOccurrences(of: "\n", with: " ")
+        self.accessibilityTraits = [.button]
     }
     
     public func setup(accountPeerId: EnginePeer.Id, postbox: Postbox, network: Network, energyUsageSettings: EnergyUsageSettings, contentSettings: ContentSettings, animationCache: AnimationCache, animationRenderer: MultiAnimationRenderer, resolveInlineStickers: @escaping ([Int64]) -> Signal<[Int64: TelegramMediaFile], NoError>, theme: PresentationTheme, strings: PresentationStrings, peer: EngineRenderedPeer, requiresPremiumForMessaging: Bool, requiresStars: Int64? = nil, customTitle: String? = nil, iconId: Int64? = nil, iconColor: Int32? = nil, online: Bool = false, numberOfLines: Int = 2, synchronousLoad: Bool) {

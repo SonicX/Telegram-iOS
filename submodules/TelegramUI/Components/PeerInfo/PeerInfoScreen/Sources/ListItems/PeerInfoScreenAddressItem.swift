@@ -231,6 +231,9 @@ private final class PeerInfoScreenAddressItemNode: PeerInfoScreenItemNode {
         
         self.activateArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: height))
         self.activateArea.accessibilityLabel = item.label
+        // VoiceOver: читался только заголовок «Адрес», сам адрес — нет.
+        self.activateArea.accessibilityValue = item.text
+        self.activateArea.accessibilityTraits = .button
         
         let contentSize = CGSize(width: width, height: height)
         self.containerNode.frame = CGRect(origin: CGPoint(), size: contentSize)

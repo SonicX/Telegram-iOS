@@ -84,7 +84,8 @@ final class PeerInfoHeaderSingleLineTextFieldNode: ASDisplayNode, PeerInfoHeader
         let isHidden = !self.textNode.textField.isFirstResponder || self.text.isEmpty
         self.clearIconNode.isHidden = isHidden
         self.clearButtonNode.isHidden = isHidden
-        self.clearButtonNode.isAccessibilityElement = isHidden
+        // VoiceOver: было `= isHidden` — кнопка пряталась от VO ровно когда видна.
+        self.clearButtonNode.isAccessibilityElement = !isHidden
     }
     
     func update(width: CGFloat, safeInset: CGFloat, isSettings: Bool, hasPrevious: Bool, hasNext: Bool, placeholder: String, isEnabled: Bool, presentationData: PresentationData, updateText: String?) -> CGFloat {
@@ -108,6 +109,10 @@ final class PeerInfoHeaderSingleLineTextFieldNode: ASDisplayNode, PeerInfoHeader
             self.textNode.textField.attributedPlaceholder = attributedPlaceholderText
             self.textNode.textField.accessibilityHint = attributedPlaceholderText.string
         }
+        // VoiceOver: с введённым текстом поле читалось без названия («Имя»/
+        // «Фамилия» был только подсказкой) — ставим его меткой.
+        self.textNode.textField.accessibilityLabel = placeholder
+        self.clearButtonNode.accessibilityLabel = presentationData.strings.VoiceOver_Editing_ClearText
         
         if let updateText = updateText {
             self.textNode.textField.text = updateText

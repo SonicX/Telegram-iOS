@@ -153,6 +153,10 @@ public final class BottomButtonPanelComponent: Component {
                     self.addSubview(actionButtonView)
                 }
                 transition.setFrame(view: actionButtonView, frame: CGRect(origin: CGPoint(x: component.insets.left, y: topInset), size: actionButtonSize))
+                // VoiceOver: «Очистить кэш, 1,2 ГБ» — ButtonComponent метку не ставит.
+                actionButtonView.isAccessibilityElement = true
+                actionButtonView.accessibilityLabel = [component.title, component.label].compactMap({ $0 }).joined(separator: ", ")
+                actionButtonView.accessibilityTraits = component.isEnabled ? .button : [.button, .notEnabled]
             }
             
             return CGSize(width: availableSize.width, height: height)

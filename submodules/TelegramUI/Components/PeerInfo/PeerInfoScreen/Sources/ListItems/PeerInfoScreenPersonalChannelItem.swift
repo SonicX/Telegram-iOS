@@ -726,6 +726,23 @@ private final class PeerInfoScreenPersonalChannelItemNode: PeerInfoScreenItemNod
         self.bottomSeparatorNode.isHidden = hasBottomCorners
         
         self.activateArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: height))
+        // VoiceOver: область строки канала была без метки — VO вставал на
+        // «пустой» элемент. Название канала, подписчики и последний пост.
+        var channelLabelParts: [String] = [presentationData.strings.Settings_PersonalChannelItem]
+        if let channelPeer = item.data.peer.chatMainPeer {
+            channelLabelParts.append(channelPeer.compactDisplayTitle)
+        }
+        self.activateArea.accessibilityLabel = channelLabelParts.joined(separator: ", ")
+        var channelValueParts: [String] = []
+        if let subscriberCount = item.data.subscriberCount {
+            channelValueParts.append(presentationData.strings.Conversation_StatusSubscribers(Int32(clamping: subscriberCount)))
+        }
+        if let lastMessage = item.data.topMessages.first, !lastMessage.text.isEmpty {
+            channelValueParts.append(lastMessage.text)
+        }
+        self.activateArea.accessibilityValue = channelValueParts.isEmpty ? nil : channelValueParts.joined(separator: ", ")
+        self.activateArea.accessibilityTraits = .button
+        self.itemNode?.accessibilityElementsHidden = true
         
         let contentSize = CGSize(width: width, height: height)
         self.containerNode.frame = CGRect(origin: CGPoint(), size: contentSize)

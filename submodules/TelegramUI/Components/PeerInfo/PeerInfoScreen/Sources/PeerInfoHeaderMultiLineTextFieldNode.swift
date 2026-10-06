@@ -131,6 +131,9 @@ final class PeerInfoHeaderMultiLineTextFieldNode: ASDisplayNode, PeerInfoHeaderT
         if self.textNode.attributedPlaceholderText == nil || !self.textNode.attributedPlaceholderText!.isEqual(to: attributedPlaceholderText) {
             self.textNode.attributedPlaceholderText = attributedPlaceholderText
         }
+        // VoiceOver: у многострочного поля не было ни метки, ни подсказки.
+        self.textNode.textView.accessibilityLabel = placeholder
+        self.clearButtonNode.accessibilityLabel = presentationData.strings.VoiceOver_Editing_ClearText
         
         if let updateText = updateText {
             let attributedText = NSAttributedString(string: updateText, font: titleFont, textColor: presentationData.theme.list.itemPrimaryTextColor)
@@ -184,7 +187,8 @@ final class PeerInfoHeaderMultiLineTextFieldNode: ASDisplayNode, PeerInfoHeaderT
         let isHidden = !self.textNode.isFirstResponder() || self.text.isEmpty
         self.clearIconNode.isHidden = isHidden
         self.clearButtonNode.isHidden = isHidden
-        self.clearButtonNode.isAccessibilityElement = isHidden
+        // VoiceOver: было `= isHidden` — кнопка пряталась от VO ровно когда видна.
+        self.clearButtonNode.isAccessibilityElement = !isHidden
     }
     
     func editableTextNode(_ editableTextNode: ASEditableTextNode, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {

@@ -286,6 +286,28 @@ public final class TabSelectorComponent: Component {
             }
         }
         
+        // VoiceOver: вкладка (Медиа/Файлы/Ссылки/…) не была элементом — без
+        // роли, состояния «выбрано» и с двумя наложенными заголовками.
+        func updateAccessibility(isSelected: Bool) {
+            var label: String?
+            if let item = self.item {
+                switch item.content {
+                case let .text(text):
+                    label = text
+                case .component:
+                    label = self.title.view?.accessibilityLabel
+                }
+            }
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = label
+            self.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+        }
+        
+        override func accessibilityActivate() -> Bool {
+            self.action()
+            return true
+        }
+        
         private func updateIsShaking(animated: Bool) {
             if self.isReordering {
                 if self.containerButton.layer.animation(forKey: "shaking_position") == nil {
@@ -719,6 +741,7 @@ public final class TabSelectorComponent: Component {
                     }
                     
                     itemView.update(theme: component.theme, size: itemBackgroundRect.size, item: item, isReordering: item.isReorderable && component.reorderItem != nil, transition: itemTransition)
+                    itemView.updateAccessibility(isSelected: item.id == component.selectedId)
                     
                     itemTransition.setPosition(view: itemTitleView, position: CGPoint(x: itemTitleFrame.minX, y: itemTitleFrame.minY))
                     itemTransition.setBounds(view: itemTitleView, bounds: CGRect(origin: CGPoint(), size: itemTitleFrame.size))

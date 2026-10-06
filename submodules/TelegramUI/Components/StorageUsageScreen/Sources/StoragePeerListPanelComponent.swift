@@ -233,6 +233,18 @@ private final class PeerListItemComponent: Component {
             self.component = component
             self.state = state
             
+            // VoiceOver: строка чата — «Имя, 120 МБ», в режиме выбора + «выбрано».
+            self.containerButton.isAccessibilityElement = true
+            self.containerButton.accessibilityLabel = [component.title, component.label].filter({ !$0.isEmpty }).joined(separator: ", ")
+            switch component.selectionState {
+            case .none:
+                self.containerButton.accessibilityValue = nil
+                self.containerButton.accessibilityTraits = .button
+            case let .editing(isSelected):
+                self.containerButton.accessibilityValue = isSelected ? StorageUsageAccessibilityStrings.selected : StorageUsageAccessibilityStrings.notSelected
+                self.containerButton.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+            }
+            
             let contextInset: CGFloat = self.isExtractedToContextMenu ? 12.0 : 0.0
             
             let height: CGFloat = 52.0

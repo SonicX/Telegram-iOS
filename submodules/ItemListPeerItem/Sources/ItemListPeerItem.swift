@@ -1847,6 +1847,21 @@ public class ItemListPeerItemNode: ItemListRevealOptionsItemNode, ItemListItemNo
                     strongSelf.updateLayout(size: layout.contentSize, leftInset: params.leftInset, rightInset: params.rightInset)
                     
                     strongSelf.setRevealOptions((left: [], right: peerRevealOptions))
+                    // VoiceOver: свайп-действия строки («Повысить», «Ограничить»,
+                    // «Удалить») были недоступны — отдаём их VO-действиями.
+                    if peerRevealOptions.isEmpty {
+                        strongSelf.accessibilityCustomActions = nil
+                    } else {
+                        strongSelf.accessibilityCustomActions = peerRevealOptions.map { option in
+                            return UIAccessibilityCustomAction(name: option.title, actionHandler: { [weak strongSelf] _ in
+                                guard let strongSelf else {
+                                    return false
+                                }
+                                strongSelf.revealOptionSelected(option, animated: false)
+                                return true
+                            })
+                        }
+                    }
                     if let revealed = item.editing.revealed {
                         strongSelf.setRevealOptionsOpened(revealed, animated: animated)
                     }

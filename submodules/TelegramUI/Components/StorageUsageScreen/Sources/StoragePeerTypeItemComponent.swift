@@ -157,6 +157,11 @@ final class StoragePeerTypeItemComponent: Component {
             
             let previousComponent = self.component
             self.component = component
+            // VoiceOver: «Личные чаты, 3 исключения» + значение «1 неделя»; открывает меню.
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = [component.title, component.subtitle].compactMap({ $0 }).joined(separator: ", ")
+            self.accessibilityValue = component.value
+            self.accessibilityTraits = .button
             
             let leftInset: CGFloat = 62.0
             let rightInset: CGFloat = 32.0

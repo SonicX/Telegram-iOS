@@ -514,6 +514,85 @@ final class StorageMediaGridPanelComponent: Component {
             })
         }
         
+        // VoiceOver: ячейки сетки — CALayer без view, VO их не видел. Отдаём
+        // по элементу на видимую ячейку: «Фото, 2 МБ, выбрано»; активация —
+        // как тап (открыть или переключить выбор в режиме правки).
+        private var accessibilityElementCache: [EngineMessage.Id: StorageUsageAccessibilityElement] = [:]
+        
+        override var accessibilityElements: [Any]? {
+            get {
+                guard let component = self.component, let environment = self.environment, let items = component.items else {
+                    return nil
+                }
+                var sizes: [EngineMessage.Id: Int64] = [:]
+                for item in items.items {
+                    sizes[item.message.id] = item.size
+                }
+                let sortedLayers = self.visibleLayers.sorted(by: { lhs, rhs in
+                    if lhs.value.frame.minY != rhs.value.frame.minY {
+                        return lhs.value.frame.minY < rhs.value.frame.minY
+                    }
+                    return lhs.value.frame.minX < rhs.value.frame.minX
+                })
+                var elements: [StorageUsageAccessibilityElement] = []
+                for (id, itemLayer) in sortedLayers {
+                    if itemLayer.isHidden {
+                        continue
+                    }
+                    let itemFrame = self.scrollView.convert(itemLayer.frame, to: self)
+                    if !itemFrame.intersects(self.bounds) {
+                        continue
+                    }
+                    let element: StorageUsageAccessibilityElement
+                    if let current = self.accessibilityElementCache[id] {
+                        element = current
+                    } else {
+                        element = StorageUsageAccessibilityElement(accessibilityContainer: self)
+                        self.accessibilityElementCache[id] = element
+                    }
+                    var isVideo = false
+                    if let message = itemLayer.message {
+                        for media in message.media {
+                            if let file = media as? TelegramMediaFile, file.isVideo {
+                                isVideo = true
+                            }
+                        }
+                    }
+                    var labelParts: [String] = [isVideo ? environment.strings.Message_Video : environment.strings.Message_Photo]
+                    if let size = sizes[id] {
+                        labelParts.append(dataSizeString(Int(size), formatting: DataSizeStringFormatting(strings: environment.strings, decimalSeparator: ".")))
+                    }
+                    element.accessibilityLabel = labelParts.joined(separator: ", ")
+                    if let selectionState = component.selectionState {
+                        let isSelected = selectionState.selectedMessages.contains(id)
+                        element.accessibilityValue = isSelected ? StorageUsageAccessibilityStrings.selected : StorageUsageAccessibilityStrings.notSelected
+                        element.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+                    } else {
+                        element.accessibilityTraits = [.button, .image]
+                    }
+                    element.frameProvider = { [weak self, weak itemLayer] in
+                        guard let self, let itemLayer else {
+                            return CGRect()
+                        }
+                        return self.scrollView.convert(itemLayer.frame, to: self)
+                    }
+                    element.activate = { [weak self] in
+                        guard let self, let component = self.component else {
+                            return false
+                        }
+                        component.action(id)
+                        return true
+                    }
+                    elements.append(element)
+                }
+                let visibleIds = Set(self.visibleLayers.keys)
+                self.accessibilityElementCache = self.accessibilityElementCache.filter { visibleIds.contains($0.key) }
+                return elements
+            }
+            set {
+            }
+        }
+        
         @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
             if case .ended = recognizer.state {
                 guard let component = self.component else {

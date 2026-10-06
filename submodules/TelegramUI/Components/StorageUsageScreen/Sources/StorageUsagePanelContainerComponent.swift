@@ -308,7 +308,54 @@ private final class StorageUsageHeaderComponent: Component {
                 self.visibleItems.removeValue(forKey: id)
             }
             
+            self.updateTabsAccessibility(component: component)
+            
             return availableSize
+        }
+        
+        // VoiceOver: каждая вкладка — отдельный элемент «Медиа, выбрано,
+        // вкладка 2 из 4» (trait .tabBar у контейнера); раньше вкладки были
+        // одним view с тапом и VO их не видел.
+        private var tabAccessibilityElements: [AnyHashable: StorageUsageAccessibilityElement] = [:]
+        
+        private func updateTabsAccessibility(component: StorageUsageHeaderComponent) {
+            var elements: [StorageUsageAccessibilityElement] = []
+            var validIds = Set<AnyHashable>()
+            for i in 0 ..< component.items.count {
+                let item = component.items[i]
+                validIds.insert(item.id)
+                let element: StorageUsageAccessibilityElement
+                if let current = self.tabAccessibilityElements[item.id] {
+                    element = current
+                } else {
+                    element = StorageUsageAccessibilityElement(accessibilityContainer: self)
+                    let id = item.id
+                    element.frameProvider = { [weak self] in
+                        guard let self, let component = self.component, !component.items.isEmpty else {
+                            return CGRect()
+                        }
+                        let index = component.items.firstIndex(where: { $0.id == id }) ?? 0
+                        let itemWidth = self.bounds.width / CGFloat(component.items.count)
+                        return CGRect(x: itemWidth * CGFloat(index), y: 0.0, width: itemWidth, height: self.bounds.height)
+                    }
+                    element.activate = { [weak self] in
+                        guard let self, let component = self.component else {
+                            return false
+                        }
+                        component.switchToPanel(id)
+                        return true
+                    }
+                    self.tabAccessibilityElements[item.id] = element
+                }
+                element.accessibilityLabel = item.title
+                element.accessibilityTraits = i == component.activeIndex ? [.button, .selected] : [.button]
+                elements.append(element)
+            }
+            for id in Array(self.tabAccessibilityElements.keys) where !validIds.contains(id) {
+                self.tabAccessibilityElements.removeValue(forKey: id)
+            }
+            self.accessibilityTraits = .tabBar
+            self.accessibilityElements = elements
         }
     }
     

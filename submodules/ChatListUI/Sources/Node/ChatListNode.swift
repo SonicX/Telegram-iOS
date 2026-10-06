@@ -2961,7 +2961,18 @@ public final class ChatListNode: ListView {
         self.displayedItemRangeChanged = { [weak self] range, transactionOpaqueState in
             if let strongSelf = self, let chatListView = (transactionOpaqueState as? ChatListOpaqueTransactionState)?.chatListView {
                 let originalList = chatListView.originalList
-                if let range = range.loadedRange {
+                // При VoiceOver список материализует ВСЕ загруженные чаты
+                // (accessibilityInvisibleInsetOverride), поэтому loadedRange
+                // всегда 0..<count: ветка «дошли до низа» (firstIndex >= 5) не
+                // срабатывала никогда и список упирался в первые 50 чатов.
+                // Видимый диапазон идёт за курсором VO — по нему и догружаем.
+                var paginationRange: (firstIndex: Int, lastIndex: Int)?
+                if strongSelf.accessibilityInvisibleInsetOverride != nil, let visibleRange = range.visibleRange {
+                    paginationRange = (visibleRange.firstIndex, visibleRange.lastIndex)
+                } else if let loadedRange = range.loadedRange {
+                    paginationRange = (loadedRange.firstIndex, loadedRange.lastIndex)
+                }
+                if let range = paginationRange {
                     var location: ChatListNodeLocation?
                     if range.firstIndex < 5, let lastItem = originalList.items.last, originalList.hasLater {
                         location = .navigation(index: lastItem.index, filter: strongSelf.chatListFilter)

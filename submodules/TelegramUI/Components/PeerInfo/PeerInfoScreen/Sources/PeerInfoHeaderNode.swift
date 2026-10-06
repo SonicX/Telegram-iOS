@@ -973,6 +973,33 @@ final class PeerInfoHeaderNode: ASDisplayNode {
                 environment: {},
                 containerSize: CGSize(width: 26.0, height: 26.0)
             )
+            // VoiceOver: значок рядом с именем (Premium/подтверждён/фейк/скам/
+            // эмодзи-статус) не был элементом.
+            switch credibilityIcon {
+            case .none:
+                self.titleCredibilityIconView.isAccessibilityElement = false
+                self.titleCredibilityIconView.accessibilityLabel = nil
+            case .premium:
+                self.titleCredibilityIconView.isAccessibilityElement = true
+                self.titleCredibilityIconView.accessibilityLabel = presentationData.strings.Premium_Title
+                self.titleCredibilityIconView.accessibilityTraits = .button
+            case .verified:
+                self.titleCredibilityIconView.isAccessibilityElement = true
+                self.titleCredibilityIconView.accessibilityLabel = "Подтверждённый аккаунт"
+                self.titleCredibilityIconView.accessibilityTraits = .image
+            case .fake:
+                self.titleCredibilityIconView.isAccessibilityElement = true
+                self.titleCredibilityIconView.accessibilityLabel = presentationData.strings.Message_FakeAccount
+                self.titleCredibilityIconView.accessibilityTraits = .staticText
+            case .scam:
+                self.titleCredibilityIconView.isAccessibilityElement = true
+                self.titleCredibilityIconView.accessibilityLabel = presentationData.strings.Message_ScamAccount
+                self.titleCredibilityIconView.accessibilityTraits = .staticText
+            case .emojiStatus:
+                self.titleCredibilityIconView.isAccessibilityElement = true
+                self.titleCredibilityIconView.accessibilityLabel = "Эмодзи-статус"
+                self.titleCredibilityIconView.accessibilityTraits = .image
+            }
             let expandedIconSize = self.titleExpandedCredibilityIconView.update(
                 transition: ComponentTransition(navigationTransition),
                 component: AnyComponent(EmojiStatusComponent(
@@ -1084,6 +1111,16 @@ final class PeerInfoHeaderNode: ASDisplayNode {
                 environment: {},
                 containerSize: CGSize(width: 26.0, height: 26.0)
             )
+            // VoiceOver: эмодзи-статус / уникальный подарок у имени — кнопка.
+            switch statusIcon {
+            case .emojiStatus:
+                self.titleStatusIconView.isAccessibilityElement = true
+                self.titleStatusIconView.accessibilityLabel = uniqueGiftSlug != nil ? "Подарок-статус" : "Эмодзи-статус"
+                self.titleStatusIconView.accessibilityTraits = .button
+            default:
+                self.titleStatusIconView.isAccessibilityElement = false
+                self.titleStatusIconView.accessibilityLabel = nil
+            }
             let expandedIconSize = self.titleExpandedStatusIconView.update(
                 transition: ComponentTransition(navigationTransition),
                 component: AnyComponent(EmojiStatusComponent(
@@ -1145,6 +1182,19 @@ final class PeerInfoHeaderNode: ASDisplayNode {
                 environment: {},
                 containerSize: CGSize(width: 26.0, height: 26.0)
             )
+            switch verifiedIcon {
+            case .verified:
+                self.titleVerifiedIconView.isAccessibilityElement = true
+                self.titleVerifiedIconView.accessibilityLabel = "Подтверждённый аккаунт"
+                self.titleVerifiedIconView.accessibilityTraits = .image
+            case .emojiStatus:
+                self.titleVerifiedIconView.isAccessibilityElement = true
+                self.titleVerifiedIconView.accessibilityLabel = "Подтверждено организацией"
+                self.titleVerifiedIconView.accessibilityTraits = .image
+            default:
+                self.titleVerifiedIconView.isAccessibilityElement = false
+                self.titleVerifiedIconView.accessibilityLabel = nil
+            }
             let expandedIconSize = self.titleExpandedVerifiedIconView.update(
                 transition: ComponentTransition(navigationTransition),
                 component: AnyComponent(EmojiStatusComponent(
@@ -1471,6 +1521,11 @@ final class PeerInfoHeaderNode: ASDisplayNode {
             transition.updateCornerRadius(node: subtitleBackgroundNode, cornerRadius: subtitleBackgroundFrame.height * 0.5)
             
             transition.updateFrame(node: subtitleBackgroundButton, frame: subtitleBackgroundFrame)
+            // VoiceOver: нажимаемый подзаголовок (кнопка поверх текста) звучал
+            // как безымянная «кнопка».
+            subtitleBackgroundButton.isAccessibilityElement = true
+            subtitleBackgroundButton.accessibilityLabel = subtitleStringText
+            subtitleBackgroundButton.accessibilityTraits = .button
             
             if let arrowImage = subtitleArrowNode.image {
                 let scaleFactor: CGFloat = 0.8
@@ -1558,6 +1613,9 @@ final class PeerInfoHeaderNode: ASDisplayNode {
             }
             
             subtitleBadgeSize = subtitleBadgeView.update(title: presentationData.strings.PeerInfo_HiddenStatusBadge, fillColor: contentButtonBackgroundColor, foregroundColor: contentButtonForegroundColor)
+            // VoiceOver: текст значка «когда?» в ComponentView — UIButton без метки.
+            subtitleBadgeView.accessibilityLabel = presentationData.strings.PeerInfo_HiddenStatusBadge
+            subtitleBadgeView.accessibilityTraits = .button
         } else if let subtitleBadgeView = self.subtitleBadgeView {
             subtitleBadgeView.removeFromSuperview()
         }

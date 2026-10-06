@@ -86,6 +86,9 @@ final class StorageCategoryItemComponent: Component {
         private var highlightBackgroundFrame: CGRect?
         private var highlightBackgroundLayer: SimpleLayer?
         
+        private var rowAccessibilityElement: StorageUsageAccessibilityElement?
+        private var rowAccessibilityHeight: CGFloat = 52.0
+        
         override init(frame: CGRect) {
             self.checkLayer = CheckLayer()
             self.separatorLayer = SimpleLayer()
@@ -135,6 +138,11 @@ final class StorageCategoryItemComponent: Component {
             self.addTarget(self, action: #selector(self.pressed), for: .touchUpInside)
             
             self.checkButtonArea.addTarget(self, action: #selector(self.checkPressed), for: .touchUpInside)
+            // VoiceOver: галочка — часть строки (значение «выбрано»), отдельной
+            // безымянной «кнопкой» её не показываем.
+            self.checkButtonArea.isAccessibilityElement = false
+            self.checkButtonArea.accessibilityElementsHidden = true
+            self.isAccessibilityElement = false
         }
         
         required init?(coder: NSCoder) {
@@ -332,6 +340,9 @@ final class StorageCategoryItemComponent: Component {
             
             self.highlightBackgroundFrame = CGRect(origin: CGPoint(), size: CGSize(width: availableSize.width, height: height + ((component.isExpanded || component.hasNext) ? UIScreenPixel : 0.0)))
             
+            self.rowAccessibilityHeight = height
+            self.updateRowAccessibility(component: component, fractionString: fractionString)
+            
             var validKeys = Set<StorageUsageScreenComponent.Category>()
             if component.isExpanded {
                 for i in 0 ..< component.category.subcategories.count {
@@ -403,8 +414,62 @@ final class StorageCategoryItemComponent: Component {
             
             return CGSize(width: availableSize.width, height: height)
         }
+
+        // VoiceOver: строка — «Фото, 12%, 340 МБ, выбрано». Для «Прочее»
+        // (с подкатегориями) активация раскрывает список, выбор — VO-действием.
+        private func updateRowAccessibility(component: StorageCategoryItemComponent, fractionString: String) {
+            let element: StorageUsageAccessibilityElement
+            if let current = self.rowAccessibilityElement {
+                element = current
+            } else {
+                element = StorageUsageAccessibilityElement(accessibilityContainer: self)
+                element.frameProvider = { [weak self] in
+                    guard let self else {
+                        return CGRect()
+                    }
+                    return CGRect(origin: CGPoint(), size: CGSize(width: self.bounds.width, height: self.rowAccessibilityHeight))
+                }
+                element.activate = { [weak self] in
+                    guard let self, let component = self.component else {
+                        return false
+                    }
+                    component.action(component.category.key, .generic)
+                    return true
+                }
+                self.rowAccessibilityElement = element
+            }
+
+            let sizeString = dataSizeString(Int(component.category.size), formatting: DataSizeStringFormatting(strings: component.strings, decimalSeparator: "."))
+            var labelParts: [String] = [component.category.title]
+            if !fractionString.isEmpty {
+                labelParts.append(fractionString)
+            }
+            labelParts.append(sizeString)
+            element.accessibilityLabel = labelParts.joined(separator: ", ")
+
+            let selectionString = component.category.isSelected ? StorageUsageAccessibilityStrings.selected : StorageUsageAccessibilityStrings.notSelected
+            if component.category.subcategories.isEmpty {
+                element.accessibilityValue = selectionString
+                element.accessibilityTraits = component.category.isSelected ? [.button, .selected] : [.button]
+                element.accessibilityCustomActions = nil
+            } else {
+                let expandedString = component.isExpanded ? StorageUsageAccessibilityStrings.expanded : StorageUsageAccessibilityStrings.collapsed
+                element.accessibilityValue = "\(selectionString), \(expandedString)"
+                element.accessibilityTraits = [.button]
+                let toggleName = component.category.isSelected ? StorageUsageAccessibilityStrings.deselect : StorageUsageAccessibilityStrings.select
+                element.accessibilityCustomActions = [UIAccessibilityCustomAction(name: toggleName, actionHandler: { [weak self] _ in
+                    guard let self, let component = self.component else {
+                        return false
+                    }
+                    component.action(component.category.key, .toggle)
+                    return true
+                })]
+            }
+
+            self.accessibilityElements = [element, self.subcategoryClippingContainer]
+        }
     }
-    
+
     func makeView() -> View {
         return View(frame: CGRect())
     }

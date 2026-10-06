@@ -315,7 +315,8 @@ final class PeerInfoHeaderNavigationButton: HighlightableButtonNode {
                 icon = PresentationResourcesRootController.navigationPostStoryIcon(presentationData.theme)
             case .sort:
                 text = ""
-                accessibilityText = presentationData.strings.Common_More
+                // VoiceOver: кнопка сортировки подарков звучала как «Ещё».
+                accessibilityText = presentationData.strings.Contacts_Sort
                 icon = PresentationResourcesRootController.navigationSortIcon(presentationData.theme)
                 isAnimation = true
                 animationState = .sort

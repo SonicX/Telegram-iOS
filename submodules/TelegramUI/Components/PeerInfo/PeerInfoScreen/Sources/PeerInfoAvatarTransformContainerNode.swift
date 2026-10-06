@@ -44,6 +44,10 @@ final class PeerInfoAvatarTransformContainerNode: ASDisplayNode {
     }
     
     var tapped: (() -> Void)?
+    
+    /// VoiceOver: аватар открывался только UITapGestureRecognizer и не был
+    /// VO-элементом. Область пропускает касания (hitTest -> nil).
+    private let accessibilityArea: AccessibilityAreaNode
     var emojiTapped: (() -> Void)?
     var contextAction: ((ASDisplayNode, ContextGesture?) -> Void)?
     
@@ -61,6 +65,7 @@ final class PeerInfoAvatarTransformContainerNode: ASDisplayNode {
         
         let avatarFont = avatarPlaceholderFont(size: floor(100.0 * 16.0 / 37.0))
         self.avatarNode = AvatarNode(font: avatarFont)
+        self.accessibilityArea = AccessibilityAreaNode()
         
         super.init()
         
@@ -68,6 +73,18 @@ final class PeerInfoAvatarTransformContainerNode: ASDisplayNode {
         self.containerNode.addSubnode(self.avatarNode)
         self.containerNode.frame = CGRect(origin: CGPoint(x: -50.0, y: -50.0), size: CGSize(width: 100.0, height: 100.0))
         self.avatarNode.frame = self.containerNode.bounds
+        
+        self.containerNode.addSubnode(self.accessibilityArea)
+        self.accessibilityArea.frame = self.containerNode.bounds
+        self.accessibilityArea.accessibilityLabel = "Фото профиля"
+        self.accessibilityArea.accessibilityTraits = [.button, .image]
+        self.accessibilityArea.activate = { [weak self] in
+            guard let self, let tapped = self.tapped else {
+                return false
+            }
+            tapped()
+            return true
+        }
         
         let tapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.tapGesture(_:)))
         self.avatarNode.view.addGestureRecognizer(tapGestureRecognizer)
@@ -344,6 +361,13 @@ final class PeerInfoAvatarTransformContainerNode: ASDisplayNode {
             
             self.containerNode.frame = CGRect(origin: CGPoint(x: -avatarSize / 2.0, y: -avatarSize / 2.0), size: CGSize(width: avatarSize, height: avatarSize))
             self.avatarNode.frame = self.containerNode.bounds
+            self.accessibilityArea.frame = self.containerNode.bounds
+            // Тап по аватару с историями открывает истории, без — фото.
+            if let storyData = self.storyData, storyData.totalCount > 0 {
+                self.accessibilityArea.accessibilityValue = storyData.unseenCount > 0 ? "есть новые истории" : "есть истории"
+            } else {
+                self.accessibilityArea.accessibilityValue = nil
+            }
             self.avatarNode.font = avatarPlaceholderFont(size: floor(avatarSize * 16.0 / 37.0))
 
             if let item = item {

@@ -351,6 +351,18 @@ private final class FileListItemComponent: Component {
             self.component = component
             self.state = state
             
+            // VoiceOver: строка файла — «Название, подпись, 12 МБ», в режиме выбора + «выбрано».
+            self.containerButton.isAccessibilityElement = true
+            self.containerButton.accessibilityLabel = [component.title, component.subtitle, component.label].filter({ !$0.isEmpty }).joined(separator: ", ")
+            switch component.selectionState {
+            case .none:
+                self.containerButton.accessibilityValue = nil
+                self.containerButton.accessibilityTraits = .button
+            case let .editing(isSelected):
+                self.containerButton.accessibilityValue = isSelected ? StorageUsageAccessibilityStrings.selected : StorageUsageAccessibilityStrings.notSelected
+                self.containerButton.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+            }
+            
             let contextInset: CGFloat = self.isExtractedToContextMenu ? 12.0 : 0.0
             
             let spacing: CGFloat = 1.0

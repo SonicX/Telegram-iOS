@@ -263,6 +263,10 @@ final class StorageCategoriesComponent: Component {
                         self.addSubview(buttonView)
                     }
                     transition.setFrame(view: buttonView, frame: buttonFrame)
+                    // VoiceOver: «Очистить всё, 1,2 ГБ» (ButtonComponent сам метку не ставит).
+                    buttonView.isAccessibilityElement = true
+                    buttonView.accessibilityLabel = [clearTitle, label].compactMap({ $0 }).joined(separator: ", ")
+                    buttonView.accessibilityTraits = totalSelectedSize != 0 ? .button : [.button, .notEnabled]
                 }
                 contentHeight += buttonSize.height
                 

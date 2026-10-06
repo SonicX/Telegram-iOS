@@ -490,6 +490,9 @@ private final class PeerInfoScreenBusinessHoursItemNode: PeerInfoScreenItemNode 
                 environment: {},
                 containerSize: CGSize(width: 200.0, height: 100.0)
             )
+            // VoiceOver: текст кнопки в MultilineTextComponent метки не даёт.
+            timezoneSwitchButton.view?.accessibilityLabel = timezoneSwitchTitle
+            timezoneSwitchButton.view?.accessibilityTraits = .button
         } else {
             if let timezoneSwitchButton = self.timezoneSwitchButton {
                 self.timezoneSwitchButton = nil
@@ -531,6 +534,7 @@ private final class PeerInfoScreenBusinessHoursItemNode: PeerInfoScreenItemNode 
         let daySpacing: CGFloat = 15.0
         
         var dayHeights: CGFloat = 0.0
+        var accessibilityScheduleParts: [String] = []
         
         for rawI in 0 ..< businessDays.count {
             if rawI == 0 {
@@ -580,6 +584,7 @@ private final class PeerInfoScreenBusinessHoursItemNode: PeerInfoScreenItemNode 
             }
             
             let businessHoursText = dayBusinessHoursText(presentationData: presentationData, day: businessDays[i], offsetMinutes: timezoneOffsetMinutes)
+            accessibilityScheduleParts.append("\(dayTitleValue): \(businessHoursText)")
             
             let dayTitleSize = dayTitle.update(
                 transition: .immediate,
@@ -651,6 +656,39 @@ private final class PeerInfoScreenBusinessHoursItemNode: PeerInfoScreenItemNode 
         
         self.activateArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: height))
         self.activateArea.accessibilityLabel = item.label
+        // VoiceOver: читался только заголовок «Часы работы». Теперь статус
+        // («Открыто, до 18:00»), а в развёрнутом виде — расписание по дням.
+        // Активация — как тап: развернуть/свернуть.
+        var accessibilityValueParts: [String] = [openStatusText]
+        if !currentDayStatusText.trimmingCharacters(in: .whitespaces).isEmpty {
+            accessibilityValueParts.append(currentDayStatusText)
+        }
+        if self.isExpanded {
+            accessibilityValueParts.append(contentsOf: accessibilityScheduleParts)
+        }
+        self.activateArea.accessibilityValue = accessibilityValueParts.joined(separator: ", ")
+        self.activateArea.accessibilityTraits = .button
+        self.activateArea.accessibilityHint = self.isExpanded ? "Свернуть расписание" : "Показать расписание по дням"
+        self.activateArea.activate = { [weak self] in
+            guard let self else {
+                return false
+            }
+            self.isExpanded = !self.isExpanded
+            self.item?.requestLayout(true)
+            return true
+        }
+        self.activateArea.customActionsProvider = { [weak self] in
+            guard let self, let item = self.item, let longTapAction = item.longTapAction, let presentationData = self.presentationData else {
+                return []
+            }
+            return [UIAccessibilityCustomAction(name: presentationData.strings.Conversation_ContextMenuCopy, actionHandler: { [weak self] _ in
+                guard let self, let item = self.item, let presentationData = self.presentationData else {
+                    return false
+                }
+                longTapAction(self, businessHoursTextToCopy(businessHours: item.businessHours, presentationData: presentationData, displayLocalTimezone: self.displayLocalTimezone))
+                return true
+            })]
+        }
         
         let contentSize = CGSize(width: width, height: height)
         self.containerNode.frame = CGRect(origin: CGPoint(), size: contentSize)

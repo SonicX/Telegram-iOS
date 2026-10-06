@@ -963,10 +963,16 @@ final class StorageUsageScreenComponent: Component {
                 let isSelectingPeers = self.aggregatedData?.isSelectingPeers ?? false
                 
                 if let navigationEditButtonView = self.navigationEditButton.view {
-                    animatedTransition.setAlpha(view: navigationEditButtonView, alpha: (isSelectingPeers ? 0.0 : 1.0) * buttonsMasterAlpha * navigationBackgroundAlpha)
+                    let alpha = (isSelectingPeers ? 0.0 : 1.0) * buttonsMasterAlpha * navigationBackgroundAlpha
+                    animatedTransition.setAlpha(view: navigationEditButtonView, alpha: alpha)
+                    // VoiceOver: «Изменить»/«Готово» лежат друг на друге и
+                    // переключаются прозрачностью — спрятанную не озвучиваем.
+                    navigationEditButtonView.accessibilityElementsHidden = alpha < 0.5
                 }
                 if let navigationDoneButtonView = self.navigationDoneButton.view {
-                    animatedTransition.setAlpha(view: navigationDoneButtonView, alpha: (isSelectingPeers ? 1.0 : 0.0) * buttonsMasterAlpha * navigationBackgroundAlpha)
+                    let alpha = (isSelectingPeers ? 1.0 : 0.0) * buttonsMasterAlpha * navigationBackgroundAlpha
+                    animatedTransition.setAlpha(view: navigationDoneButtonView, alpha: alpha)
+                    navigationDoneButtonView.accessibilityElementsHidden = alpha < 0.5
                 }
                 
                 let expansionDistance: CGFloat = 32.0
@@ -1181,6 +1187,8 @@ final class StorageUsageScreenComponent: Component {
                     self.addSubview(navigationEditButtonView)
                 }
                 transition.setFrame(view: navigationEditButtonView, frame: CGRect(origin: CGPoint(x: availableSize.width - 12.0 - environment.safeInsets.right - navigationEditButtonSize.width, y: environment.statusBarHeight), size: navigationEditButtonSize))
+                navigationEditButtonView.accessibilityLabel = environment.strings.Common_Edit
+                navigationEditButtonView.accessibilityTraits = .button
             }
             
             let navigationDoneButtonSize = self.navigationDoneButton.update(
@@ -1204,6 +1212,8 @@ final class StorageUsageScreenComponent: Component {
                     self.addSubview(navigationDoneButtonView)
                 }
                 transition.setFrame(view: navigationDoneButtonView, frame: CGRect(origin: CGPoint(x: availableSize.width - 12.0 - environment.safeInsets.right - navigationDoneButtonSize.width, y: environment.statusBarHeight), size: navigationDoneButtonSize))
+                navigationDoneButtonView.accessibilityLabel = environment.strings.Common_Done
+                navigationDoneButtonView.accessibilityTraits = .button
             }
             
             let navigationRightButtonMaxWidth: CGFloat = max(navigationEditButtonSize.width, navigationDoneButtonSize.width)
@@ -1518,6 +1528,7 @@ final class StorageUsageScreenComponent: Component {
             )
             let headerViewFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - headerViewSize.width) / 2.0), y: contentHeight), size: headerViewSize)
             if let headerComponentView = self.headerView.view {
+                setStorageUsageAccessibilityText(view: headerComponentView, text: headerText, isHeader: true)
                 if headerComponentView.superview == nil {
                     self.headerOffsetContainer.addSubview(headerComponentView)
                 }
@@ -1601,6 +1612,7 @@ final class StorageUsageScreenComponent: Component {
             )
             let headerDescriptionFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - headerDescriptionSize.width) / 2.0), y: contentHeight), size: headerDescriptionSize)
             if let headerDescriptionComponentView = self.headerDescriptionView.view {
+                setStorageUsageAccessibilityText(view: headerDescriptionComponentView, text: totalUsageText, isHeader: false)
                 if headerDescriptionComponentView.superview == nil {
                     self.scrollContainerView.addSubview(headerDescriptionComponentView)
                 }
@@ -1767,6 +1779,7 @@ final class StorageUsageScreenComponent: Component {
                 )
                 let categoriesDescriptionFrame = CGRect(origin: CGPoint(x: sideInset + 15.0, y: contentHeight), size: categoriesDescriptionSize)
                 if let categoriesDescriptionComponentView = self.categoriesDescriptionView.view {
+                    setStorageUsageAccessibilityText(view: categoriesDescriptionComponentView, text: environment.strings.StorageManagement_SectionsDescription, isHeader: false)
                     if categoriesDescriptionComponentView.superview == nil {
                         self.scrollContainerView.addSubview(categoriesDescriptionComponentView)
                     }
@@ -1798,6 +1811,7 @@ final class StorageUsageScreenComponent: Component {
                 )
                 let keepDurationTitleFrame = CGRect(origin: CGPoint(x: sideInset + 15.0, y: contentHeight), size: keepDurationTitleSize)
                 if let keepDurationTitleComponentView = self.keepDurationTitleView.view {
+                    setStorageUsageAccessibilityText(view: keepDurationTitleComponentView, text: environment.strings.StorageManagement_AutoremoveHeader, isHeader: true)
                     if keepDurationTitleComponentView.superview == nil {
                         self.scrollContainerView.addSubview(keepDurationTitleComponentView)
                     }
@@ -1905,6 +1919,7 @@ final class StorageUsageScreenComponent: Component {
                 )
                 let keepDurationDescriptionFrame = CGRect(origin: CGPoint(x: sideInset + 15.0, y: contentHeight), size: keepDurationDescriptionSize)
                 if let keepDurationDescriptionComponentView = self.keepDurationDescriptionView.view {
+                    setStorageUsageAccessibilityText(view: keepDurationDescriptionComponentView, text: environment.strings.StorageManagement_AutoremoveDescription, isHeader: false)
                     if keepDurationDescriptionComponentView.superview == nil {
                         self.scrollContainerView.addSubview(keepDurationDescriptionComponentView)
                     }
@@ -1931,6 +1946,7 @@ final class StorageUsageScreenComponent: Component {
                 )
                 let keepSizeTitleFrame = CGRect(origin: CGPoint(x: sideInset + 15.0, y: contentHeight), size: keepSizeTitleSize)
                 if let keepSizeTitleComponentView = self.keepSizeTitleView.view {
+                    setStorageUsageAccessibilityText(view: keepSizeTitleComponentView, text: environment.strings.Cache_MaximumCacheSize, isHeader: true)
                     if keepSizeTitleComponentView.superview == nil {
                         self.scrollContainerView.addSubview(keepSizeTitleComponentView)
                     }
@@ -1989,6 +2005,7 @@ final class StorageUsageScreenComponent: Component {
                 )
                 let keepSizeDescriptionFrame = CGRect(origin: CGPoint(x: sideInset + 15.0, y: contentHeight), size: keepSizeDescriptionSize)
                 if let keepSizeDescriptionComponentView = self.keepSizeDescriptionView.view {
+                    setStorageUsageAccessibilityText(view: keepSizeDescriptionComponentView, text: environment.strings.StorageManagement_AutoremoveSpaceDescription, isHeader: false)
                     if keepSizeDescriptionComponentView.superview == nil {
                         self.scrollContainerView.addSubview(keepSizeDescriptionComponentView)
                     }
@@ -3729,4 +3746,12 @@ private final class StorageUsageListContextExtractedContentSource: ContextExtrac
     func putBack() -> ContextControllerPutBackViewInfo? {
         return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: UIScreen.main.bounds)
     }
+}
+
+// VoiceOver: Text/MultilineTextComponent рисуются в view без доступности,
+// поэтому заголовки и пояснения экрана молчали. Markdown-разметку убираем.
+private func setStorageUsageAccessibilityText(view: UIView, text: String, isHeader: Bool) {
+    view.isAccessibilityElement = true
+    view.accessibilityLabel = text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "")
+    view.accessibilityTraits = isHeader ? [.staticText, .header] : .staticText
 }

@@ -1261,6 +1261,15 @@ public final class StoryPeerListComponent: Component {
                 
                 if let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View {
                     itemView.accessibilityExposedExternally = self.accessibilityItemsExposedExternally
+                    if peer.id == component.context.account.peerId {
+                        if itemView.accessibilityComposeAction == nil {
+                            itemView.accessibilityComposeAction = { [weak self] in
+                                self?.component?.composeAction(0.0)
+                            }
+                        }
+                    } else if itemView.accessibilityComposeAction != nil {
+                        itemView.accessibilityComposeAction = nil
+                    }
                     if itemView.superview == nil {
                         self.scrollContainerView.addSubview(itemView)
                         self.scrollContainerView.addSubview(itemView.backgroundContainer)
@@ -1402,6 +1411,15 @@ public final class StoryPeerListComponent: Component {
                 
                 if let itemView = visibleItem.view.view as? StoryPeerListItemComponent.View {
                     itemView.accessibilityExposedExternally = self.accessibilityItemsExposedExternally
+                    if peer.id == component.context.account.peerId {
+                        if itemView.accessibilityComposeAction == nil {
+                            itemView.accessibilityComposeAction = { [weak self] in
+                                self?.component?.composeAction(0.0)
+                            }
+                        }
+                    } else if itemView.accessibilityComposeAction != nil {
+                        itemView.accessibilityComposeAction = nil
+                    }
                     if itemView.superview == nil {
                         itemView.isUserInteractionEnabled = false
                         self.scrollContainerView.addSubview(itemView)

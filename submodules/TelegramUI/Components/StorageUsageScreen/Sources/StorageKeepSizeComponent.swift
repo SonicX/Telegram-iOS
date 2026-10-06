@@ -166,8 +166,34 @@ final class StorageKeepSizeComponent: Component {
                 }
                 transition.setFrame(view: sliderView, frame: CGRect(origin: CGPoint(x: floorToScreenPixels((availableSize.width - sliderSize.width) / 2.0), y: 41.0), size: sliderSize))
             }
+            
+            // VoiceOver: весь блок — один регулируемый элемент «Максимальный
+            // размер кэша, 5 ГБ»; свайп вверх/вниз переключает значение.
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = component.strings.Cache_MaximumCacheSize
+            self.accessibilityValue = stringForCacheSize(strings: component.strings, size: component.value)
+            self.accessibilityTraits = .adjustable
                         
             return CGSize(width: availableSize.width, height: height)
+        }
+        
+        private func adjustAccessibilityValue(by delta: Int) {
+            guard let component = self.component else {
+                return
+            }
+            let currentIndex = maximumCacheSizeValues.firstIndex(where: { $0 == component.value }) ?? 0
+            let newIndex = max(0, min(maximumCacheSizeValues.count - 1, currentIndex + delta))
+            if newIndex != currentIndex {
+                component.updateValue(maximumCacheSizeValues[newIndex])
+            }
+        }
+        
+        override func accessibilityIncrement() {
+            self.adjustAccessibilityValue(by: 1)
+        }
+        
+        override func accessibilityDecrement() {
+            self.adjustAccessibilityValue(by: -1)
         }
     }
     
