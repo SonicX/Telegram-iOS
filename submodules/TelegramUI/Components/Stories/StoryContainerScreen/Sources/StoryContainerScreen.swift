@@ -2210,6 +2210,8 @@ public class StoryContainerScreen: ViewControllerComponentContainer {
         self.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: [.portrait])
         
         self.context.sharedContext.hasPreloadBlockingContent.set(.single(true))
+        // VoiceOver: новый просмотр — заново объявляем автора первой истории.
+        StoryVoiceOverState.reset()
     }
     
     required public init(coder aDecoder: NSCoder) {

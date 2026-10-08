@@ -406,6 +406,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             // запись залочена), «Отправить». Возвращаем список даже пустым —
             // nil включил бы стандартный обход всех сабвью, включая поле.
             if self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState != nil {
+                // Таймер записи — первым: «Запись: 12 с» (обновляется на лету).
+                appendNode(self.audioRecordingTimeNode)
                 if let audioRecordingCancelIndicator = self.audioRecordingCancelIndicator, audioRecordingCancelIndicator.isDisplayingCancel, !audioRecordingCancelIndicator.isHidden, audioRecordingCancelIndicator.alpha > 0.01 {
                     elements.append(audioRecordingCancelIndicator)
                 }
@@ -1126,6 +1128,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         }
         self.mediaActionButtons.micButton.stopRecording = { [weak self] in
             if let strongSelf = self, let interfaceInteraction = strongSelf.interfaceInteraction {
+                strongSelf.announcePauseForAccessibility()
                 interfaceInteraction.stopMediaRecording()
                 
                 strongSelf.tooltipController?.dismiss()
@@ -1134,7 +1137,43 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.mediaActionButtons.micButton.updateLocked = { [weak self] _ in
             if let strongSelf = self, let interfaceInteraction = strongSelf.interfaceInteraction {
                 interfaceInteraction.lockMediaRecording()
+                if UIAccessibility.isVoiceOverRunning {
+                    UIAccessibility.post(notification: .announcement, argument: "Запись закреплена")
+                }
             }
+        }
+        // VoiceOver: «Начать запись» без удержания — запускаем запись и, как
+        // только рекордер появился, закрепляем её (тот же путь, что свайп вверх).
+        self.mediaActionButtons.accessibilityStartLockedRecording = { [weak self] in
+            guard let strongSelf = self, let interfaceInteraction = strongSelf.interfaceInteraction, let presentationInterfaceState = strongSelf.presentationInterfaceState else {
+                return
+            }
+            if presentationInterfaceState.inputTextPanelState.mediaRecordingState != nil {
+                return
+            }
+            var isVideo = false
+            if case .video = presentationInterfaceState.interfaceState.mediaRecordingMode {
+                isVideo = true
+            }
+            interfaceInteraction.beginMediaRecording(isVideo)
+            var attempts = 0
+            func lockWhenReady() {
+                guard let strongSelf = self, let interfaceInteraction = strongSelf.interfaceInteraction else {
+                    return
+                }
+                if let state = strongSelf.presentationInterfaceState?.inputTextPanelState.mediaRecordingState {
+                    if !state.isLocked {
+                        interfaceInteraction.lockMediaRecording()
+                    }
+                    UIAccessibility.post(notification: .announcement, argument: "Идёт запись. Пауза и отправка — в действиях на кнопке записи")
+                    return
+                }
+                attempts += 1
+                if attempts < 10 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: lockWhenReady)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: lockWhenReady)
         }
         self.mediaActionButtons.micButton.switchMode = { [weak self] in
             if let strongSelf = self, let interfaceInteraction = strongSelf.interfaceInteraction {
@@ -2770,15 +2809,16 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             
             switch mediaRecordingState {
             case let .audio(recorder, isLocked):
-                let hadAudioRecorder = self.mediaActionButtons.micButton.audioRecorder != nil
-                if !hadAudioRecorder, isLocked {
+                // Закрепляем кнопку, когда состояние залочено, а кнопка ещё нет:
+                // и при возобновлении записи (как раньше), и при VO-действии
+                // «Начать запись», где лок приходит ПОСЛЕ появления рекордера.
+                if isLocked, !self.mediaActionButtons.micButton.locked {
                     self.mediaActionButtons.micButton.lock()
                 }
                 self.mediaActionButtons.micButton.audioRecorder = recorder
                 audioRecordingTimeNode.audioRecorder = recorder
             case let .video(status, _):
-                let hadVideoRecorder = self.mediaActionButtons.micButton.videoRecordingStatus != nil
-                if !hadVideoRecorder, isLocked {
+                if isLocked, !self.mediaActionButtons.micButton.locked {
                     self.mediaActionButtons.micButton.lock()
                 }
                 switch status {
@@ -3577,12 +3617,59 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 mediaRecordingAccessibilityArea = AccessibilityAreaNode()
                 mediaRecordingAccessibilityArea.accessibilityLabel = text
                 mediaRecordingAccessibilityArea.accessibilityTraits = [.button, .startsMediaSession]
+                mediaRecordingAccessibilityArea.accessibilityHint = "Двойной тап — отправить. Пауза, закрепить, отменить — свайп вверх или вниз"
                 self.mediaRecordingAccessibilityArea = mediaRecordingAccessibilityArea
                 mediaRecordingAccessibilityArea.activate = { [weak self] in
                     if let self {
                         self.interfaceInteraction?.finishMediaRecording(.send(viewOnce: self.viewOnce))
                     }
                     return true
+                }
+                // VoiceOver: пауза/закрепление/отмена записи как VO-действия —
+                // кнопка «Стоп» над микрофоном и свайп вверх для незрячих
+                // труднодостижимы.
+                mediaRecordingAccessibilityArea.customActionsProvider = { [weak self] in
+                    guard let self, let state = self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState else {
+                        return []
+                    }
+                    var actions: [UIAccessibilityCustomAction] = []
+                    if state.isLocked {
+                        actions.append(UIAccessibilityCustomAction(name: "Пауза", actionHandler: { [weak self] _ in
+                            guard let self else {
+                                return false
+                            }
+                            self.announcePauseForAccessibility()
+                            self.interfaceInteraction?.stopMediaRecording()
+                            return true
+                        }))
+                    } else {
+                        actions.append(UIAccessibilityCustomAction(name: "Закрепить запись", actionHandler: { [weak self] _ in
+                            guard let self else {
+                                return false
+                            }
+                            self.interfaceInteraction?.lockMediaRecording()
+                            UIAccessibility.post(notification: .announcement, argument: "Запись закреплена")
+                            return true
+                        }))
+                    }
+                    actions.append(UIAccessibilityCustomAction(name: "Сколько записано", actionHandler: { [weak self] _ in
+                        guard let self else {
+                            return false
+                        }
+                        let duration = self.audioRecordingTimeNode?.currentTimestamp ?? 0.0
+                        UIAccessibility.post(notification: .announcement, argument: "Записано " + ChatTextInputAudioRecordingTimeNode.accessibilityDurationString(duration))
+                        return true
+                    }))
+                    actions.append(UIAccessibilityCustomAction(name: "Отменить запись", actionHandler: { [weak self] _ in
+                        guard let self else {
+                            return false
+                        }
+                        self.viewOnce = false
+                        self.audioRecordingRemoveAnimationState = .recordingToAttachButton
+                        self.interfaceInteraction?.finishMediaRecording(.dismiss)
+                        return true
+                    }))
+                    return actions
                 }
                 self.glassBackgroundContainer.contentView.insertSubview(mediaRecordingAccessibilityArea.view, aboveSubview: self.mediaActionButtons.view)
             }
@@ -3875,6 +3962,18 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     
     @objc private func recordMorePressed() {
         self.interfaceInteraction?.resumeMediaRecording()
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: "Запись продолжается")
+        }
+    }
+    
+    /// VoiceOver: при паузе озвучиваем, сколько уже записано.
+    private func announcePauseForAccessibility() {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        let duration = self.audioRecordingTimeNode?.currentTimestamp ?? 0.0
+        UIAccessibility.post(notification: .announcement, argument: "Пауза. Записано " + ChatTextInputAudioRecordingTimeNode.accessibilityDurationString(duration) + ". Продолжить — кнопка «Продолжить запись», отправить — кнопка «Отправить»")
     }
     
     private func displayViewOnceTooltip(text: String) {

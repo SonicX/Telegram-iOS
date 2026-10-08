@@ -334,22 +334,42 @@ public final class StoryItemSetContainerComponent: Component {
     final class AccessibleContentContainerView: UIView {
         var accessibilityNavigate: ((NavigationDirection) -> Void)?
         var accessibilityClose: (() -> Void)?
+        /// Видео: двойной тап ставит курсор на кнопку звука (true — обработано).
+        var accessibilityActivateOverride: (() -> Bool)?
         
         override func accessibilityIncrement() {
+            StoryVoiceOverState.markHintSpoken()
+            self.accessibilityHint = nil
             self.accessibilityNavigate?(.next)
         }
         
         override func accessibilityDecrement() {
+            StoryVoiceOverState.markHintSpoken()
+            self.accessibilityHint = nil
             self.accessibilityNavigate?(.previous)
         }
         
         override func accessibilityActivate() -> Bool {
-            // Двойной тап по центру для зрячих — «следующая»; оставляем так же.
+            StoryVoiceOverState.markHintSpoken()
+            self.accessibilityHint = nil
+            if let accessibilityActivateOverride = self.accessibilityActivateOverride, accessibilityActivateOverride() {
+                return true
+            }
+            // Фото: двойной тап по центру для зрячих — «следующая»; так же.
             guard let accessibilityNavigate = self.accessibilityNavigate else {
                 return false
             }
             accessibilityNavigate(.next)
             return true
+        }
+        
+        override func accessibilityElementDidLoseFocus() {
+            super.accessibilityElementDidLoseFocus()
+            // Подсказку прочитали (или пропустили) — больше не повторяем.
+            if self.accessibilityHint != nil {
+                StoryVoiceOverState.markHintSpoken()
+                self.accessibilityHint = nil
+            }
         }
         
         override func accessibilityPerformEscape() -> Bool {
@@ -484,6 +504,8 @@ public final class StoryItemSetContainerComponent: Component {
         let moreButton = ComponentView<Empty>()
         var currentSoundButtonState: Bool?
         let soundButton = ComponentView<Empty>()
+        /// VoiceOver: «Смотреть видео сначала» рядом с кнопкой звука (только видео).
+        let replayAccessibilityButton = StoryAccessibilityButtonView()
         var privacyIcon: ComponentView<Empty>?
         var pictureInPictureIcon: ComponentView<Empty>?
         
@@ -4200,8 +4222,26 @@ public final class StoryItemSetContainerComponent: Component {
                 transition.setAlpha(view: soundButtonView, alpha: soundAlpha)
                 // Метка по состоянию: со звуком — «Выключить звук», без — «Включить».
                 soundButtonView.isAccessibilityElement = soundAlpha > 0.01
-                soundButtonView.accessibilityLabel = soundButtonState ? component.strings.Conversation_Unmute : component.strings.Conversation_Mute
+                // VoiceOver: кнопка звука есть только у видео — говорим об этом,
+                // сюда же ставит курсор двойной тап по видео-истории.
+                soundButtonView.accessibilityLabel = "\(component.strings.Message_Video). " + (soundButtonState ? component.strings.Conversation_Unmute : component.strings.Conversation_Mute)
+                soundButtonView.accessibilityHint = soundButtonState ? "Двойной тап — включить звук, чтобы прослушать видео" : nil
                 soundButtonView.accessibilityTraits = .button
+                soundButtonView.accessibilityCustomActions = isVideo ? [self.makeReplayAccessibilityAction()] : nil
+                
+                // Кнопка «Сначала» для VO: прозрачная, касания не перехватывает,
+                // стоит сразу за кнопкой звука в порядке обхода.
+                if self.replayAccessibilityButton.superview !== self.controlsClippingView {
+                    self.controlsClippingView.addSubview(self.replayAccessibilityButton)
+                    self.replayAccessibilityButton.accessibilityLabel = "Смотреть видео сначала"
+                    self.replayAccessibilityButton.activate = { [weak self] in
+                        self?.replayCurrentVideoForAccessibility()
+                    }
+                }
+                self.controlsClippingView.insertSubview(self.replayAccessibilityButton, aboveSubview: soundButtonView)
+                self.replayAccessibilityButton.frame = CGRect(origin: CGPoint(x: headerRightOffset - soundButtonSize.width, y: 2.0 + soundButtonSize.height * 0.5), size: CGSize(width: soundButtonSize.width, height: soundButtonSize.height * 0.5))
+                self.replayAccessibilityButton.isAccessibilityElement = isVideo && soundAlpha > 0.01
+                self.replayAccessibilityButton.accessibilityElementsHidden = !(isVideo && soundAlpha > 0.01)
                 
                 if isVideo {
                     headerRightOffset -= soundButtonSize.width + 13.0
@@ -5584,6 +5624,21 @@ public final class StoryItemSetContainerComponent: Component {
             })
         }
         
+        fileprivate func replayCurrentVideoForAccessibility() {
+            self.rewindCurrentItem()
+            UIAccessibility.post(notification: .announcement, argument: "Видео с начала")
+        }
+        
+        fileprivate func makeReplayAccessibilityAction() -> UIAccessibilityCustomAction {
+            return UIAccessibilityCustomAction(name: "Сначала", actionHandler: { [weak self] _ in
+                guard let self else {
+                    return false
+                }
+                self.replayCurrentVideoForAccessibility()
+                return true
+            })
+        }
+        
         private func updateContentAccessibility(visibleItem: VisibleItem, item: StoryContentItem, isCentral: Bool) {
             guard let component = self.component else {
                 return
@@ -5596,12 +5651,24 @@ public final class StoryItemSetContainerComponent: Component {
                 contentView.accessibilityClose = nil
                 return
             }
-            var labelParts: [String] = []
+            var isVideo = false
             if case .file = item.storyItem.media {
-                labelParts.append(component.strings.Message_Video)
-            } else {
-                labelParts.append(component.strings.Message_Photo)
+                isVideo = true
             }
+            
+            // Смена автора при листании: первая история нового автора
+            // начинается с «Истории от <имя>».
+            let peer = component.slice.peer
+            if StoryVoiceOverState.lastAnnouncedPeerId != peer.id {
+                StoryVoiceOverState.lastAnnouncedPeerId = peer.id
+                StoryVoiceOverState.authorAnnouncementItemId = item.id
+            }
+            
+            var labelParts: [String] = []
+            if StoryVoiceOverState.authorAnnouncementItemId == item.id {
+                labelParts.append("Истории от \(peer.compactDisplayTitle)")
+            }
+            labelParts.append(isVideo ? component.strings.Message_Video : component.strings.Message_Photo)
             if let position = item.position, component.slice.totalCount > 1 {
                 labelParts.append("история \(position + 1) из \(component.slice.totalCount)")
             }
@@ -5609,8 +5676,37 @@ public final class StoryItemSetContainerComponent: Component {
                 labelParts.append(item.storyItem.text)
             }
             contentView.accessibilityLabel = labelParts.joined(separator: ", ")
-            contentView.accessibilityHint = "Свайп вверх или вниз — следующая или предыдущая история"
+            // Инструкция — только один раз (запоминается на устройстве).
+            if StoryVoiceOverState.isHintSpoken {
+                contentView.accessibilityHint = nil
+            } else {
+                contentView.accessibilityHint = "Свайп вверх или вниз — следующая или предыдущая история. В видео двойной тап — перейти к кнопке звука."
+            }
             contentView.accessibilityTraits = .adjustable
+            contentView.accessibilityCustomActions = isVideo ? [self.makeReplayAccessibilityAction()] : nil
+            if isVideo {
+                contentView.accessibilityActivateOverride = { [weak self] in
+                    guard let self, let soundButtonView = self.soundButton.view, soundButtonView.isAccessibilityElement else {
+                        return false
+                    }
+                    UIAccessibility.post(notification: .layoutChanged, argument: soundButtonView)
+                    return true
+                }
+            } else {
+                contentView.accessibilityActivateOverride = nil
+            }
+            
+            // Новая история (листание, автопереход после видео, другой автор):
+            // ставим курсор на неё, чтобы VO её прочитал.
+            if UIAccessibility.isVoiceOverRunning, StoryVoiceOverState.lastCentralItemId != item.id {
+                StoryVoiceOverState.lastCentralItemId = item.id
+                DispatchQueue.main.async { [weak contentView] in
+                    guard let contentView, contentView.window != nil, contentView.isAccessibilityElement else {
+                        return
+                    }
+                    UIAccessibility.post(notification: .layoutChanged, argument: contentView)
+                }
+            }
             contentView.accessibilityNavigate = { [weak self] direction in
                 self?.component?.navigate(direction)
             }
@@ -7910,4 +8006,59 @@ private func optionsRateImage(rate: String, isLarge: Bool, color: UIColor = .whi
 
         UIGraphicsPopContext()
     })
+}
+
+/// VoiceOver-кнопка без визуала: зрячим не видна (фон прозрачный), касания
+/// проходят сквозь (hitTest -> nil), VO активирует через accessibilityActivate.
+final class StoryAccessibilityButtonView: UIView {
+    var activate: (() -> Void)?
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.backgroundColor = .clear
+        self.accessibilityTraits = .button
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        return nil
+    }
+    
+    override func accessibilityActivate() -> Bool {
+        guard let activate = self.activate else {
+            return false
+        }
+        activate()
+        return true
+    }
+}
+
+/// VoiceOver-состояние просмотра историй, общее для всех авторов (у каждого
+/// автора свой StoryItemSetContainerComponent). Сбрасывается при открытии
+/// просмотра (StoryContainerScreen.init), кроме флага подсказки.
+enum StoryVoiceOverState {
+    private static let hintSpokenKey = "SG.VoiceOver.StoryNavigationHintSpoken"
+    
+    static var lastAnnouncedPeerId: EnginePeer.Id?
+    static var authorAnnouncementItemId: StoryId?
+    static var lastCentralItemId: StoryId?
+    
+    static var isHintSpoken: Bool {
+        return UserDefaults.standard.bool(forKey: hintSpokenKey)
+    }
+    
+    static func markHintSpoken() {
+        if !isHintSpoken {
+            UserDefaults.standard.set(true, forKey: hintSpokenKey)
+        }
+    }
+    
+    static func reset() {
+        lastAnnouncedPeerId = nil
+        authorAnnouncementItemId = nil
+        lastCentralItemId = nil
+    }
 }

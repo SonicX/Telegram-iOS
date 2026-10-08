@@ -4519,6 +4519,63 @@ extension ChatControllerImpl {
                 }))
             }
 
+            // «Оставить комментарий» / «N комментариев» / «Просмотреть ответ».
+            // Тестировщики: «пункт оставить комментарий пропал из меню» — в
+            // f4ee0516ef его убрали в расчёте на кнопку-футер под постом, но в
+            // истории VO ходит по сообщениям целиком (пуловые элементы ListView)
+            // и до футера не доходит. Условия — как в hasCommentButton(item:).
+            var commentsTitle: String?
+            if message.id.peerId.isReplies {
+                commentsTitle = strings.Conversation_ViewReply
+            } else if message.adAttribute == nil, let channel = message.peers[message.id.peerId] as? TelegramChannel, case let .broadcast(info) = channel.info, info.flags.contains(.hasDiscussionGroup) {
+                var isThreadHead = false
+                if case let .replyThread(replyThreadMessage) = strongSelf.chatLocation, replyThreadMessage.effectiveTopId == message.id {
+                    isThreadHead = true
+                }
+                var isPinnedMessages = false
+                if case .pinnedMessages = strongSelf.subject {
+                    isPinnedMessages = true
+                }
+                if !isThreadHead, !isPinnedMessages {
+                    var canComment = message.id.namespace == Namespaces.Message.Local
+                    var commentCount: Int32 = 0
+                    for attribute in message.attributes {
+                        if let attribute = attribute as? ReplyThreadMessageAttribute, attribute.commentsPeerId != nil {
+                            canComment = true
+                            commentCount = attribute.count
+                            break
+                        }
+                    }
+                    if canComment {
+                        if commentCount > 0 {
+                            var commentsPart = strings.Conversation_MessageViewComments(commentCount)
+                            if let startIndex = commentsPart.firstIndex(of: "["), let endIndex = commentsPart.firstIndex(of: "]") {
+                                commentsPart.removeSubrange(startIndex ... endIndex)
+                            } else {
+                                commentsPart = commentsPart.trimmingCharacters(in: CharacterSet(charactersIn: "0123456789-,. "))
+                            }
+                            commentsTitle = strings.Conversation_MessageViewCommentsFormat("\(commentCount)", commentsPart).string
+                        } else {
+                            commentsTitle = strings.Conversation_MessageLeaveComment
+                        }
+                    }
+                }
+            }
+            if let commentsTitle {
+                result.append((commentsTitle, { [weak self] in
+                    guard let strongSelf = self else {
+                        return
+                    }
+                    if message.id.peerId.isReplies {
+                        strongSelf.controllerInteraction?.openReplyThreadOriginalMessage(message)
+                    } else {
+                        // displayModalProgress: true — индикатор загрузки треда,
+                        // иначе для VO «ничего не происходит» (см. бабл, .comments).
+                        strongSelf.controllerInteraction?.openMessageReplies(message.id, true, true)
+                    }
+                }))
+            }
+
             if !message.text.isEmpty, !copyProtected, !isAction {
                 result.append((strings.Conversation_ContextMenuCopy, { [weak self] in
                     guard let strongSelf = self else {
@@ -4550,6 +4607,21 @@ extension ChatControllerImpl {
             if !isAction, !isSendFailedOrUnsent, message.id.namespace == Namespaces.Message.Cloud, message.id.peerId.namespace != Namespaces.Peer.SecretChat, !copyProtected {
                 result.append((strings.Conversation_ContextMenuForward, { [weak self] in
                     self?.interfaceInteraction?.forwardMessages([message], nil)
+                }))
+            }
+
+            // «Поделиться» — системное меню (UIActivityViewController) со
+            // сторонними приложениями: текст, медиа или ссылка на пост.
+            // Сразу внешнее меню, без Telegram-шторки выбора чатов.
+            if !isAction, !isSendFailedOrUnsent, message.id.peerId.namespace != Namespaces.Peer.SecretChat, !copyProtected {
+                result.append((strings.Conversation_ContextMenuShare, { [weak self] in
+                    guard let strongSelf = self else {
+                        return
+                    }
+                    strongSelf.commitPurposefulAction()
+                    let shareController = ShareController(context: strongSelf.context, subject: .messages([message]), externalShare: true, immediateExternalShare: true, immediateExternalShareOverridingSGBehaviour: true, updatedPresentationData: strongSelf.updatedPresentationData)
+                    strongSelf.chatDisplayNode.dismissInput()
+                    strongSelf.present(shareController, in: .window(.root))
                 }))
             }
 

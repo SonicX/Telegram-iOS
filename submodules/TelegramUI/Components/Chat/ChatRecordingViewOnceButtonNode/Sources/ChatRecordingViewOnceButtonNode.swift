@@ -31,6 +31,16 @@ public final class ChatRecordingViewOnceButtonNode: HighlightTrackingButtonNode 
         self.view.addSubview(self.backgroundView)
         self.view.addSubview(self.iconView)
         
+        // VoiceOver: кнопки над микрофоном были без подписей.
+        self.isAccessibilityElement = true
+        self.accessibilityTraits = .button
+        switch icon {
+        case .viewOnce:
+            self.accessibilityLabel = "Однократное прослушивание"
+        case .recordMore:
+            self.accessibilityLabel = "Продолжить запись"
+        }
+        
         self.highligthedChanged = { [weak self] highlighted in
             if let self, self.bounds.width > 0.0 {
                 let topScale: CGFloat = (self.bounds.width - 8.0) / self.bounds.width
@@ -64,6 +74,9 @@ public final class ChatRecordingViewOnceButtonNode: HighlightTrackingButtonNode 
         
         let updated = self.iconView.image == nil || self.innerIsSelected != isSelected
         self.innerIsSelected = isSelected
+        if case .viewOnce = self.icon {
+            self.accessibilityValue = isSelected ? "включено" : "выключено"
+        }
         
         self.iconView.tintColor = theme.chat.inputPanel.panelControlColor
         self.iconView.setMonochromaticEffect(tintColor: self.iconView.tintColor)

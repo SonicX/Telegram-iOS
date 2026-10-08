@@ -27,6 +27,41 @@ public final class ChatTextInputAudioRecordingTimeNode: ASDisplayNode {
     private var timestamp: Double = 0.0 {
         didSet {
             self.setNeedsDisplay()
+            self.updateAccessibilityLabel()
+        }
+    }
+    
+    /// Текущая длительность записи, с (для озвучки паузы/отправки).
+    public var currentTimestamp: Double {
+        return self.timestamp
+    }
+    
+    /// VoiceOver: «Запись: 1 мин 5 с». Элемент с updatesFrequently — VO
+    /// перечитывает значение, пока курсор стоит на таймере.
+    public static func accessibilityDurationString(_ timestamp: Double) -> String {
+        let seconds = Int(timestamp)
+        if seconds >= 3600 {
+            return "\(seconds / 3600) ч \(seconds / 60 % 60) мин \(seconds % 60) с"
+        } else if seconds >= 60 {
+            return "\(seconds / 60) мин \(seconds % 60) с"
+        }
+        return "\(seconds) с"
+    }
+    
+    private var lastAccessibilitySeconds: Int = -1
+    private func updateAccessibilityLabel() {
+        let seconds = Int(self.timestamp)
+        if seconds == self.lastAccessibilitySeconds {
+            return
+        }
+        self.lastAccessibilitySeconds = seconds
+        let label = "Запись: " + ChatTextInputAudioRecordingTimeNode.accessibilityDurationString(self.timestamp)
+        if Thread.isMainThread {
+            self.accessibilityLabel = label
+        } else {
+            Queue.mainQueue().async { [weak self] in
+                self?.accessibilityLabel = label
+            }
         }
     }
     private let stateDisposable = MetaDisposable()
@@ -99,6 +134,9 @@ public final class ChatTextInputAudioRecordingTimeNode: ASDisplayNode {
         self.textNode = TextNode()
         super.init()
         self.isOpaque = false
+        self.isAccessibilityElement = true
+        self.accessibilityTraits = [.staticText, .updatesFrequently]
+        self.accessibilityLabel = "Запись: 0 с"
     }
     
     deinit {

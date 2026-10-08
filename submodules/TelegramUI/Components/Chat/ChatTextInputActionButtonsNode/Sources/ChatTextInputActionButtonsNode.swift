@@ -435,6 +435,10 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         return innerSize
     }
     
+    /// VoiceOver: действие «Начать запись» — запись без удержания пальца,
+    /// сразу закреплённая (как после свайпа вверх). Задаёт панель ввода.
+    public var accessibilityStartLockedRecording: (() -> Void)?
+    
     public func updateAccessibility() {
         self.accessibilityTraits = .button
         if !self.micButton.alpha.isZero {
@@ -446,9 +450,21 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
                     self.accessibilityLabel = self.strings.VoiceOver_Chat_RecordModeVideoMessage
                     self.accessibilityHint = self.strings.VoiceOver_Chat_RecordModeVideoMessageInfo
             }
+            if self.accessibilityStartLockedRecording != nil {
+                self.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "Начать запись", actionHandler: { [weak self] _ in
+                    guard let self, let accessibilityStartLockedRecording = self.accessibilityStartLockedRecording else {
+                        return false
+                    }
+                    accessibilityStartLockedRecording()
+                    return true
+                })]
+            } else {
+                self.accessibilityCustomActions = nil
+            }
         } else {
             self.accessibilityLabel = self.strings.MediaPicker_Send
             self.accessibilityHint = nil
+            self.accessibilityCustomActions = nil
         }
     }
     
