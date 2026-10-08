@@ -775,6 +775,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             accessibilityInclusionRect = visibleRect.insetBy(dx: 0.0, dy: -max(visibleRect.height, 1.0))
         }
         let poolClipScreenFrame = self.accessibilityClippingFrameInScreenCoordinates()
+        if trackDirectionalFocus {
+            self.remapDirectionalElementPoolToCurrentIndices()
+        }
         self.forEachItemNode({ node in
             if trackDirectionalFocus {
                 guard let itemNode = node as? ListViewItemNode, let itemIndex = itemNode.index else {
@@ -7914,6 +7917,59 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return true
     }
 
+    /// Пул пуловых VO-элементов ключуется ПОЗИЦИЕЙ (`itemNode.index`), а
+    /// история чата — скользящее окно: подгрузка старых сообщений, обрезка
+    /// новых, приход нового сообщения сдвигают индексы. Элемент, который VO
+    /// держит как «текущий», оставался под старым ключом и начинал означать
+    /// ДРУГОЕ сообщение — следующий свайп уходил на соседа уже от него
+    /// (лог: JUMP skipped=2 при сдвиге окна 78→78, skipped=12/15 при 44→86).
+    /// Перед каждой сборкой массива переносим элементы под текущий индекс
+    /// их `sourceView` (вьюшка строки стабильна, пока строка материализована)
+    /// — объект, который держит VO, остаётся привязанным к тому же сообщению.
+    private func remapDirectionalElementPoolToCurrentIndices() {
+        if self.accessibilityDirectionalElementPool.isEmpty {
+            return
+        }
+        var viewToIndex: [ObjectIdentifier: Int] = [:]
+        self.forEachItemNode({ node in
+            if let itemNode = node as? ListViewItemNode, let index = itemNode.index, itemNode.isNodeLoaded {
+                viewToIndex[ObjectIdentifier(itemNode.view)] = index
+            }
+        })
+        if viewToIndex.isEmpty {
+            return
+        }
+        var moved: [Int: [FocusTrackingAccessibilityElement]] = [:]
+        var movedCount = 0
+        for (key, elements) in self.accessibilityDirectionalElementPool {
+            guard let sourceView = elements.first?.sourceView, let currentIndex = viewToIndex[ObjectIdentifier(sourceView)] else {
+                continue
+            }
+            if currentIndex != key {
+                moved[currentIndex] = elements
+                movedCount += 1
+            }
+        }
+        if moved.isEmpty {
+            return
+        }
+        for (key, elements) in self.accessibilityDirectionalElementPool where moved[key] == nil {
+            // Старый ключ переехавшей записи освобождаем; не переехавшие
+            // записи с чужим ключом (их строка ушла) уступают место переехавшим.
+            if let sourceView = elements.first?.sourceView, let currentIndex = viewToIndex[ObjectIdentifier(sourceView)], currentIndex != key {
+                continue
+            }
+            moved[key] = elements
+        }
+        for (key, elements) in moved {
+            for element in elements {
+                element.pinnedLocalIndex = key
+            }
+        }
+        self.accessibilityDirectionalElementPool = moved
+        voDiagLog("[VO-DIAG][POOL] remapped=\(movedCount) pool=\(moved.count)")
+    }
+    
     public func reuseOrCreateDirectionalElement(localIndex: Int, childOrder: Int, sourceView: UIView) -> FocusTrackingAccessibilityElement {
         var elements = self.accessibilityDirectionalElementPool[localIndex] ?? []
         while elements.count <= childOrder {
