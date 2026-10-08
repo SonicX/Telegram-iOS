@@ -1087,11 +1087,11 @@ private func settingsItems(showProfileId: Bool, data: PeerInfoScreenData?, conte
     
     let sgWebSettings = context.currentAppConfiguration.with({ $0 }).sgWebSettings
     if sgWebSettings.global.paymentsEnabled || context.sharedContext.immediateSGStatus.status > 1 {
-        items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 0, label: swiftgramProLabel, text: "Swiftgram Pro", icon: PresentationResourcesSettings.swiftgramPro, action: {
+        items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 0, label: swiftgramProLabel, text: "OpenGram Pro", icon: PresentationResourcesSettings.swiftgramPro, action: {
             interaction.openSettings(.swiftgramPro)
         }))
     }
-    items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 1, label: swiftgramLabel, text: "Swiftgram", icon: PresentationResourcesSettings.swiftgram, action: {
+    items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 1, label: swiftgramLabel, text: "OpenGram", icon: PresentationResourcesSettings.swiftgram, action: {
         interaction.openSettings(.swiftgram)
     }))
 
@@ -14752,7 +14752,7 @@ public final class PeerInfoScreenImpl: ViewController, PeerInfoScreen, KeyShortc
 
         // MARK: Swiftgram
         #if DEBUG
-        items.append(.action(ContextMenuActionItem(text: "Swiftgram Debug", icon: { theme in
+        items.append(.action(ContextMenuActionItem(text: "OpenGram Debug", icon: { theme in
             return generateTintedImage(image: nil, color: theme.contextMenu.primaryColor)
         }, action: { [weak self] _, f in
             guard let self = self else {
@@ -15928,7 +15928,7 @@ extension PeerInfoScreenImpl {
 
         // MARK: Swiftgram
         #if DEBUG
-        items.append(.action(ContextMenuActionItem(text: "Swiftgram Debug", icon: { theme in
+        items.append(.action(ContextMenuActionItem(text: "OpenGram Debug", icon: { theme in
             return generateTintedImage(image: nil, color: theme.contextMenu.primaryColor)
         }, action: { [weak self] _, f in
             guard let self = self else {
