@@ -1085,12 +1085,11 @@ private func settingsItems(showProfileId: Bool, data: PeerInfoScreenData?, conte
     }
     
     
-    let sgWebSettings = context.currentAppConfiguration.with({ $0 }).sgWebSettings
-    if sgWebSettings.global.paymentsEnabled || context.sharedContext.immediateSGStatus.status > 1 {
-        items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 0, label: swiftgramProLabel, text: "OpenGram Pro", icon: PresentationResourcesSettings.swiftgramPro, action: {
-            interaction.openSettings(.swiftgramPro)
-        }))
-    }
+    // OpenGram: встроенных покупок нет (SG_CONFIG.iaps пуст) — раздел «Pro»
+    // с экраном покупки не показываем, иначе проверяющий App Store увидит
+    // пустой paywall. Условие Swiftgram (paymentsEnabled/status) здесь
+    // срабатывало, поэтому отключено явно.
+    let _ = swiftgramProLabel
     items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 1, label: swiftgramLabel, text: "OpenGram", icon: PresentationResourcesSettings.swiftgram, action: {
         interaction.openSettings(.swiftgram)
     }))
