@@ -1090,6 +1090,7 @@ private func settingsItems(showProfileId: Bool, data: PeerInfoScreenData?, conte
     // пустой paywall. Условие Swiftgram (paymentsEnabled/status) здесь
     // срабатывало, поэтому отключено явно.
     let _ = swiftgramProLabel
+    let sgWebSettings = context.currentAppConfiguration.with({ $0 }).sgWebSettings
     items[.swiftgram]!.append(PeerInfoScreenDisclosureItem(id: 1, label: swiftgramLabel, text: "OpenGram", icon: PresentationResourcesSettings.swiftgram, action: {
         interaction.openSettings(.swiftgram)
     }))
