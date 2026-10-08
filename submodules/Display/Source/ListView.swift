@@ -1105,6 +1105,45 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         ) { [weak self] notification in
             self?.handleSystemAccessibilityFocusNotification(notification)
         }
+        self.accessibilityAppStateObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            if self.accessibilityFocusIsCurrentlyInList, let index = self.accessibilityLastSystemFocusedIndex {
+                self.accessibilityFocusIndexBeforeResign = index
+                self.accessibilityFocusSignatureBeforeResign = self.accessibilityLastSystemFocusedSignature
+            } else {
+                self.accessibilityFocusIndexBeforeResign = nil
+                self.accessibilityFocusSignatureBeforeResign = nil
+            }
+        })
+        self.accessibilityAppStateObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, UIAccessibility.isVoiceOverRunning, let savedIndex = self.accessibilityFocusIndexBeforeResign else {
+                return
+            }
+            guard self.isNodeLoaded, self.view.window != nil, !self.isHidden, self.alpha > 0.01 else {
+                return
+            }
+            self.accessibilityForegroundRestoreUntil = CACurrentMediaTime() + 5.0
+            self.accessibilityForegroundRestoreAttempts = 0
+            voDiagLog("[VO-DIAG][FG] restore-window-open savedIndex=\(savedIndex)")
+            // Страховка: если iOS после возврата вообще не тронет наш список
+            // (курсор уйдёт в навбар), сами вернём его на прежнюю строку.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+                guard let self, CACurrentMediaTime() < self.accessibilityForegroundRestoreUntil, self.accessibilityForegroundRestoreAttempts == 0 else {
+                    return
+                }
+                self.restoreAccessibilityFocusAfterForeground(reason: "fallback")
+            }
+        })
     }
     
     deinit {
@@ -1125,6 +1164,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             
             self.waitingForNodesDisposable.dispose()
             self.reorderFeedbackDisposable?.dispose()
+            for observer in self.accessibilityAppStateObservers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            self.accessibilityAppStateObservers.removeAll()
             if let accessibilityElementFocusedObserver = self.accessibilityElementFocusedObserver {
                 NotificationCenter.default.removeObserver(accessibilityElementFocusedObserver)
                 self.accessibilityElementFocusedObserver = nil
@@ -5927,6 +5970,16 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     private var accessibilityAutoAdvanceInProgress = false
     private var accessibilityLastCenteredElementIdentifier: ObjectIdentifier?
     private var accessibilityElementFocusedObserver: NSObjectProtocol?
+    // Возврат из фона (блокировка телефона): iOS ставит курсор VO на ПЕРВЫЙ
+    // элемент экрана — в истории чата это самое старое загруженное сообщение
+    // далеко за верхней кромкой, и наш scroll-to-focused утаскивал ленту туда
+    // (лог: focus idx=43 y=-7305 → JUMP back skipped=41). Запоминаем, где был
+    // курсор перед уходом в фон, и после возврата ставим его обратно.
+    private var accessibilityAppStateObservers: [NSObjectProtocol] = []
+    private var accessibilityFocusIndexBeforeResign: Int?
+    private var accessibilityFocusSignatureBeforeResign: String?
+    private var accessibilityForegroundRestoreUntil: CFTimeInterval = 0.0
+    private var accessibilityForegroundRestoreAttempts: Int = 0
     private var accessibilityLastSystemFocusedSignature: String?
     private var accessibilityLastSystemFocusedSourceViewIdentifier: ObjectIdentifier?
     private var accessibilityLastSystemFocusedIndex: Int?
@@ -6780,6 +6833,22 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // Remember where (vertically, on screen) the focused element sits so
         // the forward-escape redirect can tell a "swipe past the newest
         // message" (bottom) from a "swipe before the oldest message" (top).
+        if let savedIndex = self.accessibilityFocusIndexBeforeResign {
+            // Фокус после возврата из фона. iOS может ПОВТОРНО (через ~0.3с
+            // после нашего поста) посадить курсор на первый элемент — окно
+            // держим открытым и возвращаем курсор, пока он не встанет на
+            // прежнюю строку (или не кончатся попытки/время). К навязанному
+            // элементу НЕ скроллим.
+            if CACurrentMediaTime() < self.accessibilityForegroundRestoreUntil, toIndex != savedIndex, self.accessibilityForegroundRestoreAttempts < 4 {
+                voDiagLog("[VO-DIAG][FG] redirect from=\(toIndex) to=\(savedIndex) attempt=\(self.accessibilityForegroundRestoreAttempts + 1)")
+                self.restoreAccessibilityFocusAfterForeground(reason: "system-focus")
+                return
+            }
+            voDiagLog("[VO-DIAG][FG] window-close index=\(toIndex) saved=\(savedIndex) attempts=\(self.accessibilityForegroundRestoreAttempts)")
+            self.accessibilityForegroundRestoreUntil = 0.0
+            self.accessibilityFocusIndexBeforeResign = nil
+            self.accessibilityFocusSignatureBeforeResign = nil
+        }
         self.accessibilityLastFocusedScreenMidY = focusedData.frame.isNull ? nil : focusedData.frame.midY
         self.accessibilityLastSystemFocusedIndex = toIndex
         self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
@@ -7492,6 +7561,19 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
     }
 
+    private func restoreAccessibilityFocusAfterForeground(reason: String) {
+        guard let savedIndex = self.accessibilityFocusIndexBeforeResign else {
+            return
+        }
+        self.accessibilityForegroundRestoreAttempts += 1
+        if let signature = self.accessibilityFocusSignatureBeforeResign {
+            self.accessibilityLastSystemFocusedSignature = signature
+        }
+        self.accessibilityLastSystemFocusedIndex = savedIndex
+        voDiagLog("[VO-DIAG][FG] restore reason=\(reason) index=\(savedIndex)")
+        self.recoverAccessibilityFocusToList(aroundIndex: savedIndex, reason: "foreground-\(reason)")
+    }
+    
     private func recoverAccessibilityFocusToList(aroundIndex: Int?, reason: String) {
         guard !self.accessibilityRecoveryInProgress else {
             return
