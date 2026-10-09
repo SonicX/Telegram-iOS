@@ -271,3 +271,7 @@
 "Settings.NY.Style.snow" = "Снег";
 "Settings.NY.Style.lightning" = "Молнии";
 "Settings.NY.Notice" = "Доступны только на ограниченное время!";
+
+"VoiceOver.Story.Like" = "Поставить лайк";
+"VoiceOver.Story.Liked" = "Лайк поставлен";
+"VoiceOver.Message.RepostToStory" = "Опубликовать в истории";

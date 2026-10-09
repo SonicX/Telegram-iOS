@@ -93,26 +93,14 @@ func chatShareToSavedMessagesAdditionalView(_ chatController: ChatControllerImpl
 }
 
 extension ChatControllerImpl {
-    func openMessageShareMenu(id: EngineMessage.Id) {
-        guard let messages = self.chatDisplayNode.historyNode.messageGroupInCurrentHistoryView(id), let message = messages.first else {
-            return
+    /// Можно ли опубликовать сообщение в свою историю (репост поста канала):
+    /// те же условия, что у плитки «Репост в историю» в шторке «Поделиться».
+    /// Используется и VoiceOver-действием «Опубликовать в истории».
+    func canRepostMessageToStory(_ message: Message) -> Bool {
+        guard case .peer = self.presentationInterfaceState.chatLocation, let channel = message.peers[message.id.peerId] as? TelegramChannel, case .broadcast = channel.info else {
+            return false
         }
-
-        let chatPresentationInterfaceState = self.presentationInterfaceState
-        var warnAboutPrivate = false
-        var canShareToStory = false
-        if case .peer = chatPresentationInterfaceState.chatLocation, let channel = message.peers[message.id.peerId] as? TelegramChannel {
-            if case .broadcast = channel.info {
-                canShareToStory = true
-            }
-            if channel.addressName == nil {
-                warnAboutPrivate = true
-            }
-        }
-        let shareController = ShareController(context: self.context, subject: .messages(messages), updatedPresentationData: self.updatedPresentationData, shareAsLink: true)
-        shareController.parentNavigationController = self.navigationController as? NavigationController
-        
-        if let message = messages.first, message.media.contains(where: { media in
+        if message.media.contains(where: { media in
             if media is TelegramMediaContact || media is TelegramMediaPoll || media is TelegramMediaTodo {
                 return true
             } else if let file = media as? TelegramMediaFile, file.isSticker || file.isAnimatedSticker || file.isVideoSticker {
@@ -121,11 +109,37 @@ extension ChatControllerImpl {
                 return false
             }
         }) {
-            canShareToStory = false
+            return false
         }
         if message.text.containsOnlyEmoji {
-            canShareToStory = false
+            return false
         }
+        return true
+    }
+
+    /// Открывает редактор публикации сообщения (с его альбомом) в историю.
+    func openRepostMessageToStory(_ message: Message) {
+        let messages = self.chatDisplayNode.historyNode.messageGroupInCurrentHistoryView(message.id) ?? [message]
+        let controller = self.context.sharedContext.makeStorySharingScreen(context: self.context, subject: .messages(messages), parentController: self)
+        self.push(controller)
+    }
+
+    func openMessageShareMenu(id: EngineMessage.Id) {
+        guard let messages = self.chatDisplayNode.historyNode.messageGroupInCurrentHistoryView(id), let message = messages.first else {
+            return
+        }
+
+        let chatPresentationInterfaceState = self.presentationInterfaceState
+        var warnAboutPrivate = false
+        if case .peer = chatPresentationInterfaceState.chatLocation, let channel = message.peers[message.id.peerId] as? TelegramChannel {
+            if channel.addressName == nil {
+                warnAboutPrivate = true
+            }
+        }
+        let shareController = ShareController(context: self.context, subject: .messages(messages), updatedPresentationData: self.updatedPresentationData, shareAsLink: true)
+        shareController.parentNavigationController = self.navigationController as? NavigationController
+        
+        let canShareToStory = self.canRepostMessageToStory(message)
         
         if canShareToStory {
             shareController.shareStory = { [weak self] in

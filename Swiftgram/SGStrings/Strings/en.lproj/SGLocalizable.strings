@@ -271,3 +271,7 @@
 "Settings.NY.Style.snow" = "Snow";
 "Settings.NY.Style.lightning" = "Lightning";
 "Settings.NY.Notice" = "Available for a limited time only!";
+
+"VoiceOver.Story.Like" = "Like";
+"VoiceOver.Story.Liked" = "Liked";
+"VoiceOver.Message.RepostToStory" = "Repost to Story";

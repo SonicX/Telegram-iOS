@@ -13,6 +13,7 @@ import ContextUI
 import ReactionButtonListComponent
 import LottieComponent
 import GlassBackgroundComponent
+import SGStrings
 
 private class ButtonIcon: Equatable {
     enum IconType: Equatable {
@@ -816,14 +817,25 @@ public final class MessageInputActionButtonComponent: Component {
                 accessibilityLabelText = component.strings.Share_RepostStory.replacingOccurrences(of: "\n", with: " ")
             case .more:
                 accessibilityLabelText = component.strings.Common_More
-            case .like:
-                accessibilityLabelText = component.strings.VoiceOver_MessageContextReactions
+            case let .like(reaction, _, _):
+                // У облачного пакета переводов нет русского варианта для этой кнопки
+                // (VoiceOver читал английское «React») — берём свои строки.
+                let locale = component.strings.baseLanguageCode
+                if reaction != nil {
+                    accessibilityLabelText = i18n("VoiceOver.Story.Liked", locale)
+                } else {
+                    accessibilityLabelText = i18n("VoiceOver.Story.Like", locale)
+                }
             case .close:
                 accessibilityLabelText = component.strings.Common_Close
             }
             self.isAccessibilityElement = accessibilityLabelText != nil
             self.accessibilityLabel = accessibilityLabelText
-            self.accessibilityTraits = .button
+            if case let .like(reaction, _, _) = component.mode, reaction != nil {
+                self.accessibilityTraits = [.button, .selected]
+            } else {
+                self.accessibilityTraits = .button
+            }
             
             return availableSize
         }

@@ -10,6 +10,7 @@ import MobileCoreServices
 import Intents
 import LegacyComponents
 import TelegramPresentationData
+import SGStrings
 import TelegramUIPreferences
 import DeviceAccess
 import TextFormat
@@ -4607,6 +4608,22 @@ extension ChatControllerImpl {
             if !isAction, !isSendFailedOrUnsent, message.id.namespace == Namespaces.Message.Cloud, message.id.peerId.namespace != Namespaces.Peer.SecretChat, !copyProtected {
                 result.append((strings.Conversation_ContextMenuForward, { [weak self] in
                     self?.interfaceInteraction?.forwardMessages([message], nil)
+                }))
+            }
+
+            // «Опубликовать в истории» — репост поста канала в свою историю.
+            // Тестировщики: VO-путь «Поделиться» ниже ведёт в системное меню,
+            // а плитка «Репост в историю» живёт только в Telegram-шторке, до
+            // которой VoiceOver из цепочки действий не доходит — даём прямой
+            // пункт с теми же условиями (canRepostMessageToStory).
+            if !isAction, !isSendFailedOrUnsent, message.id.namespace == Namespaces.Message.Cloud, !copyProtected, strongSelf.canRepostMessageToStory(message) {
+                result.append((i18n("VoiceOver.Message.RepostToStory", strings.baseLanguageCode), { [weak self] in
+                    guard let strongSelf = self else {
+                        return
+                    }
+                    strongSelf.commitPurposefulAction()
+                    strongSelf.chatDisplayNode.dismissInput()
+                    strongSelf.openRepostMessageToStory(message)
                 }))
             }
 
