@@ -253,6 +253,7 @@ final class TextFontComponent: Component {
             
             self.button.clipsToBounds = true
             self.button.setTitle(value.title, for: .normal)
+            self.button.accessibilityLabel = "Шрифт: \(value.title)"
             self.button.titleLabel?.font = value.uiFont(size: 13.0)
             self.button.contentEdgeInsets = UIEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 20.0)
             var buttonSize = self.button.sizeThatFits(availableSize)
@@ -509,6 +510,28 @@ final class TextSettingsComponent: CombinedComponent {
                 styleImage = state.image(.stroke)
             }
             
+            // VoiceOver: кнопки панели текста — иконки без подписей.
+            let styleAccessibilityLabel: String
+            switch component.style {
+            case .regular:
+                styleAccessibilityLabel = "Стиль текста: обычный"
+            case .filled:
+                styleAccessibilityLabel = "Стиль текста: на плашке"
+            case .semi:
+                styleAccessibilityLabel = "Стиль текста: на полупрозрачной плашке"
+            case .stroke, .blur:
+                styleAccessibilityLabel = "Стиль текста: с обводкой"
+            }
+            let alignmentAccessibilityLabel: String
+            switch component.alignment {
+            case .left:
+                alignmentAccessibilityLabel = "Выравнивание: по левому краю"
+            case .center:
+                alignmentAccessibilityLabel = "Выравнивание: по центру"
+            case .right:
+                alignmentAccessibilityLabel = "Выравнивание: по правому краю"
+            }
+            
             var fontAvailableWidth: CGFloat = context.availableSize.width
             if component.color != nil {
                 fontAvailableWidth -= 72.0
@@ -524,7 +547,7 @@ final class TextSettingsComponent: CombinedComponent {
                     action: {
                         toggleStyle()
                     }
-                ).minSize(CGSize(width: 44.0, height: 44.0)),
+                ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(styleAccessibilityLabel),
                 availableSize: CGSize(width: 30.0, height: 30.0),
                 transition: .easeInOut(duration: 0.2)
             )
@@ -553,7 +576,7 @@ final class TextSettingsComponent: CombinedComponent {
                     action: {
                         toggleAlignment()
                     }
-                ).minSize(CGSize(width: 44.0, height: 44.0)),
+                ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(alignmentAccessibilityLabel),
                 availableSize: context.availableSize,
                 transition: .easeInOut(duration: 0.2)
             )
@@ -575,7 +598,7 @@ final class TextSettingsComponent: CombinedComponent {
                         action: {
                             toggleKeyboard()
                         }
-                    ).minSize(CGSize(width: 44.0, height: 44.0)),
+                    ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(component.isEmojiKeyboard ? "Клавиатура" : "Эмодзи"),
                     availableSize: CGSize(width: 32.0, height: 32.0),
                     transition: .easeInOut(duration: 0.15)
                 )
@@ -749,8 +772,28 @@ public final class TextSizeSliderComponent: Component {
             return true
         }
         
+        override public func accessibilityIncrement() {
+            if let component = self.component {
+                self.updated(min(1.0, component.value + 0.1))
+                self.released()
+            }
+        }
+        
+        override public func accessibilityDecrement() {
+            if let component = self.component {
+                self.updated(max(0.0, component.value - 0.1))
+                self.released()
+            }
+        }
+        
         func updateLayout(size: CGSize, component: TextSizeSliderComponent, transition: ComponentTransition) -> CGSize {
             self.component = component
+            
+            // VoiceOver: ползунок размера — регулируемый элемент (свайп вверх/вниз).
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = "Размер текста"
+            self.accessibilityValue = "\(Int((component.value * 100.0).rounded())) %"
+            self.accessibilityTraits = .adjustable
             
             let previousSize = self.validSize
             self.validSize = size

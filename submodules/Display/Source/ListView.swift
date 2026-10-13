@@ -521,11 +521,28 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         if let cached = self.voAccessibilityElementsCache, now - self.voAccessibilityElementsCacheTimestamp < 0.25 {
             return cached
         }
-        let elements = self.customAccessibilityElements()
+        var elements = self.customAccessibilityElements()
+        // Настоящие элементы панели под лентой («Написать сообщение»)
+        // дописываем только во ВНЕШНИЙ массив для VoiceOver: внутренняя
+        // машинерия (customAccessibilityElements) о них не знает, и «последний
+        // элемент» для неё по-прежнему новейшее сообщение. Без этого VO со
+        // свайпа за новейшее сообщение заворачивал курсор на «Назад» в навбаре.
+        if let provider = self.accessibilityTrailingRealElementsProvider, let current = elements, !current.isEmpty {
+            let trailing = provider()
+            if !trailing.isEmpty {
+                elements = current + trailing
+            }
+        }
         self.voAccessibilityElementsCache = elements
         self.voAccessibilityElementsCacheTimestamp = now
         return elements
     }
+    
+    /// VoiceOver: реальные (не пуловые) элементы, которые VO должен встретить
+    /// сразу ПОСЛЕ последнего элемента ленты — кнопка «Написать сообщение»
+    /// панели ввода. Подаются как есть, их контейнер остаётся родным, так что
+    /// следующий свайп ведёт дальше по панели ввода.
+    public var accessibilityTrailingRealElementsProvider: (() -> [NSObject])?
 
     fileprivate func voInvalidateAccessibilityElementsCache() {
         self.voAccessibilityElementsCache = nil
@@ -7221,6 +7238,16 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return false
         }
 
+        // Крайний элемент списка в этом направлении уже целиком на экране —
+        // дальше прокручивать нечего. Холостой скролл + синхронная
+        // пересборка элементов роняли фокус: VO перекидывал курсор на верх
+        // экрана («пинг-понг» у последнего сообщения, лог тестировщика
+        // 2026-10-13: «Ваш файл» → boundary-edge-scroll → через 0.4 с «Tatiana»).
+        if self.accessibilityListEndItemFullyVisible(visualDown: voStep > 0) {
+            voDiagLog("[VO-DIAG][SCROLL] boundary-skip end-visible dir=\(voStep)")
+            return false
+        }
+
         self.accessibilityEdgeScrollPending = true
         self.accessibilityIgnoreOffscreenUntil = CACurrentMediaTime() + 0.2
         voAccessibilityLog("[VO-STATE] boundary-page-scroll step=2-scroll-triggered edgeIndex=\(toIndex) voDir=\(voDirection)")
@@ -7261,6 +7288,37 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return true
     }
 
+    /// Крайний элемент всего списка (не только материализованных) со стороны
+    /// visualDown целиком виден в клипе: в ротированной истории визуальный
+    /// низ — индекс 0 (новейшее), верх — последний индекс.
+    private func accessibilityListEndItemFullyVisible(visualDown: Bool) -> Bool {
+        if self.items.isEmpty {
+            return false
+        }
+        let targetIndex: Int
+        if visualDown {
+            targetIndex = self.rotated ? 0 : self.items.count - 1
+        } else {
+            targetIndex = self.rotated ? self.items.count - 1 : 0
+        }
+        guard let clip = self.accessibilityClippingFrameInScreenCoordinates() else {
+            return false
+        }
+        var result = false
+        self.forEachItemNode({ node in
+            guard let itemNode = node as? ListViewItemNode, itemNode.index == targetIndex, itemNode.isNodeLoaded, itemNode.view.window != nil else {
+                return
+            }
+            let frame = UIAccessibility.convertToScreenCoordinates(itemNode.view.bounds, in: itemNode.view)
+            if visualDown {
+                result = frame.maxY <= clip.maxY + 2.0 && frame.minY >= clip.minY - 2.0
+            } else {
+                result = frame.minY >= clip.minY - 2.0 && frame.maxY <= clip.maxY + 2.0
+            }
+        })
+        return result
+    }
+    
     private func performAccessibilityEdgeScroll(voDirection: Int) -> Bool {
         // voDirection — дельта ПОЗИЦИЙ В МАССИВЕ (toIndex - fromIndex), а
         // массив у всех потребителей идёт визуально СВЕРХУ ВНИЗ (история
@@ -7658,6 +7716,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // запускались, курсор оставался в навбаре («свайп за край — улетел в навбар»).
         // Теперь проверку планируем ЗА пределы окна.
         var checkDelay: Double = 0.12
+        // Свайп вперёд за новейшее сообщение: iOS сначала ставит курсор на
+        // «Назад», и за 0.12 с VO успевал его озвучить до перевода на поле
+        // ввода. Здесь отличать нечего — проверяем сразу, чтобы оборвать речь.
+        if cameDirectlyFromList && self.accessibilityLastInListFocusAtTrailingEdge {
+            checkDelay = 0.0
+        }
         let ignoreRemaining = self.accessibilityIgnoreOffscreenUntil - CACurrentMediaTime()
         if ignoreRemaining > 0.0 {
             checkDelay = ignoreRemaining + 0.12
@@ -7810,7 +7874,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                let lastFocusedMidY = self.accessibilityLastFocusedScreenMidY,
                lastFocusedMidY > clip.midY,
                self.accessibilityLastInListFocusAtTrailingEdge,
-               CACurrentMediaTime() - self.accessibilityLastInListFocusTimestamp < 1.5,
+               // Прямой побег с новейшего сообщения (wrap) — без порога
+               // давности: сообщение могли слушать дольше 1.5 с.
+               CACurrentMediaTime() - self.accessibilityLastInListFocusTimestamp < 1.5 || cameDirectlyFromList,
                let handler = self.accessibilityForwardEscapeHandler {
                 let escapedFrame: CGRect
                 if let focusedView = focusedObject as? UIView {

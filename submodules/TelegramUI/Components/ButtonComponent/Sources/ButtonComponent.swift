@@ -450,6 +450,7 @@ public final class ButtonComponent: Component {
         private var shimmeringView: ButtonShimmeringView?
         private var chromeView: UIImageView?
         private var contentItem: ContentItem?
+        private var autoAccessibilityLabel: String?
         
         private var activityIndicator: ActivityIndicator?
         
@@ -658,6 +659,22 @@ public final class ButtonComponent: Component {
             
             transition.setPosition(view: self.containerView, position: CGPoint(x: size.width / 2.0, y: size.height / 2.0))
             transition.setBoundsSize(view: self.containerView, size: size)
+            
+            // VoiceOver: кнопка — UIButton без заголовка, текст лежит во
+            // вложенной компоненте; без подписи VO читал только «кнопка»
+            // (например, «Опубликовать историю» на последнем шаге публикации).
+            // Подпись, выставленную снаружи, не трогаем.
+            if let textContent = component.content.component.wrapped as? ButtonTextContentComponent, !textContent.text.isEmpty {
+                if self.accessibilityLabel == nil || self.accessibilityLabel == self.autoAccessibilityLabel {
+                    self.accessibilityLabel = textContent.text
+                    self.autoAccessibilityLabel = textContent.text
+                }
+            }
+            var accessibilityTraits: UIAccessibilityTraits = .button
+            if !component.isEnabled {
+                accessibilityTraits.insert(.notEnabled)
+            }
+            self.accessibilityTraits = accessibilityTraits
             
             return size
         }

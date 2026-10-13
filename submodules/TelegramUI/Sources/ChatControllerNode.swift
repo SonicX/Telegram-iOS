@@ -1084,6 +1084,13 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     if focusedObject is NavigationButtonNode, self.historyNode.accessibilityLastEscapeCameDirectlyFromList && self.historyNode.accessibilityLastInListFocusWasTallAsScreen {
                         return false
                     }
+                    // То же для НОВЕЙШЕГО сообщения: прямой уход с последнего
+                    // элемента ленты на «Назад» — это wrap при свайпе вперёд, даже
+                    // если сообщение слушали дольше 1.5 с (лог 2026-10-13:
+                    // sinceInList=1.53 → курсор остался в навбаре вместо поля ввода).
+                    if focusedObject is NavigationButtonNode, self.historyNode.accessibilityLastEscapeCameDirectlyFromList && self.historyNode.accessibilityLastInListFocusWasAtTrailingEdge {
+                        return false
+                    }
                     return true
                 }
             }
@@ -1169,6 +1176,29 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 return true
             }
             return false
+        }
+        // VoiceOver: сразу за новейшим сообщением VO должен идти на панель под
+        // лентой (плашка ответа, «Написать сообщение» или «Вступить в группу»),
+        // а не заворачивать курсор на «Назад» в навбаре.
+        self.historyNode.accessibilityTrailingRealElementsProvider = { [weak self] in
+            guard let self, let inputPanelNode = self.inputPanelNode else {
+                return []
+            }
+            if let accessoryPanelNode = self.accessoryPanelNode,
+               let target = accessoryPanelNode.accessibilityElements?.first as? UIView, !target.isHidden, target.alpha > 0.01, target.window != nil {
+                return [target]
+            }
+            if let textInputPanelNode = inputPanelNode as? ChatTextInputPanelNode {
+                if let target = textInputPanelNode.composeAccessibilityButtonView() {
+                    return [target]
+                }
+                return []
+            }
+            if let subscriberPanelNode = inputPanelNode as? ChatChannelSubscriberInputPanelNode,
+               let target = subscriberPanelNode.accessibilityElements?.first as? UIView, !target.isHidden, target.alpha > 0.01, target.window != nil {
+                return [target]
+            }
+            return []
         }
         // VoiceOver (Баг 2): trailing-кнопки в ленте истории. Info возвращает
         // подпись если кнопку надо показать (иначе nil); Activate — действие.

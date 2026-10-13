@@ -1749,6 +1749,10 @@ final class ColorSwatchComponent: Component {
         }
         
         func update(component: ColorSwatchComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
+            // VoiceOver: кружок цвета без подписи читался как «кнопка».
+            if case .main = component.type {
+                self.accessibilityLabel = "Цвет"
+            }
             self.component = component
             let contentSize: CGSize
             if case .pallete = component.type {

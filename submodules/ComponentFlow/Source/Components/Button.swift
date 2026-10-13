@@ -12,6 +12,8 @@ public final class Button: Component {
     public let action: () -> Void
     public let holdAction: ((UIView) -> Void)?
     public let highlightedAction: ActionSlot<Bool>?
+    /// VoiceOver: подпись для кнопок-иконок без текста.
+    public fileprivate(set) var accessibilityLabelValue: String?
 
     convenience public init(
         content: AnyComponent<Empty>,
@@ -58,7 +60,7 @@ public final class Button: Component {
     }
     
     public func minSize(_ minSize: CGSize?) -> Button {
-        return Button(
+        let result = Button(
             content: self.content,
             minSize: minSize,
             hitTestEdgeInsets: self.hitTestEdgeInsets,
@@ -70,10 +72,12 @@ public final class Button: Component {
             holdAction: self.holdAction,
             highlightedAction: self.highlightedAction
         )
+        result.accessibilityLabelValue = self.accessibilityLabelValue
+        return result
     }
     
     public func withHitTestEdgeInsets(_ hitTestEdgeInsets: UIEdgeInsets?) -> Button {
-        return Button(
+        let result = Button(
             content: self.content,
             minSize: self.minSize,
             hitTestEdgeInsets: hitTestEdgeInsets,
@@ -85,10 +89,12 @@ public final class Button: Component {
             holdAction: self.holdAction,
             highlightedAction: self.highlightedAction
         )
+        result.accessibilityLabelValue = self.accessibilityLabelValue
+        return result
     }
     
     public func withIsExclusive(_ isExclusive: Bool) -> Button {
-        return Button(
+        let result = Button(
             content: self.content,
             minSize: self.minSize,
             hitTestEdgeInsets: self.hitTestEdgeInsets,
@@ -100,11 +106,13 @@ public final class Button: Component {
             holdAction: self.holdAction,
             highlightedAction: self.highlightedAction
         )
+        result.accessibilityLabelValue = self.accessibilityLabelValue
+        return result
     }
     
     
     public func withHoldAction(_ holdAction: ((UIView) -> Void)?) -> Button {
-        return Button(
+        let result = Button(
             content: self.content,
             minSize: self.minSize,
             hitTestEdgeInsets: self.hitTestEdgeInsets,
@@ -116,10 +124,12 @@ public final class Button: Component {
             holdAction: holdAction,
             highlightedAction: self.highlightedAction
         )
+        result.accessibilityLabelValue = self.accessibilityLabelValue
+        return result
     }
     
     public func tagged(_ tag: AnyObject) -> Button {
-        return Button(
+        let result = Button(
             content: self.content,
             minSize: self.minSize,
             hitTestEdgeInsets: self.hitTestEdgeInsets,
@@ -131,9 +141,20 @@ public final class Button: Component {
             holdAction: self.holdAction,
             highlightedAction: self.highlightedAction
         )
+        result.accessibilityLabelValue = self.accessibilityLabelValue
+        return result
+    }
+    
+    public func withAccessibilityLabel(_ label: String?) -> Button {
+        let result = self.minSize(self.minSize)
+        result.accessibilityLabelValue = label
+        return result
     }
     
     public static func ==(lhs: Button, rhs: Button) -> Bool {
+        if lhs.accessibilityLabelValue != rhs.accessibilityLabelValue {
+            return false
+        }
         if lhs.content != rhs.content {
             return false
         }
@@ -159,6 +180,7 @@ public final class Button: Component {
     }
     
     public final class View: UIButton, ComponentTaggedView {
+        private var autoAccessibilityLabel: String?
         private let contentView: ComponentHostView<Empty>
         
         public var content: UIView? {
@@ -324,6 +346,19 @@ public final class Button: Component {
             self.updateAlpha(transition: transition)
             self.isEnabled = component.isEnabled
             self.isExclusiveTouch = component.isExclusive
+            
+            // VoiceOver: у UIButton без заголовка VO читал только «кнопка»,
+            // хотя внутри лежит текст («Отмена», «Готово» в редакторе истории).
+            // Подпись, выставленную снаружи, не трогаем.
+            if let label = component.accessibilityLabelValue {
+                self.accessibilityLabel = label
+                self.autoAccessibilityLabel = label
+            } else if let text = (component.content.wrapped as? Text)?.text, !text.isEmpty {
+                if self.accessibilityLabel == nil || self.accessibilityLabel == self.autoAccessibilityLabel {
+                    self.accessibilityLabel = text
+                    self.autoAccessibilityLabel = text
+                }
+            }
             
             transition.setFrame(view: self.contentView, frame: CGRect(origin: CGPoint(x: floor((size.width - contentSize.width) / 2.0), y: floor((size.height - contentSize.height) / 2.0)), size: contentSize), completion: nil)
             

@@ -5691,6 +5691,19 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     /// (см. её `activate` → `ensureFocused`) поднимает клавиатуру и фокусирует
     /// поле. Возвращает false, если кнопку показать нельзя (ввод запрещён или
     /// панель ещё не сверстана) — тогда вызывающий код применяет запасной путь.
+    /// VoiceOver: кнопка «Написать сообщение», если она сейчас показана, —
+    /// её лента истории ставит следующей после новейшего сообщения.
+    public func composeAccessibilityButtonView() -> UIView? {
+        guard !self.sendingTextDisabled, self.isNodeLoaded else {
+            return nil
+        }
+        let buttonView = self.composeAccessibilityArea.view
+        guard !self.composeAccessibilityArea.isHidden, buttonView.alpha > 0.01, buttonView.window != nil, self.composeAccessibilityArea.accessibilityLabel?.isEmpty == false else {
+            return nil
+        }
+        return buttonView
+    }
+    
     public func focusComposeAccessibilityButton() -> Bool {
         guard !self.sendingTextDisabled, self.isNodeLoaded else {
             return false
@@ -5699,7 +5712,10 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         guard !self.composeAccessibilityArea.isHidden, buttonView.alpha > 0.01, self.composeAccessibilityArea.accessibilityLabel?.isEmpty == false else {
             return false
         }
-        UIAccessibility.post(notification: .screenChanged, argument: buttonView)
+        // .layoutChanged, не .screenChanged: экранное уведомление VO применял
+        // только после того, как договорит «Назад» (лог 2026-10-13: перевод
+        // курсора через 1.5 с), а layoutChanged переводит фокус сразу.
+        UIAccessibility.post(notification: .layoutChanged, argument: buttonView)
         return true
     }
 
