@@ -1437,6 +1437,19 @@ public final class PeerListItemComponent: Component {
             }
             self.swipeOptionContainer.setRevealOptions(([], rightOptions))
             
+            // Строка — пустая кнопка с текстом во вложенных вьюшках: VoiceOver читал
+            // просто «кнопка» (выбор, кому показать историю, списки зрителей).
+            self.containerButton.accessibilityLabel = component.title
+            self.containerButton.accessibilityValue = component.subtitle?.text
+            var accessibilityTraits: UIAccessibilityTraits = .button
+            if case .editing(true, _) = component.selectionState {
+                accessibilityTraits.insert(.selected)
+            }
+            if component.action == nil {
+                accessibilityTraits.insert(.notEnabled)
+            }
+            self.containerButton.accessibilityTraits = accessibilityTraits
+            
             return CGSize(width: availableSize.width, height: height)
         }
     }

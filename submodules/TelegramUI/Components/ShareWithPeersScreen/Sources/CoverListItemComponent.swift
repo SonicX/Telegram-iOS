@@ -127,6 +127,9 @@ final class CoverListItemComponent: Component {
             transition.setFrame(layer: self.separatorLayer, frame: CGRect(origin: CGPoint(x: leftInset, y: height), size: CGSize(width: availableSize.width - leftInset, height: UIScreenPixel)))
             self.separatorLayer.isHidden = !component.hasNext
             
+            self.containerButton.accessibilityLabel = component.title
+            self.containerButton.accessibilityTraits = .button
+            
             let containerFrame = CGRect(origin: CGPoint(x: 0.0, y: verticalInset), size: CGSize(width: availableSize.width, height: height - verticalInset * 2.0))
             transition.setFrame(view: self.containerButton, frame: containerFrame)
             

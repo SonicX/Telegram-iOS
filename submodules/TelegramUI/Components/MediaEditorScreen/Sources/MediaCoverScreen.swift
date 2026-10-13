@@ -13,6 +13,32 @@ import MultilineTextComponent
 import MediaEditor
 import MediaScrubberComponent
 import ButtonComponent
+import SGStrings
+
+/// VoiceOver: полоса выбора кадра обложки — жестовый скраббер без доступности.
+/// Прозрачный регулируемый элемент поверх неё: свайп вверх/вниз сдвигает кадр.
+private final class CoverFrameAccessibilityView: UIView {
+    var adjust: ((Int) -> Void)?
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.isUserInteractionEnabled = false
+        self.isAccessibilityElement = true
+        self.accessibilityTraits = .adjustable
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func accessibilityIncrement() {
+        self.adjust?(1)
+    }
+    
+    override func accessibilityDecrement() {
+        self.adjust?(-1)
+    }
+}
 
 private final class MediaCoverScreenComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
@@ -86,6 +112,7 @@ private final class MediaCoverScreenComponent: Component {
         private let label = ComponentView<Empty>()
         private let doneButton = ComponentView<Empty>()
         private let scrubber = ComponentView<Empty>()
+        private let scrubberAccessibilityView = CoverFrameAccessibilityView()
         
         private let fadeView = UIView()
                         
@@ -218,6 +245,7 @@ private final class MediaCoverScreenComponent: Component {
                 size: cancelButtonSize
             )
             if let cancelButtonView = self.cancelButton.view {
+                cancelButtonView.accessibilityLabel = environment.strings.Common_Cancel
                 if cancelButtonView.superview == nil {
                     self.addSubview(cancelButtonView)
                     setupButtonShadow(cancelButtonView)
@@ -370,6 +398,29 @@ private final class MediaCoverScreenComponent: Component {
                     } else {
                         transition.setFrame(view: scrubberView, frame: scrubberFrame)
                     }
+                    
+                    if self.scrubberAccessibilityView.superview == nil {
+                        self.addSubview(self.scrubberAccessibilityView)
+                    }
+                    self.scrubberAccessibilityView.frame = scrubberFrame
+                    let duration: Double = playerState.tracks.first(where: { $0.id == 0 }).flatMap { $0.duration } ?? 0.0
+                    let locale = environment.strings.baseLanguageCode
+                    self.scrubberAccessibilityView.accessibilityLabel = i18n("VoiceOver.Editor.CoverFrame", locale)
+                    self.scrubberAccessibilityView.accessibilityValue = i18n("VoiceOver.Editor.CoverFrame.Value", locale, "\(Int(playerState.position.rounded()))", "\(Int(duration.rounded()))")
+                    self.scrubberAccessibilityView.accessibilityHint = i18n("VoiceOver.Editor.CoverFrame.Hint", locale)
+                    self.scrubberAccessibilityView.adjust = { [weak state] direction in
+                        guard let state, let mediaEditor = state.mediaEditor, let playerState = state.playerState else {
+                            return
+                        }
+                        let duration: Double = playerState.tracks.first(where: { $0.id == 0 }).flatMap { $0.duration } ?? 0.0
+                        guard duration > 0.0 else {
+                            return
+                        }
+                        let step = max(0.5, duration / 20.0)
+                        let position = max(0.0, min(duration, playerState.position + step * Double(direction)))
+                        mediaEditor.seek(position, andPlay: false)
+                    }
+                    
                     if animateIn {
                         scrubberView.layer.animatePosition(from: CGPoint(x: 0.0, y: 44.0), to: .zero, duration: 0.3, timingFunction: kCAMediaTimingFunctionSpring, additive: true)
                         scrubberView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
@@ -583,6 +634,9 @@ final class MediaCoverScreen: ViewController {
         self.displayNode = Node(controller: self)
 
         super.displayNodeDidLoad()
+        
+        // Экран обложки лежит поверх редактора и камеры: курсор VoiceOver уходил на их кнопки.
+        self.displayNode.view.addSubview(AccessibilityCoverSentinelView())
     }
                 
     func requestDismiss(animated: Bool) {

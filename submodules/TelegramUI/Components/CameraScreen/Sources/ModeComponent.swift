@@ -107,7 +107,12 @@ final class ModeComponent: Component {
                 title.addAttribute(.kern, value: -0.5 as NSNumber, range: NSMakeRange(0, title.length))
                 self.setAttributedTitle(title, for: .normal)
                 self.sizeToFit()
-                
+
+                // Подпись не капсом, а текущий режим отмечен «выбрано» — иначе по озвучке
+                // не понять, какой режим включён и что съёмку запускает отдельная кнопка.
+                self.accessibilityLabel = value
+                self.accessibilityTraits = selected ? [.button, .selected] : .button
+
                 return CGSize(width: self.titleLabel?.bounds.size.width ?? 0.0, height: isTablet ? tabletButtonSize.height : buttonSize.height)
             }
         }

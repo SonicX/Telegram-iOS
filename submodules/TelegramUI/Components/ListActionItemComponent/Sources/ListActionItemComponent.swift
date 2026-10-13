@@ -943,6 +943,30 @@ public final class ListActionItemComponent: Component {
             transition.setFrame(view: self.container, frame: CGRect(origin: CGPoint(), size: size))
             transition.setFrame(view: self.button, frame: CGRect(origin: CGPoint(), size: size))
             
+            // Вся строка — UIButton, а текст и переключатель лежат внутри неё:
+            // VoiceOver читал только «кнопка». У нажимаемой строки подпись берём
+            // из заголовка, значение — из правой части; у ненажимаемой кнопку
+            // убираем из обхода, чтобы VoiceOver дошёл до текста и переключателя.
+            if component.action != nil {
+                self.button.isAccessibilityElement = true
+                self.button.accessibilityLabel = self.title.view.flatMap(listActionItemAccessibilityText)
+                var value: String?
+                if let customAccessoryView = self.customAccessoryView?.view {
+                    value = listActionItemAccessibilityText(customAccessoryView)
+                }
+                var traits: UIAccessibilityTraits = .button
+                if case let .toggle(toggle) = component.accessory {
+                    if toggle.isOn {
+                        traits.insert(.selected)
+                    }
+                }
+                self.button.accessibilityValue = value
+                self.button.accessibilityTraits = traits
+            } else {
+                self.button.isAccessibilityElement = false
+                self.button.accessibilityLabel = nil
+            }
+            
             return size
         }
     }
@@ -954,4 +978,24 @@ public final class ListActionItemComponent: Component {
     public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
+}
+
+private func listActionItemAccessibilityText(_ view: UIView) -> String? {
+    if view.isHidden || view.alpha < 0.01 {
+        return nil
+    }
+    if let label = view as? UILabel, let text = label.text, !text.isEmpty {
+        return text
+    }
+    if let textView = view as? ImmediateTextView, let text = textView.attributedText?.string, !text.isEmpty {
+        return text
+    }
+    if let textView = view as? TextView, let text = textView.cachedLayout?.attributedString?.string, !text.isEmpty {
+        return text
+    }
+    if view.isAccessibilityElement, let label = view.accessibilityLabel, !label.isEmpty {
+        return label
+    }
+    let parts = view.subviews.compactMap(listActionItemAccessibilityText)
+    return parts.isEmpty ? nil : parts.joined(separator: ", ")
 }

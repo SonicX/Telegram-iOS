@@ -12,6 +12,7 @@ import UIKitRuntimeUtils
 import AccountContext
 import GlassBackgroundComponent
 import GlassBarButtonComponent
+import SGStrings
 import BundleIconComponent
 import ActivityIndicator
 
@@ -687,6 +688,7 @@ final class CaptureControlsComponent: Component {
     let collageCount: Int?
     let tintColor: UIColor
     let shutterState: ShutterButtonState
+    let isFrontCamera: Bool
     let lastGalleryAsset: PHAsset?
     let resolvedCodePeer: EnginePeer?
     let tag: AnyObject?
@@ -716,6 +718,7 @@ final class CaptureControlsComponent: Component {
         collageCount: Int?,
         tintColor: UIColor,
         shutterState: ShutterButtonState,
+        isFrontCamera: Bool,
         lastGalleryAsset: PHAsset?,
         resolvedCodePeer: EnginePeer?,
         tag: AnyObject?,
@@ -744,6 +747,7 @@ final class CaptureControlsComponent: Component {
         self.collageCount = collageCount
         self.tintColor = tintColor
         self.shutterState = shutterState
+        self.isFrontCamera = isFrontCamera
         self.lastGalleryAsset = lastGalleryAsset
         self.resolvedCodePeer = resolvedCodePeer
         self.tag = tag
@@ -793,6 +797,9 @@ final class CaptureControlsComponent: Component {
             return false
         }
         if lhs.shutterState != rhs.shutterState {
+            return false
+        }
+        if lhs.isFrontCamera != rhs.isFrontCamera {
             return false
         }
         if lhs.lastGalleryAsset?.localIdentifier != rhs.lastGalleryAsset?.localIdentifier {
@@ -1258,7 +1265,8 @@ final class CaptureControlsComponent: Component {
                             tag: component.galleryButtonTag,
                             action: {
                                 component.galleryTapped()
-                            }
+                            },
+                            accessibilityLabel: i18n("VoiceOver.Camera.Gallery", component.strings.baseLanguageCode)
                         )
                     ),
                     environment: {},
@@ -1315,7 +1323,9 @@ final class CaptureControlsComponent: Component {
                             minSize: CGSize(width: 44.0, height: 44.0),
                             action: {
                                 component.flipTapped()
-                            }
+                            },
+                            accessibilityLabel: i18n("VoiceOver.Camera.Flip", component.strings.baseLanguageCode),
+                            accessibilityValue: i18n(component.isFrontCamera ? "VoiceOver.Camera.Front" : "VoiceOver.Camera.Back", component.strings.baseLanguageCode)
                         )
                     ),
                     environment: {},
@@ -1365,6 +1375,8 @@ final class CaptureControlsComponent: Component {
                     if bottomFlipButtonView.superview == nil {
                         self.bottomContainerView.contentView.addSubview(bottomFlipButtonView)
                     }
+                    bottomFlipButtonView.accessibilityLabel = i18n("VoiceOver.Camera.Flip", component.strings.baseLanguageCode)
+                    bottomFlipButtonView.accessibilityValue = i18n(component.isFrontCamera ? "VoiceOver.Camera.Front" : "VoiceOver.Camera.Back", component.strings.baseLanguageCode)
                     transition.setBounds(view: bottomFlipButtonView, bounds: CGRect(origin: .zero, size: bottomFlipButtonFrame.size))
                     transition.setPosition(view: bottomFlipButtonView, position: bottomFlipButtonFrame.center)
                     
@@ -1404,6 +1416,7 @@ final class CaptureControlsComponent: Component {
                 if bottomSettingsButtonView.superview == nil {
                     self.bottomContainerView.contentView.addSubview(bottomSettingsButtonView)
                 }
+                bottomSettingsButtonView.accessibilityLabel = i18n("VoiceOver.Camera.LiveSettings", component.strings.baseLanguageCode)
                 transition.setBounds(view: bottomSettingsButtonView, bounds: CGRect(origin: .zero, size: bottomFlipButtonFrame.size))
                 transition.setPosition(view: bottomSettingsButtonView, position: bottomFlipButtonFrame.center)
                 
@@ -1594,7 +1607,8 @@ final class CaptureControlsComponent: Component {
                         minSize: hintIconSize,
                         action: {
                             component.lockRecording()
-                        }
+                        },
+                        accessibilityLabel: i18n("VoiceOver.Camera.LockRecording", component.strings.baseLanguageCode)
                     )
                 ),
                 environment: {},
@@ -1639,6 +1653,28 @@ final class CaptureControlsComponent: Component {
                 transition.setAlpha(view: shutterButtonView, alpha: isTransitioning || isLiveActive ? 0.0 : alpha)
                 
                 shutterButtonView.isUserInteractionEnabled = component.hasAccess
+                
+                // Спуск затвора — пустой круг без текста: VoiceOver читал «кнопка», и было
+                // непонятно, что именно он снимает и что режим выбирается переключателем ниже.
+                let locale = component.strings.baseLanguageCode
+                switch component.shutterState {
+                case .generic, .disabled:
+                    shutterButtonView.accessibilityLabel = i18n("VoiceOver.Camera.TakePhoto", locale)
+                case .video:
+                    shutterButtonView.accessibilityLabel = i18n("VoiceOver.Camera.StartVideo", locale)
+                case .stopRecording, .holdRecording:
+                    shutterButtonView.accessibilityLabel = i18n("VoiceOver.Camera.StopVideo", locale)
+                case .live:
+                    shutterButtonView.accessibilityLabel = i18n("VoiceOver.Camera.StartLive", locale)
+                case .transition:
+                    break
+                }
+                if let collageCount = component.collageCount, collageCount > 1, let label = shutterButtonView.accessibilityLabel {
+                    let current = min(collageCount, Int(component.collageProgress * Float(collageCount)) + 1)
+                    shutterButtonView.accessibilityLabel = "\(label), \(current)/\(collageCount)"
+                }
+                shutterButtonView.accessibilityHint = i18n("VoiceOver.Camera.Shutter.Hint", locale)
+                shutterButtonView.accessibilityTraits = component.hasAccess ? [.button, .startsMediaSession] : [.button, .notEnabled]
             }
             
             self.panGestureRecognizer?.isEnabled = !isLiveStream

@@ -4,6 +4,8 @@ import Display
 import ComponentFlow
 import Camera
 import CameraButtonComponent
+import TelegramPresentationData
+import SGStrings
 
 private func generateCollageIcon(grid: Camera.CollageGrid, crossed: Bool) -> UIImage? {
     return generateImage(CGSize(width: 36.0, height: 36.0), rotatedContext: { size, context in
@@ -166,13 +168,16 @@ final class CollageIconComponent: Component {
 final class CollageIconCarouselComponent: Component {
     typealias EnvironmentType = Empty
     
+    let strings: PresentationStrings
     let grids: [Camera.CollageGrid]
     let selected: (Camera.CollageGrid) -> Void
     
     init(
+        strings: PresentationStrings,
         grids: [Camera.CollageGrid],
         selected: @escaping (Camera.CollageGrid) -> Void
     ) {
+        self.strings = strings
         self.grids = grids
         self.selected = selected
     }
@@ -246,7 +251,8 @@ final class CollageIconCarouselComponent: Component {
                             if let component = self?.component {
                                 component.selected(grid)
                             }
-                        }
+                        },
+                        accessibilityLabel: i18n("VoiceOver.Camera.CollageGrid", component.strings.baseLanguageCode, "\(grid.count)", grid.rows.map { "\($0.columns)" }.joined(separator: " + "))
                     )),
                     environment: {},
                     containerSize: buttonSize

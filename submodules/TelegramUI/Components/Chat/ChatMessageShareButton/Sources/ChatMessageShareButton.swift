@@ -10,6 +10,7 @@ import Postbox
 import WallpaperBackgroundNode
 import ChatMessageItemCommon
 import ContextUI
+import SGStrings
 
 public class ChatMessageShareButton: ASDisplayNode {
     private let referenceNode: ContextReferenceContentNode
@@ -142,9 +143,15 @@ public class ChatMessageShareButton: ASDisplayNode {
             var updatedIconImage: UIImage?
             var updatedBottomIconImage: UIImage?
             var updatedIconOffset = CGPoint()
+            // Круглая кнопка сбоку от пузыря была без подписи: VoiceOver читал просто «кнопка»
+            // (особенно заметно в «Избранном», где у каждого пересланного сообщения стрелка).
+            let strings = presentationData.strings
+            let locale = strings.baseLanguageCode
+            var accessibilityLabel: String = strings.VoiceOver_MessageContextShare
             if let _ = message.adAttribute {
                 updatedIconImage = PresentationResourcesChat.chatFreeCloseButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
                 updatedIconOffset = CGPoint(x: UIScreenPixel, y: UIScreenPixel)
+                accessibilityLabel = strings.Common_Close
                 
                 if hasMore {
                     updatedBottomIconImage = PresentationResourcesChat.chatFreeMoreButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
@@ -152,25 +159,34 @@ public class ChatMessageShareButton: ASDisplayNode {
             } else if case let .customChatContents(contents) = subject, case .hashTagSearch = contents.kind {
                 updatedIconImage = PresentationResourcesChat.chatFreeNavigateButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
                 updatedIconOffset = CGPoint(x: UIScreenPixel, y: 1.0)
+                accessibilityLabel = i18n("VoiceOver.Message.GoToMessage", locale)
             } else if let hasTranslation = hasTranslation /* MARK: Swiftgram */ {
                 updatedIconImage = PresentationResourcesChat.chatTranslateShareButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper, undoTranslate: hasTranslation)
+                accessibilityLabel = i18n(hasTranslation ? "VoiceOver.Message.ShowOriginal" : "VoiceOver.Message.Translate", locale)
             } else if isNavigate {
                 updatedIconImage = PresentationResourcesChat.chatFreeNavigateToThreadButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
                 updatedIconOffset = CGPoint(x: UIScreenPixel, y: -3.0)
+                accessibilityLabel = i18n("VoiceOver.Message.GoToThread", locale)
             } else if case .pinnedMessages = subject {
                 updatedIconImage = PresentationResourcesChat.chatFreeNavigateButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
                 updatedIconOffset = CGPoint(x: UIScreenPixel, y: 1.0)
+                accessibilityLabel = i18n("VoiceOver.Message.GoToMessage", locale)
             } else if isReplies {
                 updatedIconImage = PresentationResourcesChat.chatFreeCommentButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
+                accessibilityLabel = i18n("VoiceOver.Message.Comments", locale)
             } else if message.id.peerId.isRepliesOrSavedMessages(accountPeerId: account.peerId) {
                 updatedIconImage = PresentationResourcesChat.chatFreeNavigateButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
                 updatedIconOffset = CGPoint(x: UIScreenPixel, y: 1.0)
+                accessibilityLabel = i18n("VoiceOver.Message.GoToOriginal", locale)
             } else {
                 updatedIconImage = PresentationResourcesChat.chatFreeShareButtonIcon(presentationData.theme.theme, wallpaper: presentationData.theme.wallpaper)
             }
          
             self.topIconNode.image = updatedIconImage
             self.topIconOffset = updatedIconOffset
+            self.topButton.isAccessibilityElement = true
+            self.topButton.accessibilityLabel = accessibilityLabel
+            self.topButton.accessibilityTraits = .button
             
             if let updatedBottomIconImage {
                 let bottomButton: HighlightTrackingButtonNode
@@ -211,6 +227,9 @@ public class ChatMessageShareButton: ASDisplayNode {
                 }
                 separatorNode.backgroundColor = bubbleVariableColor(variableColor: presentationData.theme.theme.chat.message.shareButtonForegroundColor, wallpaper: presentationData.theme.wallpaper).withAlphaComponent(0.15)
                 bottomIconNode.image = updatedBottomIconImage
+                bottomButton.isAccessibilityElement = true
+                bottomButton.accessibilityLabel = strings.Common_More
+                bottomButton.accessibilityTraits = .button
             } else {
                 self.bottomButton?.removeFromSupernode()
                 self.bottomButton = nil

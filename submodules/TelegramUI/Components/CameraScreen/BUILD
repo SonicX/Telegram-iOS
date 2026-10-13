@@ -95,6 +95,7 @@ swift_library(
         "//submodules/TelegramCallsUI",
         "//submodules/TelegramUI/Components/Stories/StoryContainerScreen",
         "//submodules/TelegramUI/Components/ChatEntityKeyboardInputNode",
+        "//Swiftgram/SGStrings:SGStrings",
     ],
     visibility = [
         "//visibility:public",

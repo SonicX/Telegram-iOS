@@ -381,6 +381,32 @@ public final class StoryItemSetContainerComponent: Component {
         }
     }
     
+    /// VoiceOver: невидимая кнопка «Предыдущая/Следующая история» у краёв
+    /// истории. Свайп вверх/вниз по самой истории есть, но тестировщики
+    /// просили явную кнопку возврата к предыдущей.
+    final class AccessibilityNavigationButtonView: UIView {
+        var action: (() -> Void)?
+        
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            self.isUserInteractionEnabled = false
+            self.isAccessibilityElement = true
+            self.accessibilityTraits = .button
+        }
+        
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+        
+        override func accessibilityActivate() -> Bool {
+            guard let action = self.action else {
+                return false
+            }
+            action()
+            return true
+        }
+    }
+    
     final class VisibleItem {
         let externalState = StoryContentItem.ExternalState()
         let unclippedContainerView: UIView
@@ -485,6 +511,8 @@ public final class StoryItemSetContainerComponent: Component {
         let componentContainerView: UIView
         let overlayContainerView: SparseContainerView
         let itemsContainerView: UIView
+        let previousStoryAccessibilityButton = AccessibilityNavigationButtonView()
+        let nextStoryAccessibilityButton = AccessibilityNavigationButtonView()
         let controlsContainerView: UIView
         let controlsClippingView: UIView
         let controlsNavigationClippingView: UIView
@@ -637,6 +665,8 @@ public final class StoryItemSetContainerComponent: Component {
             self.itemsContainerView.addGestureRecognizer(self.scroller.panGestureRecognizer)
             
             self.componentContainerView.addSubview(self.itemsContainerView)
+            self.componentContainerView.addSubview(self.previousStoryAccessibilityButton)
+            self.componentContainerView.addSubview(self.nextStoryAccessibilityButton)
             self.componentContainerView.addSubview(self.controlsNavigationClippingView)
             self.componentContainerView.addSubview(self.controlsClippingView)
             self.componentContainerView.addSubview(self.controlsContainerView)
@@ -1816,6 +1846,10 @@ public final class StoryItemSetContainerComponent: Component {
 
                         view.setProgressMode(mode: itemProgressMode, isCentral: index == centralIndex && component.isCentral)
                         self.updateContentAccessibility(visibleItem: visibleItem, item: item, isCentral: index == centralIndex && component.isCentral)
+                        if !component.isCentral {
+                            self.previousStoryAccessibilityButton.isAccessibilityElement = false
+                            self.nextStoryAccessibilityButton.isAccessibilityElement = false
+                        }
                         
                         var isChannel = false
                         var canShare = true
@@ -5651,6 +5685,8 @@ public final class StoryItemSetContainerComponent: Component {
                 contentView.accessibilityClose = nil
                 return
             }
+            self.previousStoryAccessibilityButton.isAccessibilityElement = true
+            self.nextStoryAccessibilityButton.isAccessibilityElement = true
             var isVideo = false
             if case .file = item.storyItem.media {
                 isVideo = true
@@ -5712,6 +5748,20 @@ public final class StoryItemSetContainerComponent: Component {
             }
             contentView.accessibilityClose = { [weak self] in
                 self?.component?.close()
+            }
+            
+            let contentFrame = contentView.convert(contentView.bounds, to: self.componentContainerView)
+            let buttonWidth: CGFloat = 44.0
+            let buttonHeight: CGFloat = min(120.0, contentFrame.height)
+            self.previousStoryAccessibilityButton.frame = CGRect(x: contentFrame.minX, y: contentFrame.midY - buttonHeight / 2.0, width: buttonWidth, height: buttonHeight)
+            self.nextStoryAccessibilityButton.frame = CGRect(x: contentFrame.maxX - buttonWidth, y: contentFrame.midY - buttonHeight / 2.0, width: buttonWidth, height: buttonHeight)
+            self.previousStoryAccessibilityButton.accessibilityLabel = "Предыдущая история"
+            self.nextStoryAccessibilityButton.accessibilityLabel = "Следующая история"
+            self.previousStoryAccessibilityButton.action = { [weak self] in
+                self?.component?.navigate(.previous)
+            }
+            self.nextStoryAccessibilityButton.action = { [weak self] in
+                self?.component?.navigate(.next)
             }
         }
         

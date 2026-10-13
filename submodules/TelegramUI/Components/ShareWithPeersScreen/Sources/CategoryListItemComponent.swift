@@ -316,6 +316,16 @@ final class CategoryListItemComponent: Component {
             let containerFrame = CGRect(origin: CGPoint(x: contextInset, y: verticalInset), size: CGSize(width: availableSize.width - contextInset * 2.0, height: height - verticalInset * 2.0))
             transition.setFrame(view: self.containerButton, frame: containerFrame)
             
+            // Строка — пустая UIButton с текстом во вложенных вьюшках: VoiceOver
+            // читал просто «кнопка». Подпись из заголовка, подзаголовок — значение.
+            self.containerButton.accessibilityLabel = component.title
+            self.containerButton.accessibilityValue = component.subtitle
+            if case .editing(true, _) = component.selectionState {
+                self.containerButton.accessibilityTraits = [.button, .selected]
+            } else {
+                self.containerButton.accessibilityTraits = .button
+            }
+            
             return CGSize(width: availableSize.width, height: height)
         }
     }

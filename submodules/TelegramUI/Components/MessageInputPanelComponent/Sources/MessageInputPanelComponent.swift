@@ -284,6 +284,7 @@ public final class MessageInputPanelComponent: Component {
     public let wasRecordingDismissed: Bool
     public let timeoutValue: String?
     public let timeoutSelected: Bool
+    public let timeoutAccessibilityLabel: String?
     public let displayGradient: Bool
     public let bottomInset: CGFloat
     public let isFormattingLocked: Bool
@@ -353,6 +354,7 @@ public final class MessageInputPanelComponent: Component {
         wasRecordingDismissed: Bool,
         timeoutValue: String?,
         timeoutSelected: Bool,
+        timeoutAccessibilityLabel: String? = nil,
         displayGradient: Bool,
         bottomInset: CGFloat,
         isFormattingLocked: Bool,
@@ -421,6 +423,7 @@ public final class MessageInputPanelComponent: Component {
         self.hasRecordedVideoPreview = hasRecordedVideoPreview
         self.timeoutValue = timeoutValue
         self.timeoutSelected = timeoutSelected
+        self.timeoutAccessibilityLabel = timeoutAccessibilityLabel
         self.displayGradient = displayGradient
         self.bottomInset = bottomInset
         self.isFormattingLocked = isFormattingLocked
@@ -510,6 +513,9 @@ public final class MessageInputPanelComponent: Component {
             return false
         }
         if lhs.timeoutSelected != rhs.timeoutSelected {
+            return false
+        }
+        if lhs.timeoutAccessibilityLabel != rhs.timeoutAccessibilityLabel {
             return false
         }
         if lhs.displayGradient != rhs.displayGradient {
@@ -2366,6 +2372,13 @@ public final class MessageInputPanelComponent: Component {
                 if let timeoutButtonView = self.timeoutButton.view {
                     if timeoutButtonView.superview == nil {
                         self.addSubview(timeoutButtonView)
+                    }
+                    // Иконка-таймер без подписи: VoiceOver распознавал картинку
+                    // и читал «меньше, дисплей».
+                    if let label = component.timeoutAccessibilityLabel {
+                        timeoutButtonView.isAccessibilityElement = true
+                        timeoutButtonView.accessibilityLabel = label
+                        timeoutButtonView.accessibilityTraits = .button
                     }
                     let originX = fieldBackgroundFrame.maxX - 4.0
                     let timeoutIconFrame = CGRect(origin: CGPoint(x: originX - timeoutButtonSize.width, y: fieldBackgroundFrame.maxY - 4.0 - timeoutButtonSize.height), size: timeoutButtonSize)

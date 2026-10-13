@@ -10,6 +10,9 @@ public final class CameraButton: Component {
     let isExclusive: Bool
     let action: () -> Void
     let longTapAction: (() -> Void)?
+    let accessibilityLabel: String?
+    let accessibilityValue: String?
+    let isAccessibilitySelected: Bool
 
     public init(
         content: AnyComponentWithIdentity<Empty>,
@@ -18,7 +21,10 @@ public final class CameraButton: Component {
         isEnabled: Bool = true,
         isExclusive: Bool = true,
         action: @escaping () -> Void,
-        longTapAction: (() -> Void)? = nil
+        longTapAction: (() -> Void)? = nil,
+        accessibilityLabel: String? = nil,
+        accessibilityValue: String? = nil,
+        isAccessibilitySelected: Bool = false
     ) {
         self.content = content
         self.minSize = minSize
@@ -27,6 +33,9 @@ public final class CameraButton: Component {
         self.isExclusive = isExclusive
         self.action = action
         self.longTapAction = longTapAction
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityValue = accessibilityValue
+        self.isAccessibilitySelected = isAccessibilitySelected
     }
     
     public func tagged(_ tag: AnyObject) -> CameraButton {
@@ -37,7 +46,10 @@ public final class CameraButton: Component {
             isEnabled: self.isEnabled,
             isExclusive: self.isExclusive,
             action: self.action,
-            longTapAction: self.longTapAction
+            longTapAction: self.longTapAction,
+            accessibilityLabel: self.accessibilityLabel,
+            accessibilityValue: self.accessibilityValue,
+            isAccessibilitySelected: self.isAccessibilitySelected
         )
     }
     
@@ -55,6 +67,15 @@ public final class CameraButton: Component {
             return false
         }
         if lhs.isExclusive != rhs.isExclusive {
+            return false
+        }
+        if lhs.accessibilityLabel != rhs.accessibilityLabel {
+            return false
+        }
+        if lhs.accessibilityValue != rhs.accessibilityValue {
+            return false
+        }
+        if lhs.isAccessibilitySelected != rhs.isAccessibilitySelected {
             return false
         }
         return true
@@ -185,6 +206,18 @@ public final class CameraButton: Component {
             self.updateScale(transition: transition)
             self.isEnabled = component.isEnabled
             self.longTapGestureRecognizer?.isEnabled = component.longTapAction != nil
+            
+            // Без подписи VoiceOver называл иконочные кнопки камеры просто «кнопка».
+            self.accessibilityLabel = component.accessibilityLabel
+            self.accessibilityValue = component.accessibilityValue
+            var accessibilityTraits: UIAccessibilityTraits = .button
+            if component.isAccessibilitySelected {
+                accessibilityTraits.insert(.selected)
+            }
+            if !component.isEnabled {
+                accessibilityTraits.insert(.notEnabled)
+            }
+            self.accessibilityTraits = accessibilityTraits
             
             self.contentView.bounds = CGRect(origin: .zero, size: contentSize)
             self.contentView.center = CGPoint(x: size.width / 2.0, y: size.height / 2.0)

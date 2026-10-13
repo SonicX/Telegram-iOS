@@ -52,6 +52,7 @@ import SaveProgressScreen
 import TelegramNotices
 import AttachmentFileController
 import SaveToCameraRoll
+import SGStrings
 
 private let playbackButtonTag = GenericComponentViewTag()
 private let muteButtonTag = GenericComponentViewTag()
@@ -865,6 +866,7 @@ final class MediaEditorScreenComponent: Component {
                 size: cancelButtonSize
             )
             if let cancelButtonView = self.cancelButton.view {
+                cancelButtonView.accessibilityLabel = environment.strings.Common_Cancel
                 if cancelButtonView.superview == nil {
                     self.addSubview(cancelButtonView)
                 }
@@ -907,6 +909,8 @@ final class MediaEditorScreenComponent: Component {
                 size: doneButtonSize
             )
             if let doneButtonView = self.doneButton.view {
+                doneButtonView.accessibilityLabel = doneButtonTitle.flatMap { $0.capitalized(with: Locale(identifier: environment.strings.baseLanguageCode)) } ?? environment.strings.Common_Done
+                doneButtonView.accessibilityTraits = .button
                 if doneButtonView.superview == nil {
                     self.addSubview(doneButtonView)
                 }
@@ -1086,6 +1090,10 @@ final class MediaEditorScreenComponent: Component {
                 drawButtonFrame.origin.x = stickerButtonFrame.origin.x
                                 
                 if let rotateButtonView = self.rotateButton.view {
+                    rotateButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Rotate", environment.strings.baseLanguageCode)
+                    // Сама кнопка — ASDisplayNode внутри; без этого VoiceOver читал пустую «кнопку».
+                    rotateButtonView.isAccessibilityElement = true
+                    rotateButtonView.accessibilityTraits = .button
                     if rotateButtonView.superview == nil {
                         self.addSubview(rotateButtonView)
                     }
@@ -1097,6 +1105,10 @@ final class MediaEditorScreenComponent: Component {
                 }
                 
                 if let flipButtonView = self.flipButton.view {
+                    flipButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Mirror", environment.strings.baseLanguageCode)
+                    // Сама кнопка — ASDisplayNode внутри; без этого VoiceOver читал пустую «кнопку».
+                    flipButtonView.isAccessibilityElement = true
+                    flipButtonView.accessibilityTraits = .button
                     if flipButtonView.superview == nil {
                         self.addSubview(flipButtonView)
                     }
@@ -1114,6 +1126,10 @@ final class MediaEditorScreenComponent: Component {
             }
             
             if let drawButtonView = self.drawButton.view {
+                drawButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Draw", environment.strings.baseLanguageCode)
+                // Сама кнопка — ASDisplayNode внутри; без этого VoiceOver читал пустую «кнопку».
+                drawButtonView.isAccessibilityElement = true
+                drawButtonView.accessibilityTraits = .button
                 if drawButtonView.superview == nil {
                     self.addSubview(drawButtonView)
                 }
@@ -1125,6 +1141,10 @@ final class MediaEditorScreenComponent: Component {
             }
             
             if !isAvatarEditor && !isCoverEditor, let textButtonView = self.textButton.view {
+                textButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Text", environment.strings.baseLanguageCode)
+                // Сама кнопка — ASDisplayNode внутри; без этого VoiceOver читал пустую «кнопку».
+                textButtonView.isAccessibilityElement = true
+                textButtonView.accessibilityTraits = .button
                 if textButtonView.superview == nil {
                     self.addSubview(textButtonView)
                 }
@@ -1136,6 +1156,10 @@ final class MediaEditorScreenComponent: Component {
             }
             
             if !isAvatarEditor && !isCoverEditor, let stickerButtonView = self.stickerButton.view {
+                stickerButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Stickers", environment.strings.baseLanguageCode)
+                // Сама кнопка — ASDisplayNode внутри; без этого VoiceOver читал пустую «кнопку».
+                stickerButtonView.isAccessibilityElement = true
+                stickerButtonView.accessibilityTraits = .button
                 if stickerButtonView.superview == nil {
                     self.addSubview(stickerButtonView)
                 }
@@ -1176,6 +1200,7 @@ final class MediaEditorScreenComponent: Component {
                     size: toolsButtonSize
                 )
                 if let toolsButtonView = self.toolsButton.view {
+                    toolsButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Adjustments", environment.strings.baseLanguageCode)
                     if toolsButtonView.superview == nil {
                         self.addSubview(toolsButtonView)
                     }
@@ -1508,6 +1533,7 @@ final class MediaEditorScreenComponent: Component {
                         wasRecordingDismissed: false,
                         timeoutValue: timeoutValue,
                         timeoutSelected: false,
+                        timeoutAccessibilityLabel: i18n("VoiceOver.Editor.StoryTimeout", environment.strings.baseLanguageCode, timeoutValue),
                         displayGradient: false,
                         bottomInset: 0.0,
                         isFormattingLocked: !state.isPremium,
@@ -1544,6 +1570,7 @@ final class MediaEditorScreenComponent: Component {
                     fadeTransition.setAlpha(view: self.fadeView, alpha: 0.0)
                 }
                 transition.setFrame(view: self.fadeView, frame: CGRect(origin: .zero, size: availableSize))
+            self.fadeView.accessibilityLabel = i18n("VoiceOver.Editor.HideKeyboard", environment.strings.baseLanguageCode)
                 
                 let isEditingCaption = self.inputPanelExternalState.isEditing
                 if self.isEditingCaption != isEditingCaption {
@@ -1665,6 +1692,7 @@ final class MediaEditorScreenComponent: Component {
                     size: saveButtonSize
                 )
                 if let saveButtonView = self.saveButton.view {
+                    saveButtonView.accessibilityLabel = i18n("VoiceOver.Editor.Save", environment.strings.baseLanguageCode)
                     if saveButtonView.superview == nil {
                         setupButtonShadow(saveButtonView)
                         self.addSubview(saveButtonView)
@@ -1763,6 +1791,8 @@ final class MediaEditorScreenComponent: Component {
                         size: dayNightButtonSize
                     )
                     if let dayNightButtonView = self.dayNightButton.view {
+                        dayNightButtonView.accessibilityLabel = i18n("VoiceOver.Editor.NightTheme", environment.strings.baseLanguageCode)
+                        dayNightButtonView.accessibilityTraits = isNightTheme ? [.button, .selected] : .button
                         if dayNightButtonView.superview == nil {
                             setupButtonShadow(dayNightButtonView)
                             self.addSubview(dayNightButtonView)
@@ -1858,6 +1888,7 @@ final class MediaEditorScreenComponent: Component {
                         size: muteButtonSize
                     )
                     if let muteButtonView = self.muteButton.view {
+                        muteButtonView.accessibilityLabel = i18n(isVideoMuted ? "VoiceOver.Editor.Unmute" : "VoiceOver.Editor.Mute", environment.strings.baseLanguageCode)
                         if muteButtonView.superview == nil {
                             setupButtonShadow(muteButtonView)
                             self.addSubview(muteButtonView)
@@ -1948,6 +1979,7 @@ final class MediaEditorScreenComponent: Component {
                         size: playbackButtonSize
                     )
                     if let playbackButtonView = self.playbackButton.view {
+                        playbackButtonView.accessibilityLabel = i18n(playerState.isPlaying ? "VoiceOver.Editor.Pause" : "VoiceOver.Editor.Play", environment.strings.baseLanguageCode)
                         if playbackButtonView.superview == nil {
                             setupButtonShadow(playbackButtonView)
                             self.addSubview(playbackButtonView)
@@ -1996,6 +2028,7 @@ final class MediaEditorScreenComponent: Component {
                     size: switchCameraButtonSize
                 )
                 if let switchCameraButtonView = self.switchCameraButton.view {
+                    switchCameraButtonView.accessibilityLabel = i18n("VoiceOver.Camera.Flip", environment.strings.baseLanguageCode)
                     if switchCameraButtonView.superview == nil {
                         self.addSubview(switchCameraButtonView)
                     }
@@ -6968,6 +7001,9 @@ public final class MediaEditorScreenImpl: ViewController, MediaEditorScreen, UID
         self.displayNode = Node(controller: self)
 
         super.displayNodeDidLoad()
+        
+        // Редактор лежит поверх камеры — курсор VoiceOver не должен уходить под него.
+        self.displayNode.view.addSubview(AccessibilityCoverSentinelView())
         
         let dropInteraction = UIDropInteraction(delegate: self)
         self.displayNode.view.addInteraction(dropInteraction)

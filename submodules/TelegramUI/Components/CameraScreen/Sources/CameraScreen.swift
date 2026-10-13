@@ -30,6 +30,7 @@ import TelegramVoip
 import TelegramCallsUI
 import GlassBarButtonComponent
 import PlainButtonComponent
+import SGStrings
 import StoryContainerScreen
 
 let videoRedColor = UIColor(rgb: 0xff3b30)
@@ -1497,6 +1498,7 @@ private final class CameraScreenComponent: CombinedComponent {
                     collageCount: component.cameraState.isCollageEnabled ? component.cameraState.collageGrid.count : nil,
                     tintColor: controlsTintColor,
                     shutterState: shutterState,
+                    isFrontCamera: component.cameraState.position == .front,
                     lastGalleryAsset: state.lastGalleryAsset,
                     resolvedCodePeer: state.isTakingPhoto || state.isRecording ? nil : component.resolvedCodePeer,
                     tag: captureControlsTag,
@@ -1700,7 +1702,8 @@ private final class CameraScreenComponent: CombinedComponent {
                                     return
                                 }
                                 controller.requestDismiss(animated: true)
-                            }
+                            },
+                            accessibilityLabel: environment.strings.Common_Close
                         ).tagged(cancelButtonTag),
                         availableSize: CGSize(width: 40.0, height: 40.0),
                         transition: .immediate
@@ -1711,6 +1714,16 @@ private final class CameraScreenComponent: CombinedComponent {
                         .disappear(.default(scale: true))
                         .shadow(Shadow(color: UIColor(white: 0.0, alpha: 0.25), radius: 3.0, offset: .zero))
                     )
+                }
+                
+                let flashAccessibilityValue: String
+                switch component.cameraState.flashMode {
+                case .on:
+                    flashAccessibilityValue = i18n("VoiceOver.Camera.Flash.On", environment.strings.baseLanguageCode)
+                case .auto:
+                    flashAccessibilityValue = i18n("VoiceOver.Camera.Flash.Auto", environment.strings.baseLanguageCode)
+                default:
+                    flashAccessibilityValue = i18n("VoiceOver.Camera.Flash.Off", environment.strings.baseLanguageCode)
                 }
                 
                 let flashContentComponent: AnyComponentWithIdentity<Empty>
@@ -1815,7 +1828,8 @@ private final class CameraScreenComponent: CombinedComponent {
                                     if let state {
                                         state.disableCollageCamera()
                                     }
-                                }
+                                },
+                                accessibilityLabel: i18n("VoiceOver.Camera.CollageOff", environment.strings.baseLanguageCode)
                             ).tagged(disableCollageButtonTag),
                             availableSize: CGSize(width: 40.0, height: 40.0),
                             transition: .immediate
@@ -1842,7 +1856,9 @@ private final class CameraScreenComponent: CombinedComponent {
                                     if let state {
                                         state.presentFlashTint()
                                     }
-                                }
+                                },
+                                accessibilityLabel: i18n("VoiceOver.Camera.Flash", environment.strings.baseLanguageCode),
+                                accessibilityValue: flashAccessibilityValue
                             ).tagged(flashButtonTag),
                             availableSize: CGSize(width: 40.0, height: 40.0),
                             transition: .immediate
@@ -1877,7 +1893,9 @@ private final class CameraScreenComponent: CombinedComponent {
                                         if let state {
                                             state.toggleDualCamera()
                                         }
-                                    }
+                                    },
+                                    accessibilityLabel: i18n("VoiceOver.Camera.Dual", environment.strings.baseLanguageCode),
+                                    isAccessibilitySelected: component.cameraState.isDualCameraEnabled
                                 ).tagged(dualButtonTag),
                                 availableSize: CGSize(width: 40.0, height: 40.0),
                                 transition: .immediate
@@ -1911,7 +1929,9 @@ private final class CameraScreenComponent: CombinedComponent {
                                             if let state {
                                                 state.togglePosition(animateFlipAction)
                                             }
-                                        }
+                                        },
+                                        accessibilityLabel: i18n("VoiceOver.Camera.Flip", environment.strings.baseLanguageCode),
+                                        accessibilityValue: i18n(component.cameraState.position == .front ? "VoiceOver.Camera.Front" : "VoiceOver.Camera.Back", environment.strings.baseLanguageCode)
                                     ),
                                     availableSize: availableSize,
                                     transition: context.transition
@@ -1940,7 +1960,9 @@ private final class CameraScreenComponent: CombinedComponent {
                                         if let state {
                                             state.toggleCollageCamera()
                                         }
-                                    }
+                                    },
+                                    accessibilityLabel: i18n("VoiceOver.Camera.Collage", environment.strings.baseLanguageCode),
+                                    isAccessibilitySelected: component.cameraState.isCollageEnabled
                                 ).tagged(collageButtonTag),
                                 availableSize: CGSize(width: 40.0, height: 40.0),
                                 transition: .immediate
@@ -1963,6 +1985,7 @@ private final class CameraScreenComponent: CombinedComponent {
                             if state.displayingCollageSelection {
                                 let collageCarousel = collageCarousel.update(
                                     component: CollageIconCarouselComponent(
+                                        strings: environment.strings,
                                         grids: collageGrids.filter { $0 != component.cameraState.collageGrid },
                                         selected: { [weak state] grid in
                                             state?.updateCollageGrid(grid)
@@ -4122,6 +4145,10 @@ public class CameraScreenImpl: ViewController, CameraScreen {
         self.displayNode = Node(controller: self)
 
         super.displayNodeDidLoad()
+        
+        // Камера пушится поверх списка чатов, который остаётся в иерархии под ней:
+        // курсор VoiceOver уходил на чаты за камерой.
+        self.displayNode.view.addSubview(AccessibilityCoverSentinelView())
         
         self.node.didAppear = { [weak self] in
             guard let self, !self.resumeLiveStream else {

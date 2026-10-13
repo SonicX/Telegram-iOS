@@ -2787,6 +2787,7 @@ final class ShareWithPeersScreenComponent: Component {
                 if navigationLeftButtonView.superview == nil {
                     self.navigationContainerView.addSubview(navigationLeftButtonView)
                 }
+                navigationLeftButtonView.accessibilityLabel = environment.strings.Common_Close
                 transition.setFrame(view: navigationLeftButtonView, frame: navigationLeftButtonFrame)
             }
             navigationButtonsWidth += navigationLeftButtonSize.width + navigationSideInset
@@ -3621,6 +3622,7 @@ private final class AlbumLabelComponent: Component {
         
         func update(component: AlbumLabelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.component = component
+            self.accessibilityLabel = component.title
             
             let height: CGFloat = 44.0
             
