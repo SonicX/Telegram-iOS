@@ -2503,6 +2503,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         // на первый элемент списка («Archived Chats»).
                         let target: Any = listNode?.accessibilityFocusTarget(for: targetNode) ?? targetNode.view
                         voDiagLog("[VO-DIAG] return-focus-to-opened-chat posted target=\(type(of: target))")
+                        listNode?.accessibilityNoteProgrammaticFocus(on: target)
                         UIAccessibility.post(notification: .layoutChanged, argument: target)
                     }
                 }

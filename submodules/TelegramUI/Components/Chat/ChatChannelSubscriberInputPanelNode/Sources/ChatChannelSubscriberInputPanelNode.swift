@@ -21,6 +21,7 @@ import ComponentDisplayAdapters
 import GlassControls
 import BundleIconComponent
 import MultilineTextComponent
+import SGStrings
 
 private enum SubscriberAction: Equatable, Hashable {
     case join
@@ -621,7 +622,28 @@ public final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
         var accessibilityViews: [UIView] = []
         if let panelView = self.panel.view as? GlassControlPanelComponent.View {
             if let leftView = panelView.leftItemView {
-                accessibilityViews.append(contentsOf: self.allButtons(in: leftView))
+                // Кнопки-иконки слева (предложить пост, подарок, помощь) без
+                // подписи VoiceOver читал как безымянный элемент (лог
+                // 2026-10-14: «-» на (26,806) при свайпе за последнее
+                // сообщение канала). Порядок кнопок — порядок leftPanelItems.
+                let locale = interfaceState.strings.baseLanguageCode
+                let leftButtons = self.allButtons(in: leftView)
+                for (index, button) in leftButtons.enumerated() {
+                    if index < leftPanelItems.count, (button.accessibilityLabel ?? "").isEmpty {
+                        switch leftPanelItems[index].id {
+                        case AnyHashable("suggestPost"):
+                            button.accessibilityLabel = i18n("VoiceOver.Channel.SuggestPost", locale)
+                        case AnyHashable("gift"):
+                            button.accessibilityLabel = i18n("VoiceOver.Channel.Gift", locale)
+                        case AnyHashable("help"):
+                            button.accessibilityLabel = i18n("VoiceOver.Channel.Help", locale)
+                        default:
+                            break
+                        }
+                    }
+                    button.accessibilityTraits = .button
+                }
+                accessibilityViews.append(contentsOf: leftButtons)
             }
             if let centerView = panelView.centerItemView, let button = self.firstButton(in: centerView) {
                 if let title = centerAction?.title {

@@ -310,6 +310,9 @@
 "VoiceOver.Message.GoToThread" = "Go to topic";
 "VoiceOver.Message.Comments" = "Comments";
 "VoiceOver.Message.Translate" = "Translate";
+"VoiceOver.Channel.SuggestPost" = "Suggest a Post";
+"VoiceOver.Channel.Gift" = "Send a Gift";
+"VoiceOver.Channel.Help" = "Help";
 "VoiceOver.Message.ShowOriginal" = "Show original";
 "VoiceOver.Camera.Front" = "front camera now";
 "VoiceOver.Camera.Back" = "back camera now";

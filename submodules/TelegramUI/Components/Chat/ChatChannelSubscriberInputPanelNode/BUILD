@@ -30,6 +30,7 @@ swift_library(
         "//submodules/TelegramUI/Components/GlassControls",
         "//submodules/Components/BundleIconComponent",
         "//submodules/Components/MultilineTextComponent",
+        "//Swiftgram/SGStrings:SGStrings",
     ],
     visibility = [
         "//visibility:public",

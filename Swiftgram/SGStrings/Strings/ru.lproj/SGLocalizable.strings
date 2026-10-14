@@ -310,6 +310,9 @@
 "VoiceOver.Message.GoToThread" = "Перейти к теме";
 "VoiceOver.Message.Comments" = "Комментарии";
 "VoiceOver.Message.Translate" = "Перевести";
+"VoiceOver.Channel.SuggestPost" = "Предложить пост";
+"VoiceOver.Channel.Gift" = "Подарить подарок";
+"VoiceOver.Channel.Help" = "Помощь";
 "VoiceOver.Message.ShowOriginal" = "Показать оригинал";
 "VoiceOver.Camera.Front" = "сейчас фронтальная";
 "VoiceOver.Camera.Back" = "сейчас задняя";

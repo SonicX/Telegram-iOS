@@ -2054,6 +2054,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     }
     
     private var voDiagLastKnownOffset: CGFloat?
+    /// Когда в последний раз сдвигался контент корневого списка (любой
+    /// источник: наш подскролл к фокусу, нативный AX-скролл iOS, палец).
+    private var accessibilityLastContentShiftTimestamp: CFTimeInterval = 0.0
     private var accessibilityCorrectiveScrollInProgress = false
 
     private func updateVisibleContentOffset() {
@@ -2088,6 +2091,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                             self.accessibilityCorrectiveScrollInProgress = false
                         }
                     }
+                }
+                if let last = self.voDiagLastKnownOffset, abs(value - last) > 1.0 {
+                    self.accessibilityLastContentShiftTimestamp = CACurrentMediaTime()
                 }
                 self.voDiagLastKnownOffset = value
             }
@@ -6106,7 +6112,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     }
                 }
             }
-            voDiagLog("[VO-DIAG] focus → type=\(typeName) label=«\(String(label.prefix(48)))» frame=\(frameString)")
+            // Индекс строки пулового элемента — по нему видно, на сколько
+            // строк реально прыгнул курсор.
+            let pinString = (focused as? FocusTrackingAccessibilityElement)?.pinnedLocalIndex.map { " pin=\($0)" } ?? ""
+            voDiagLog("[VO-DIAG] focus → type=\(typeName) label=«\(String(label.prefix(48)))» frame=\(frameString)\(pinString)")
         }
     }()
 
@@ -6934,6 +6943,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // на видимый, поэтому прыжок назад через ≥1 элемент на невидимый
         // элемент сразу после высокого сообщения однозначен: доделываем свайп
         // вперёд — на элемент, следующий за высоким.
+        if let fromIndex, self.redirectAnchorReboundIfNeeded(focusedAny: focusedAny, toIndex: toIndex, fromIndex: fromIndex, elementData: elementData.map { ($0.index, $0.element) }) {
+            return
+        }
         if let fromIndex, toIndex < fromIndex - 1,
            focusedAny is FocusTrackingAccessibilityElement,
            let previousSourceView = (elementData.first(where: { $0.index == fromIndex })?.element as? FocusTrackingAccessibilityElement)?.sourceView,
@@ -8369,6 +8381,61 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return nil
     }
 
+    /// «Якорь» — строка, на которую МЫ поставили курсор (возврат из чата в
+    /// список). iOS запоминает элемент последнего layoutChanged-поста и после
+    /// сдвига контента (наш подскролл к фокусу, нативный AX-скролл) иногда
+    /// ре-анкорит курсор обратно на него — тестировщица: «пролистнул каналы,
+    /// дошёл до нужного, а курсор летит обратно к тому, с которого начал»
+    /// (лог 2026-10-14: iPhones.ru → подскролл → через 1.4с «Подслушано»,
+    /// куда курсор ставился при выходе из чата, на 3 строки назад).
+    /// Такой откат возвращаем на строку, где пользователь был, и делаем её
+    /// новым якорем — тогда следующий ре-анкор iOS приземлится уже туда.
+    private weak var accessibilityProgrammaticFocusAnchor: FocusTrackingAccessibilityElement?
+    private var accessibilityAnchorStepsAway: Int = 0
+
+    public func accessibilityNoteProgrammaticFocus(on target: Any) {
+        self.accessibilityProgrammaticFocusAnchor = target as? FocusTrackingAccessibilityElement
+        self.accessibilityAnchorStepsAway = 0
+    }
+
+    private func redirectAnchorReboundIfNeeded(focusedAny: Any, toIndex: Int, fromIndex: Int, elementData: [(Int, UIAccessibilityElement)]) -> Bool {
+        guard let anchor = self.accessibilityProgrammaticFocusAnchor else {
+            return false
+        }
+        let focusedTracked = focusedAny as? FocusTrackingAccessibilityElement
+        let isAnchor = focusedTracked != nil && (focusedTracked === anchor || (anchor.sourceView != nil && focusedTracked?.sourceView === anchor.sourceView))
+        if !isAnchor {
+            if abs(toIndex - fromIndex) == 1 {
+                self.accessibilityAnchorStepsAway += 1
+            }
+            return false
+        }
+        let stepsAway = self.accessibilityAnchorStepsAway
+        self.accessibilityAnchorStepsAway = 0
+        // Пользователь ушёл от якоря хотя бы на 2 строки свайпами, курсор
+        // вернулся на якорь прыжком (не соседний элемент) сразу после сдвига
+        // контента — это ре-анкор iOS, а не касание и не свайп.
+        let sinceShift = CACurrentMediaTime() - self.accessibilityLastContentShiftTimestamp
+        guard stepsAway >= 2, abs(toIndex - fromIndex) >= 2, sinceShift < 2.0 else {
+            return false
+        }
+        guard let previous = elementData.first(where: { $0.0 == fromIndex })?.1 as? FocusTrackingAccessibilityElement,
+              previous.sourceView?.window != nil else {
+            return false
+        }
+        voDiagLog("[VO-DIAG][CC] anchor-rebound from=\(fromIndex) to=\(toIndex) steps=\(stepsAway) sinceShift=\(String(format: "%.2f", sinceShift)) back-to=«\(String((previous.accessibilityLabel ?? "-").prefix(24)))»")
+        self.accessibilityProgrammaticFocusAnchor = previous
+        self.accessibilityRingRepostGeneration &+= 1
+        DispatchQueue.main.async { [weak self, weak previous] in
+            guard let self, let previous, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            let _ = self.customAccessibilityElements()
+            UIAccessibility.post(notification: .layoutChanged, argument: previous)
+        }
+        return true
+    }
+
     /// Начальный фокус экрана (плашка «Непрочитанные» при входе в чат), который
     /// надо УДЕРЖАТЬ: iOS по окончании пуша сама ставит курсор на первый
     /// элемент массива — самое старое материализованное сообщение — и наш пост
@@ -8398,8 +8465,13 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             self.accessibilityInitialFocusTarget = nil
             return false
         }
-        if let tracked = focused as? FocusTrackingAccessibilityElement, tracked === target {
-            // Курсор на цели — дальше пользователь ходит сам.
+        // Курсор на цели — дальше пользователь ходит сам. Сравниваем по
+        // строке (sourceView/индекс), а не по инстансу: у сообщения может быть
+        // несколько VO-элементов, и курсор на соседнем из них — тоже цель
+        // (лог 2026-10-14: курсор встал на «Ваше сообщение», а редирект
+        // дважды сдёрнул его на первый элемент).
+        if let tracked = focused as? FocusTrackingAccessibilityElement,
+           tracked === target || (tracked.sourceView != nil && tracked.sourceView === target.sourceView) || (tracked.pinnedLocalIndex != nil && tracked.pinnedLocalIndex == target.pinnedLocalIndex) {
             self.accessibilityInitialFocusTarget = nil
             return false
         }
