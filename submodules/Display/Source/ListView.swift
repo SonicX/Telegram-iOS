@@ -6590,6 +6590,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // «осознанным» (вайтлист legitimate-escape), и recovery не запускался —
         // курсор застревал на «Назад».
         if let focusedAny {
+            if self.redirectToInitialFocusTargetIfNeeded(focused: focusedAny) {
+                return
+            }
             self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
             self.accessibilityFocusIsCurrentlyInList = true
             var earlyFocusedFrame = CGRect.null
@@ -6919,6 +6922,30 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         if fromIndex == nil, let previousSignature = self.accessibilityLastSystemFocusedSignature {
             fromIndex = elementData.first(where: { self.accessibilityDebugStableKey(from: $0.data) == previousSignature })?.index
+        }
+        // Заворот курсора с ВЫСОКОГО сообщения (iOS 26). Свайп вперёд с
+        // сообщения высотой во весь вьюпорт не находит следующего элемента,
+        // и VO, вместо выпада на «Назад» (его ловит fast-tall-advance),
+        // садится сразу на элемент ленты, целиком уехавший ВЫШЕ экрана —
+        // через один-два элемента назад. Подскролл к нему возвращает ленту,
+        // и пользователь ходит по кругу (лог 2026-10-14, канал: «…» →
+        // «Непрочитанные сообщения» → «Видео» → снова «…», 12 кругов).
+        // Осознанный свайп назад ведёт на СОСЕДНИЙ элемент, а касание —
+        // на видимый, поэтому прыжок назад через ≥1 элемент на невидимый
+        // элемент сразу после высокого сообщения однозначен: доделываем свайп
+        // вперёд — на элемент, следующий за высоким.
+        if let fromIndex, toIndex < fromIndex - 1,
+           focusedAny is FocusTrackingAccessibilityElement,
+           let previousSourceView = (elementData.first(where: { $0.index == fromIndex })?.element as? FocusTrackingAccessibilityElement)?.sourceView,
+           let clip = self.accessibilityClippingFrameInScreenCoordinates(), clip.height > 1.0,
+           previousSourceView.bounds.height >= clip.height * 0.7,
+           !focusedData.frame.isNull, focusedData.frame.maxY <= clip.minY + 1.0 {
+            voDiagLog("[VO-DIAG][CC] tall-wrap-back from=\(fromIndex) to=\(toIndex) count=\(elements.count) prevH=\(Int(previousSourceView.bounds.height)) clipH=\(Int(clip.height))")
+            if self.advanceAccessibilityFocusPastTallItem(fromArrayIndex: fromIndex, reason: "tall-wrap-back") {
+                // Рамку уже запланировали на элемент, куда завернуло, — отменяем.
+                self.accessibilityRingRepostGeneration &+= 1
+                return
+            }
         }
         self.accessibilityLastSystemFocusedSourceViewIdentifier = {
             guard let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? FocusTrackingAccessibilityElement,
@@ -7545,25 +7572,26 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// идентичность элемента через скролл — фокус-пост попадает в цель.
     private var accessibilityLastTallAdvanceTimestamp: CFTimeInterval = 0.0
 
-    private func advanceAccessibilityFocusPastTallItem(fromArrayIndex: Int, reason: String) {
+    @discardableResult
+    private func advanceAccessibilityFocusPastTallItem(fromArrayIndex: Int, reason: String) -> Bool {
         guard !self.accessibilityRecoveryInProgress else {
-            return
+            return false
         }
         // VoiceOver шлёт фокус-уведомления пачками (вьюшка + прокси) — без
         // гейта один свайп давал бы ДВА advance и перескок через сообщение.
         guard CACurrentMediaTime() - self.accessibilityLastTallAdvanceTimestamp > 0.5 else {
-            return
+            return false
         }
         self.accessibilityLastTallAdvanceTimestamp = CACurrentMediaTime()
         guard let elementsAny = self.customAccessibilityElements(), !elementsAny.isEmpty else {
             self.recoverAccessibilityFocusToList(aroundIndex: fromArrayIndex, reason: reason)
-            return
+            return true
         }
         let nextIndex = fromArrayIndex + 1
         guard nextIndex < elementsAny.count, let targetElement = elementsAny[nextIndex] as? NSObject else {
             // Следующего нет (край буфера) — обычное восстановление.
             self.recoverAccessibilityFocusToList(aroundIndex: fromArrayIndex, reason: reason)
-            return
+            return true
         }
         if let trackedElement = targetElement as? FocusTrackingAccessibilityElement, let pinned = trackedElement.pinnedLocalIndex {
             self.scrollVoiceOverFocusToItem(at: pinned)
@@ -7620,6 +7648,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 UIAccessibility.post(notification: .layoutChanged, argument: postTarget)
             }
         }
+        return true
     }
 
     private func restoreAccessibilityFocusAfterForeground(reason: String) {
@@ -8338,6 +8367,56 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
         return nil
+    }
+
+    /// Начальный фокус экрана (плашка «Непрочитанные» при входе в чат), который
+    /// надо УДЕРЖАТЬ: iOS по окончании пуша сама ставит курсор на первый
+    /// элемент массива — самое старое материализованное сообщение — и наш пост
+    /// теряется (лог 2026-10-14: пост в плашку, через 0.64с фокус на «Видео»
+    /// y=-12720, тестировщице пришлось 18 свайпами идти обратно к плашке).
+    /// Пока окно открыто и курсор ни разу не дошёл до цели, чужой фокус в
+    /// ленте возвращаем на цель (не больше `maxAttempts` раз).
+    private weak var accessibilityInitialFocusTarget: FocusTrackingAccessibilityElement?
+    private var accessibilityInitialFocusUntil: CFTimeInterval = 0.0
+    private var accessibilityInitialFocusAttemptsLeft: Int = 0
+
+    public func accessibilityHoldInitialFocus(on target: Any, duration: Double = 2.0, maxAttempts: Int = 3) {
+        guard let element = target as? FocusTrackingAccessibilityElement else {
+            return
+        }
+        self.accessibilityInitialFocusTarget = element
+        self.accessibilityInitialFocusUntil = CACurrentMediaTime() + duration
+        self.accessibilityInitialFocusAttemptsLeft = maxAttempts
+    }
+
+    /// true — фокус перехвачен и возвращён на начальную цель.
+    private func redirectToInitialFocusTargetIfNeeded(focused: Any) -> Bool {
+        guard let target = self.accessibilityInitialFocusTarget else {
+            return false
+        }
+        if CACurrentMediaTime() > self.accessibilityInitialFocusUntil || self.accessibilityInitialFocusAttemptsLeft <= 0 || target.sourceView?.window == nil {
+            self.accessibilityInitialFocusTarget = nil
+            return false
+        }
+        if let tracked = focused as? FocusTrackingAccessibilityElement, tracked === target {
+            // Курсор на цели — дальше пользователь ходит сам.
+            self.accessibilityInitialFocusTarget = nil
+            return false
+        }
+        if let focusedView = focused as? UIView, let sourceView = target.sourceView, focusedView === sourceView || focusedView.isDescendant(of: sourceView) {
+            self.accessibilityInitialFocusTarget = nil
+            return false
+        }
+        self.accessibilityInitialFocusAttemptsLeft -= 1
+        voDiagLog("[VO-DIAG] initial-focus-redirect to=«\(String((target.accessibilityLabel ?? "-").prefix(24)))» left=\(self.accessibilityInitialFocusAttemptsLeft)")
+        DispatchQueue.main.async { [weak self, weak target] in
+            guard let self, let target, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            let _ = self.customAccessibilityElements()
+            UIAccessibility.post(notification: .layoutChanged, argument: target)
+        }
+        return true
     }
 
     public func accessibilityFocusTarget(for itemNode: ListViewItemNode) -> Any {

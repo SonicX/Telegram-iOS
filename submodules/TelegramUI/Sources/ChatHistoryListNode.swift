@@ -6807,10 +6807,12 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                                 // (пост в сырую вьюшку VO может не применить).
                                 let target: Any = strongSelf.accessibilityFocusTarget(for: unreadNode)
                                 voDiagLog("[VO-DIAG] initial-focus → unread-plaque target=\(type(of: target))")
+                                strongSelf.accessibilityHoldInitialFocus(on: target)
                                 UIAccessibility.post(notification: .layoutChanged, argument: target)
                             } else if let trailingNode {
                                 let target: Any = strongSelf.accessibilityFocusTarget(for: trailingNode)
                                 voDiagLog("[VO-DIAG] initial-focus → trailing-message target=\(type(of: target))")
+                                strongSelf.accessibilityHoldInitialFocus(on: target)
                                 UIAccessibility.post(notification: .layoutChanged, argument: target)
                             } else {
                                 voDiagLog("[VO-DIAG] initial-focus → no-target")
