@@ -6214,7 +6214,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 anyFrameChanged = true
             }
         }
-        if anyFrameChanged {
+        // Пока курсор в списке, layoutChanged(nil) не постим: iOS
+        // пере-разрешает фокус и через 0.27с после нашего подскролла ставила
+        // курсор на соседнюю строку против хода свайпов (лог 2026-10-14:
+        // свайпы вверх 8→7→6→5→4, подскролл, сам собой 5). Штампы фреймов
+        // на вьюшках уже обновлены выше, касания их видят.
+        if anyFrameChanged, !self.accessibilityFocusIsCurrentlyInList {
             // ДЕБАУНС вместо троттлинга: инвалидация VO-дерева — только после
             // успокоения скролла (250мс без изменений). Пост layoutChanged(nil)
             // ВО ВРЕМЯ скролла заставлял VO перечитывать дерево посреди свайпа,
@@ -6673,7 +6678,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     // (tall-advance), а перепост давал бы ложные рестарты.
                     tallAsClip = fullHeight >= clip.height
                 }
-                if !tallAsClip, fullHeight > 1.0, drawnVisibleHeight < fullHeight * 0.5 {
+                // Корневые списки (чаты) — без перепоста: их строки
+                // активируются не по фрейму, а layoutChanged с элементом
+                // запоминается iOS, и через ~1с курсор откатывался на него со
+                // следующей строки (лог 2026-10-14: ТОПОР → ВИЛСАКОМ → ТОПОР).
+                if !tallAsClip, !self.accessibilityShieldsBarBands, fullHeight > 1.0, drawnVisibleHeight < fullHeight * 0.5 {
                     voDiagLog("[VO-DIAG][RING] scheduled idx=\(pinned) drawn=(\(Int(drawnFrame.minY)),h\(drawnFrame.isNull ? -1 : Int(drawnFrame.height))) vis=\(Int(drawnVisibleHeight)) full=\(Int(fullHeight))")
                     self.scheduleAccessibilityRingRepost(localIndex: pinned, drawnFrame: drawnFrame)
                 }
@@ -6943,6 +6952,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // на видимый, поэтому прыжок назад через ≥1 элемент на невидимый
         // элемент сразу после высокого сообщения однозначен: доделываем свайп
         // вперёд — на элемент, следующий за высоким.
+        if let fromIndex, self.redirectFastReversalIfNeeded(toIndex: toIndex, fromIndex: fromIndex, elementData: elementData.map { ($0.index, $0.element) }) {
+            return
+        }
         if let fromIndex, self.redirectAnchorReboundIfNeeded(focusedAny: focusedAny, toIndex: toIndex, fromIndex: fromIndex, elementData: elementData.map { ($0.index, $0.element) }) {
             return
         }
@@ -8379,6 +8391,58 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
         return nil
+    }
+
+    /// Откат на шаг ПРОТИВ хода свайпов через доли секунды после прихода на
+    /// строку. Человек, листающий подряд в одну сторону, не разворачивается
+    /// быстрее, чем услышит строку; такие развороты за 0.16–0.28с в логах
+    /// 2026-10-14 — ре-анкор iOS после подскролла/постов (ВИЛСАКОМ →
+    /// Анатолий, Книжки → Юрий). Возвращаем курсор на строку, где он был.
+    /// Только корневые списки (чаты): в истории чата своя машинерия.
+    private var accessibilityStepRunDirection: Int = 0
+    private var accessibilityStepRunLength: Int = 0
+    private var accessibilityLastStepTimestamp: CFTimeInterval = 0.0
+    private var accessibilityReversalRedirectTimestamps: [CFTimeInterval] = []
+
+    private func redirectFastReversalIfNeeded(toIndex: Int, fromIndex: Int, elementData: [(Int, UIAccessibilityElement)]) -> Bool {
+        guard self.accessibilityShieldsBarBands else {
+            return false
+        }
+        let now = CACurrentMediaTime()
+        let delta = toIndex - fromIndex
+        let sinceLastStep = now - self.accessibilityLastStepTimestamp
+        self.accessibilityLastStepTimestamp = now
+        if abs(delta) != 1 {
+            self.accessibilityStepRunDirection = 0
+            self.accessibilityStepRunLength = 0
+            return false
+        }
+        if delta == -self.accessibilityStepRunDirection, self.accessibilityStepRunLength >= 2, sinceLastStep < 0.35 {
+            // Не больше двух возвратов за 2с — если iOS упорно ре-анкорит,
+            // пинг-понг хуже одного лишнего шага.
+            self.accessibilityReversalRedirectTimestamps = self.accessibilityReversalRedirectTimestamps.filter { now - $0 < 2.0 }
+            if self.accessibilityReversalRedirectTimestamps.count < 2,
+               let previous = elementData.first(where: { $0.0 == fromIndex })?.1 as? FocusTrackingAccessibilityElement,
+               previous.sourceView?.window != nil {
+                self.accessibilityReversalRedirectTimestamps.append(now)
+                voDiagLog("[VO-DIAG][CC] fast-reversal from=\(fromIndex) to=\(toIndex) run=\(self.accessibilityStepRunLength) dt=\(String(format: "%.2f", sinceLastStep)) back-to=«\(String((previous.accessibilityLabel ?? "-").prefix(24)))»")
+                DispatchQueue.main.async { [weak self, weak previous] in
+                    guard let self, let previous, UIAccessibility.isVoiceOverRunning else {
+                        return
+                    }
+                    let _ = self.customAccessibilityElements()
+                    UIAccessibility.post(notification: .layoutChanged, argument: previous)
+                }
+                return true
+            }
+        }
+        if delta == self.accessibilityStepRunDirection {
+            self.accessibilityStepRunLength += 1
+        } else {
+            self.accessibilityStepRunDirection = delta
+            self.accessibilityStepRunLength = 1
+        }
+        return false
     }
 
     /// «Якорь» — строка, на которую МЫ поставили курсор (возврат из чата в
