@@ -987,10 +987,12 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         if let navigationBar = self.navigationBar {
             self.contentContainerNode.contentNode.addSubnode(navigationBar)
         }
-        // VoiceOver: навбар — ПЕРЕД лентой (Назад, заголовок, профиль,
-        // сообщения, панель ввода). Исключение — пока держим начальный фокус
-        // на плашке непрочитанных: тогда первой идёт лента, потому что iOS
-        // при открытии экрана ставит курсор на его первый элемент.
+        // VoiceOver: явный порядок «лента → навбар → панель ввода»: после
+        // новейшего сообщения — Назад, заголовок, профиль, затем поле ввода.
+        // Там шапку и ищут тестировщики: перед лентой (как в обычных
+        // приложениях) до неё свайпами не дойти — выше вся загруженная история
+        // (сборка 261019: «зашёл в канал, шапки нет»). По умолчанию порядок
+        // решала сортировка по (0,0) у обоих — недетерминированно.
         self.contentContainerNode.accessibilityElementsReorder = { [weak self] elements in
             guard let self, let navigationBar = self.navigationBar, navigationBar.isNodeLoaded, self.historyNodeContainer.isNodeLoaded else {
                 return elements
@@ -1002,15 +1004,14 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 return elements
             }
             let bar = result.remove(at: barIndex)
-            let historyFirst = self.historyNode.accessibilityInitialFocusPending
-            if historyFirst, let historyIndex = result.firstIndex(where: { ($0 as AnyObject) === historyView }) {
+            if let historyIndex = result.firstIndex(where: { ($0 as AnyObject) === historyView }) {
                 result.insert(bar, at: historyIndex + 1)
             } else {
-                result.insert(bar, at: 0)
+                result.insert(bar, at: barIndex)
             }
-            if self.voLastOrderHistoryFirst != historyFirst {
-                self.voLastOrderHistoryFirst = historyFirst
-                voDiagLog("[VO-DIAG][ORDER] chat navbar=\(historyFirst ? "after-history" : "first") count=\(result.count)")
+            if self.voLastOrderLogged != true {
+                self.voLastOrderLogged = true
+                voDiagLog("[VO-DIAG][ORDER] chat history→navbar count=\(result.count)")
             }
             return result
         }
@@ -1090,23 +1091,17 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             // осознанная цель пользователя: касание или свайп по навбару.
             // Без этого гейта recovery в первые 1.5 с после ухода из ленты
             // утаскивал курсор с «Назад» обратно на сообщение — как раньше
-            // с вкладками таб-бара. ЗАГОЛОВОК (titleView) сюда сознательно
-            // НЕ входит: на него iOS ошибочно бросает курсор при свайпе за
-            // новейшее сообщение, и forward-escape-редирект ниже должен
-            // по-прежнему уводить его на панель ввода.
+            // с вкладками таб-бара.
             if let navigationBar = self.navigationBar, focusedView.isDescendant(of: navigationBar.view) {
                 if let titleView = navigationBar.titleView, focusedView === titleView || focusedView.isDescendant(of: titleView) {
-                    // Заголовок ЛЕГИТИМЕН, кроме единственного случая: свайп
-                    // вперёд ЗА НОВЕЙШЕЕ сообщение (trailing+recent), когда
-                    // iOS ошибочно бросает курсор на заголовок — там должен
-                    // сработать forward-escape-редирект на поле ввода.
-                    // Раньше заголовок был исключён из вайтлиста целиком, и
-                    // recovery по recency-гейту утаскивал курсор при ЛЮБОМ
-                    // касании заголовка в первые 1.5с после чтения ленты
-                    // (жалоба: «навбар один раз кликается, курсор уходит»).
-                    if !(self.historyNode.accessibilityLastInListFocusWasAtTrailingEdge && self.historyNode.accessibilityFocusWasRecentlyInList) {
-                        return true
-                    }
+                    // Заголовок легитимен всегда: после новейшего сообщения
+                    // навбар — штатная следующая остановка (порядок задан явно).
+                    return true
+                } else if self.historyNode.accessibilityLastInListFocusWasAtTrailingEdge {
+                    // Навбар идёт сразу после новейшего сообщения (явный
+                    // порядок ленты, см. accessibilityElementsReorder) — это
+                    // штатная следующая остановка свайпа, а не «выпад».
+                    return true
                 } else if !self.historyNode.accessibilityFocusWasRecentlyInList {
                     // Осознанный уход в навбар (касание/свайпы по навбару спустя
                     // паузу). ВАЖНО: если фокус был в ленте только что — это
@@ -1125,13 +1120,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     // широкий вариант делал навбар недостижимым) легитимным
                     // не считаем — им займётся tall-advance/recovery.
                     if focusedObject is NavigationButtonNode, self.historyNode.accessibilityLastEscapeCameDirectlyFromList && self.historyNode.accessibilityLastInListFocusWasTallAsScreen {
-                        return false
-                    }
-                    // То же для НОВЕЙШЕГО сообщения: прямой уход с последнего
-                    // элемента ленты на «Назад» — это wrap при свайпе вперёд, даже
-                    // если сообщение слушали дольше 1.5 с (лог 2026-10-13:
-                    // sinceInList=1.53 → курсор остался в навбаре вместо поля ввода).
-                    if focusedObject is NavigationButtonNode, self.historyNode.accessibilityLastEscapeCameDirectlyFromList && self.historyNode.accessibilityLastInListFocusWasAtTrailingEdge {
                         return false
                     }
                     return true
@@ -1377,7 +1365,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     // сообщение. На фокус-ивенты (не чаще раза в 2с) печатаем состав навбара —
     // какие элементы и с какими фреймами видит VoiceOver. Убрать после фикса.
     private var voNavbarDumpObserver: Any?
-    private var voLastOrderHistoryFirst: Bool?
+    private var voLastOrderLogged: Bool?
     private var voNavbarDumpLastTime: Double = 0.0
 
     private func voInstallNavbarDumpDiagnostics() {
