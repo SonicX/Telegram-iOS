@@ -177,7 +177,62 @@ public final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
     // VoiceOver: реальные кнопки панели (левые иконки, центральное действие,
     // поиск) в порядке обхода. Возвращаются из accessibilityElements, чтобы
     // панель была полноценным VoiceOver-контейнером.
-    private var accessibilityElementViews: [UIView] = []
+    private var accessibilityLeftItemIds: [AnyHashable] = []
+    private var accessibilityLocale: String = "en"
+    private var accessibilitySearchTitle: String = ""
+
+    /// Кнопки собираем при КАЖДОМ запросе VoiceOver, а не один раз при
+    /// обновлении панели: панель пересоздаёт кнопку, когда меняется её текст
+    /// («Вкл. звук» ↔ «Убрать звук»), и закэшированный список держал уже
+    /// убранную кнопку — после нажатия курсор на неё больше не попадал, до
+    /// блокировки телефона (отзыв тестировщика 2026-10-16). Подписи
+    /// проставляем здесь же — новые кнопки приходят без них.
+    private var accessibilityElementViews: [UIView] {
+        guard let panelView = self.panel.view as? GlassControlPanelComponent.View else {
+            return []
+        }
+        var accessibilityViews: [UIView] = []
+        if let leftView = panelView.leftItemView {
+            // Кнопки-иконки слева (предложить пост, подарок, помощь) без
+            // подписи VoiceOver читал как безымянный элемент (лог
+            // 2026-10-14: «-» на (26,806) при свайпе за последнее
+            // сообщение канала). Порядок кнопок — порядок leftPanelItems.
+            let leftButtons = self.allButtons(in: leftView)
+            for (index, button) in leftButtons.enumerated() {
+                if index < self.accessibilityLeftItemIds.count, (button.accessibilityLabel ?? "").isEmpty {
+                    switch self.accessibilityLeftItemIds[index] {
+                    case AnyHashable("suggestPost"):
+                        button.accessibilityLabel = i18n("VoiceOver.Channel.SuggestPost", self.accessibilityLocale)
+                    case AnyHashable("gift"):
+                        button.accessibilityLabel = i18n("VoiceOver.Channel.Gift", self.accessibilityLocale)
+                    case AnyHashable("help"):
+                        button.accessibilityLabel = i18n("VoiceOver.Channel.Help", self.accessibilityLocale)
+                    default:
+                        break
+                    }
+                }
+                button.accessibilityTraits = .button
+            }
+            accessibilityViews.append(contentsOf: leftButtons)
+        }
+        if let centerView = panelView.centerItemView, let button = self.firstButton(in: centerView) {
+            if let title = self.accessibilityCenterActionTitle {
+                button.accessibilityLabel = title
+            }
+            button.accessibilityTraits = .button
+            accessibilityViews.append(button)
+        }
+        if let rightView = panelView.rightItemView {
+            for button in self.allButtons(in: rightView) {
+                if (button.accessibilityLabel ?? "").isEmpty {
+                    button.accessibilityLabel = self.accessibilitySearchTitle
+                }
+                button.accessibilityTraits = .button
+                accessibilityViews.append(button)
+            }
+        }
+        return accessibilityViews.filter { $0.window != nil }
+    }
 
     private let actionDisposable = MetaDisposable()
     private let badgeDisposable = MetaDisposable()
@@ -618,51 +673,25 @@ public final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
         // ниже), как это сделано у ChatTextInputPanelNode: собираем реальные
         // кнопки и проставляем им подписи. Активация (двойной тап) идёт через
         // штатный touchUpInside → buttonPressed()/действие компонента.
+        let previousCenterActionTitle = self.accessibilityCenterActionTitle
         self.accessibilityCenterActionTitle = centerAction?.title
-        var accessibilityViews: [UIView] = []
-        if let panelView = self.panel.view as? GlassControlPanelComponent.View {
-            if let leftView = panelView.leftItemView {
-                // Кнопки-иконки слева (предложить пост, подарок, помощь) без
-                // подписи VoiceOver читал как безымянный элемент (лог
-                // 2026-10-14: «-» на (26,806) при свайпе за последнее
-                // сообщение канала). Порядок кнопок — порядок leftPanelItems.
-                let locale = interfaceState.strings.baseLanguageCode
-                let leftButtons = self.allButtons(in: leftView)
-                for (index, button) in leftButtons.enumerated() {
-                    if index < leftPanelItems.count, (button.accessibilityLabel ?? "").isEmpty {
-                        switch leftPanelItems[index].id {
-                        case AnyHashable("suggestPost"):
-                            button.accessibilityLabel = i18n("VoiceOver.Channel.SuggestPost", locale)
-                        case AnyHashable("gift"):
-                            button.accessibilityLabel = i18n("VoiceOver.Channel.Gift", locale)
-                        case AnyHashable("help"):
-                            button.accessibilityLabel = i18n("VoiceOver.Channel.Help", locale)
-                        default:
-                            break
-                        }
-                    }
-                    button.accessibilityTraits = .button
+        // Центральная кнопка сменилась («Вкл. звук» → «Убрать звук»), пока
+        // курсор VoiceOver был на панели: ставим курсор на новую кнопку —
+        // старая убрана, и курсор на ней «повисал».
+        if UIAccessibility.isVoiceOverRunning, let previousCenterActionTitle, let newTitle = centerAction?.title, previousCenterActionTitle != newTitle,
+           self.isNodeLoaded, let focusedView = UIAccessibility.focusedElement(using: nil) as? UIView, focusedView.isDescendant(of: self.view) || focusedView.window == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, let panelView = self.panel.view as? GlassControlPanelComponent.View, let centerView = panelView.centerItemView, let button = self.firstButton(in: centerView), button.window != nil else {
+                    return
                 }
-                accessibilityViews.append(contentsOf: leftButtons)
-            }
-            if let centerView = panelView.centerItemView, let button = self.firstButton(in: centerView) {
-                if let title = centerAction?.title {
-                    button.accessibilityLabel = title
-                }
+                button.accessibilityLabel = self.accessibilityCenterActionTitle
                 button.accessibilityTraits = .button
-                accessibilityViews.append(button)
-            }
-            if let rightView = panelView.rightItemView {
-                for button in self.allButtons(in: rightView) {
-                    if (button.accessibilityLabel ?? "").isEmpty {
-                        button.accessibilityLabel = interfaceState.strings.Common_Search
-                    }
-                    button.accessibilityTraits = .button
-                    accessibilityViews.append(button)
-                }
+                UIAccessibility.post(notification: .layoutChanged, argument: button)
             }
         }
-        self.accessibilityElementViews = accessibilityViews
+        self.accessibilityLeftItemIds = leftPanelItems.map(\.id)
+        self.accessibilityLocale = interfaceState.strings.baseLanguageCode
+        self.accessibilitySearchTitle = interfaceState.strings.Common_Search
         
         /*if self.presentationInterfaceState != interfaceState || force {
             let previousState = self.presentationInterfaceState
