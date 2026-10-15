@@ -346,9 +346,7 @@ extension ChatControllerImpl {
                 // сообщения непосредственно перед вызовом, читаем его до
                 // потребления в animateIn.
                 var effectiveActionsSignal = actionsSignal
-                var voReactionsOnlyMode = false
                 if ContextController.accessibilityFocusReactionsOnNextPresent, UIAccessibility.isVoiceOverRunning {
-                    voReactionsOnlyMode = true
                     effectiveActionsSignal = actionsSignal
                     |> map { items -> ContextController.Items in
                         var items = items
@@ -367,10 +365,13 @@ extension ChatControllerImpl {
                 // заново поверх подтверждения — остаётся только озвучка
                 // «Реакция проставлена». (Выбрать программно пункт ротора
                 // «Реакции» iOS не позволяет — ротор сбрасывается на начало.)
-                var voReturnFocusToMessageId: MessageId?
-                if voReactionsOnlyMode {
-                    voReturnFocusToMessageId = message.id
-                }
+                // Возврат — после ЛЮБОГО закрытия меню («Сохранить в Избранное»,
+                // «Копировать», «Закрепить»…): без него iOS ставила курсор на
+                // первый элемент ленты — самое старое загруженное сообщение, на
+                // десятки сообщений назад (лог 2026-10-16). Исключения: выбор
+                // реакции (см. reactionSelected) и действия, уводящие курсор в
+                // другое место (поле ввода, окно пересылки) — см. dismissed.
+                var voReturnFocusToMessageId: MessageId? = message.id
                 // VoiceOver: текст подтверждения выбора реакции — постится в
                 // dismissed, обрывая системное перечитывание сообщения.
                 var voReactionAnnouncement: String?
@@ -402,20 +403,41 @@ extension ChatControllerImpl {
                     }
                     if let self, let messageId = voReturnFocusToMessageId, UIAccessibility.isVoiceOverRunning {
                         voReturnFocusToMessageId = nil
-                        var targetView: UIView?
-                        self.chatDisplayNode.historyNode.forEachItemNode { itemNode in
-                            if targetView == nil, let itemNode = itemNode as? ChatMessageItemView, itemNode.item?.message.id == messageId {
-                                targetView = itemNode.view
+                        let historyNode = self.chatDisplayNode.historyNode
+                        var targetNode: ChatMessageItemView?
+                        historyNode.forEachItemNode { itemNode in
+                            if targetNode == nil, let itemNode = itemNode as? ChatMessageItemView, itemNode.item?.message.id == messageId {
+                                targetNode = itemNode
                             }
                         }
-                        if let targetView {
+                        if let targetNode {
+                            // Держим цель сразу: пока курсор не на сообщении,
+                            // VoiceOver видит ленту начиная с него, и его
+                            // собственная пере-установка курсора после закрытия
+                            // меню встаёт прямо на сообщение.
+                            let target = historyNode.accessibilityFocusTarget(for: targetNode)
+                            historyNode.accessibilityHoldInitialFocus(on: target, duration: 2.0)
                             // Даём дереву доступности восстановиться после
                             // accessibilityElementsHidden = false, затем ставим
-                            // курсор обратно на сообщение.
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak targetView] in
-                                if let targetView {
-                                    UIAccessibility.post(notification: .layoutChanged, argument: targetView)
+                            // курсор обратно на сообщение — если он ещё не там
+                            // и не ушёл осознанно из ленты (поле ввода после
+                            // «Ответить», окно пересылки, другой экран).
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak historyNode] in
+                                guard let historyNode, historyNode.accessibilityInitialFocusPending, historyNode.view.window != nil else {
+                                    return
                                 }
+                                if let focused = UIAccessibility.focusedElement(using: nil) {
+                                    var focusedView: UIView?
+                                    if let view = focused as? UIView {
+                                        focusedView = view
+                                    } else if let element = focused as? UIAccessibilityElement {
+                                        focusedView = (element as? FocusTrackingAccessibilityElement)?.sourceView ?? (element.accessibilityContainer as? UIView)
+                                    }
+                                    if let focusedView, !focusedView.isDescendant(of: historyNode.view) {
+                                        return
+                                    }
+                                }
+                                UIAccessibility.post(notification: .layoutChanged, argument: target)
                             }
                         }
                     }
