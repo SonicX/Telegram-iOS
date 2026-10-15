@@ -573,7 +573,15 @@ public final class NavigationContainer: ASDisplayNode, ASGestureRecognizerDelega
                 toValue.value.setIgnoreAppearanceMethodInvocations(true)
                 self.addSubnode(toValue.value.displayNode)
                 toValue.value.setIgnoreAppearanceMethodInvocations(false)
-                toValue.value.displayNode.recursivelyEnsureDisplaySynchronously(true)
+                // С VoiceOver переход идёт этой (мгновенной) веткой всегда — а
+                // синхронная отрисовка всего экрана на главном потоке вешала
+                // приложение на 2–3 с при выходе из канала: список чатов под
+                // VoiceOver держит материализованными все строки (жалоба
+                // тестировщиков на сборку 261019+). Без неё содержимое
+                // дорисуется асинхронно за доли секунды.
+                if !UIAccessibility.isVoiceOverRunning {
+                    toValue.value.displayNode.recursivelyEnsureDisplaySynchronously(true)
+                }
                 toValue.value.viewDidAppear(false)
             }
             self.ignoreInputHeight = false
