@@ -22,6 +22,7 @@ import TextFormat
 import PhotoResources
 import ListSectionComponent
 import ListItemSwipeOptionContainer
+import SGStrings
 
 private let avatarFont = avatarPlaceholderFont(size: 15.0)
 private let readIconImage: UIImage? = generateTintedImage(image: UIImage(bundleImageName: "Chat/Message/MenuReadIcon"), color: .white)?.withRenderingMode(.alwaysTemplate)
@@ -1440,7 +1441,33 @@ public final class PeerListItemComponent: Component {
             // Строка — пустая кнопка с текстом во вложенных вьюшках: VoiceOver читал
             // просто «кнопка» (выбор, кому показать историю, списки зрителей).
             self.containerButton.accessibilityLabel = component.title
-            self.containerButton.accessibilityValue = component.subtitle?.text
+            // Реакция зрителя истории — иконка справа, VoiceOver её не читал.
+            var accessibilityValueParts: [String] = []
+            if let subtitle = component.subtitle?.text, !subtitle.isEmpty {
+                accessibilityValueParts.append(subtitle)
+            }
+            if let reaction = component.reaction {
+                let locale = component.strings.baseLanguageCode
+                switch reaction.reaction {
+                case let .builtin(value):
+                    accessibilityValueParts.append("\(i18n("VoiceOver.Story.ViewerReaction", locale)): \(value)")
+                case .custom:
+                    var alt: String?
+                    for attribute in reaction.file?.attributes ?? [] {
+                        if case let .CustomEmoji(_, _, altValue, _) = attribute, !altValue.isEmpty {
+                            alt = altValue
+                        }
+                    }
+                    if let alt {
+                        accessibilityValueParts.append("\(i18n("VoiceOver.Story.ViewerReaction", locale)): \(alt)")
+                    } else {
+                        accessibilityValueParts.append(i18n("VoiceOver.Story.ViewerReaction", locale))
+                    }
+                case .stars:
+                    accessibilityValueParts.append(i18n("VoiceOver.Story.ViewerReactionStars", locale))
+                }
+            }
+            self.containerButton.accessibilityValue = accessibilityValueParts.isEmpty ? nil : accessibilityValueParts.joined(separator: ", ")
             var accessibilityTraits: UIAccessibilityTraits = .button
             if case .editing(true, _) = component.selectionState {
                 accessibilityTraits.insert(.selected)

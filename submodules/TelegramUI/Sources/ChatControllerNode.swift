@@ -214,6 +214,22 @@ class ChatNodeContainer: ASDisplayNode {
     var contentNode: ASDisplayNode {
         return self
     }
+
+    /// VoiceOver: явный порядок дочерних элементов. По умолчанию AsyncDisplayKit
+    /// сортирует их по левому верхнему углу, а лента и навбар оба начинаются в
+    /// (0,0) — при равенстве лента шла ПЕРЕД навбаром. Вместе с кнопкой
+    /// «Написать сообщение», дописанной в конец ленты, это давало порядок
+    /// «лента → навбар → панель ввода»: свайпами вправо навбар пропадал, а
+    /// свайпами влево курсор кружил по навбару и панели ввода (отзыв
+    /// тестировщика 2026-10-15).
+    var accessibilityElementsReorder: (([Any]) -> [Any])?
+
+    @objc func customAccessibilityElements() -> [Any]? {
+        guard let reorder = self.accessibilityElementsReorder, self.isNodeLoaded else {
+            return nil
+        }
+        return reorder(self.accessibilityElements ?? [])
+    }
     
     override init() {
         super.init()
@@ -971,6 +987,33 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         if let navigationBar = self.navigationBar {
             self.contentContainerNode.contentNode.addSubnode(navigationBar)
         }
+        // VoiceOver: навбар — ПЕРЕД лентой (Назад, заголовок, профиль,
+        // сообщения, панель ввода). Исключение — пока держим начальный фокус
+        // на плашке непрочитанных: тогда первой идёт лента, потому что iOS
+        // при открытии экрана ставит курсор на его первый элемент.
+        self.contentContainerNode.accessibilityElementsReorder = { [weak self] elements in
+            guard let self, let navigationBar = self.navigationBar, navigationBar.isNodeLoaded, self.historyNodeContainer.isNodeLoaded else {
+                return elements
+            }
+            let barView = navigationBar.view
+            let historyView = self.historyNodeContainer.view
+            var result = elements
+            guard let barIndex = result.firstIndex(where: { ($0 as AnyObject) === barView }) else {
+                return elements
+            }
+            let bar = result.remove(at: barIndex)
+            let historyFirst = self.historyNode.accessibilityInitialFocusPending
+            if historyFirst, let historyIndex = result.firstIndex(where: { ($0 as AnyObject) === historyView }) {
+                result.insert(bar, at: historyIndex + 1)
+            } else {
+                result.insert(bar, at: 0)
+            }
+            if self.voLastOrderHistoryFirst != historyFirst {
+                self.voLastOrderHistoryFirst = historyFirst
+                voDiagLog("[VO-DIAG][ORDER] chat navbar=\(historyFirst ? "after-history" : "first") count=\(result.count)")
+            }
+            return result
+        }
         
         self.inputPanelContainerNode.expansionUpdated = { [weak self] transition in
             guard let strongSelf = self else {
@@ -1177,29 +1220,11 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             }
             return false
         }
-        // VoiceOver: сразу за новейшим сообщением VO должен идти на панель под
-        // лентой (плашка ответа, «Написать сообщение» или «Вступить в группу»),
-        // а не заворачивать курсор на «Назад» в навбаре.
-        self.historyNode.accessibilityTrailingRealElementsProvider = { [weak self] in
-            guard let self, let inputPanelNode = self.inputPanelNode else {
-                return []
-            }
-            if let accessoryPanelNode = self.accessoryPanelNode,
-               let target = accessoryPanelNode.accessibilityElements?.first as? UIView, !target.isHidden, target.alpha > 0.01, target.window != nil {
-                return [target]
-            }
-            if let textInputPanelNode = inputPanelNode as? ChatTextInputPanelNode {
-                if let target = textInputPanelNode.composeAccessibilityButtonView() {
-                    return [target]
-                }
-                return []
-            }
-            if let subscriberPanelNode = inputPanelNode as? ChatChannelSubscriberInputPanelNode,
-               let target = subscriberPanelNode.accessibilityElements?.first as? UIView, !target.isHidden, target.alpha > 0.01, target.window != nil {
-                return [target]
-            }
-            return []
-        }
+        // Дубль кнопки панели в конце ленты больше не нужен: навбар теперь
+        // стоит ПЕРЕД лентой, и после новейшего сообщения VoiceOver сам идёт
+        // на панель ввода. С дублем порядок становился несимметричным —
+        // свайпы влево с «Написать сообщение» уходили в навбар по кругу.
+        self.historyNode.accessibilityTrailingRealElementsProvider = nil
         // VoiceOver (Баг 2): trailing-кнопки в ленте истории. Info возвращает
         // подпись если кнопку надо показать (иначе nil); Activate — действие.
         self.historyNode.accessibilityComposeButtonInfo = { [weak self] in
@@ -1352,6 +1377,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     // сообщение. На фокус-ивенты (не чаще раза в 2с) печатаем состав навбара —
     // какие элементы и с какими фреймами видит VoiceOver. Убрать после фикса.
     private var voNavbarDumpObserver: Any?
+    private var voLastOrderHistoryFirst: Bool?
     private var voNavbarDumpLastTime: Double = 0.0
 
     private func voInstallNavbarDumpDiagnostics() {

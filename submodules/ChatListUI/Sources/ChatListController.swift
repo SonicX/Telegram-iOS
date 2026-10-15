@@ -2454,6 +2454,38 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         // (effectiveContainerNode) в peerSelected.
         self.chatListDisplayNode.mainContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
         self.chatListDisplayNode.effectiveContainerNode.currentItemNode.accessibilityFocusHandlingSuspended = false
+
+        // VoiceOver: цель возврата выбираем уже на СТАРТЕ pop и сразу держим
+        // её — список отдаёт VoiceOver элементы начиная с этой строки, и iOS
+        // по окончании перехода сама ставит курсор прямо на неё. Раньше пост
+        // шёл через 0.65с после появления экрана, а до того курсор вставал на
+        // «Избранное» и потом переезжал (лог 2026-10-14, сборка 261018).
+        if let peerId = self.voReturnFocusToPeerId, UIAccessibility.isVoiceOverRunning {
+            let listNode = self.chatListDisplayNode.effectiveContainerNode.currentItemNode
+            if let targetNode = self.voReturnTargetNode(in: listNode, peerId: peerId) {
+                listNode.ensureItemNodeVisible(targetNode, animated: false)
+                let target: Any = listNode.accessibilityFocusTarget(for: targetNode)
+                listNode.accessibilityHoldInitialFocus(on: target, duration: 3.0)
+                listNode.accessibilityNoteProgrammaticFocus(on: target)
+                self.voReturnFocusHeldEarly = true
+                voDiagLog("[VO-DIAG] return-focus-to-opened-chat held target=\(type(of: target))")
+            }
+        }
+    }
+
+    private var voReturnFocusHeldEarly = false
+
+    private func voReturnTargetNode(in listNode: ChatListNode, peerId: EnginePeer.Id) -> ChatListItemNode? {
+        var targetNode: ChatListItemNode?
+        listNode.forEachItemNode { itemNode in
+            guard targetNode == nil, let itemNode = itemNode as? ChatListItemNode, let item = itemNode.item else {
+                return
+            }
+            if case let .peer(peerData) = item.content, peerData.peer.peerId == peerId, itemNode.isNodeLoaded {
+                targetNode = itemNode
+            }
+        }
+        return targetNode
     }
 
     override public func viewDidAppear(_ animated: Bool) {
@@ -2469,22 +2501,26 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         // соседний чат.
         if let peerId = self.voReturnFocusToPeerId {
             self.voReturnFocusToPeerId = nil
+            let heldEarly = self.voReturnFocusHeldEarly
+            self.voReturnFocusHeldEarly = false
             if UIAccessibility.isVoiceOverRunning {
                 let listNode = self.chatListDisplayNode.effectiveContainerNode.currentItemNode
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak listNode] in
-                    guard let listNode, UIAccessibility.isVoiceOverRunning else {
+                if heldEarly, listNode.accessibilityInitialFocusPending, let targetNode = self.voReturnTargetNode(in: listNode, peerId: peerId) {
+                    // Цель уже держится с viewWillAppear — ставим курсор сразу,
+                    // без задержек.
+                    let target: Any = listNode.accessibilityFocusTarget(for: targetNode)
+                    voDiagLog("[VO-DIAG] return-focus-to-opened-chat posted-now target=\(type(of: target))")
+                    UIAccessibility.post(notification: .layoutChanged, argument: target)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak listNode] in
+                    guard let self, let listNode, UIAccessibility.isVoiceOverRunning else {
                         return
                     }
-                    var targetNode: ChatListItemNode?
-                    listNode.forEachItemNode { itemNode in
-                        guard targetNode == nil, let itemNode = itemNode as? ChatListItemNode, let item = itemNode.item else {
-                            return
-                        }
-                        if case let .peer(peerData) = item.content, peerData.peer.peerId == peerId, itemNode.isNodeLoaded {
-                            targetNode = itemNode
-                        }
+                    // Курсор уже на цели — второй пост только переозвучил бы её.
+                    if heldEarly && !listNode.accessibilityInitialFocusPending {
+                        return
                     }
-                    guard let targetNode else {
+                    guard let targetNode = self.voReturnTargetNode(in: listNode, peerId: peerId) else {
                         voDiagLog("[VO-DIAG] return-focus-to-opened-chat row-not-found")
                         return
                     }

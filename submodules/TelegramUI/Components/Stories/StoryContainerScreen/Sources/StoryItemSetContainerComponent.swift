@@ -549,7 +549,43 @@ public final class StoryItemSetContainerComponent: Component {
         
         var preparingToDisplayViewList: Bool = false
         
-        var viewListDisplayState: ViewListDisplayState = .hidden
+        var viewListDisplayState: ViewListDisplayState = .hidden {
+            didSet {
+                if (oldValue == .hidden) != (self.viewListDisplayState == .hidden) {
+                    self.voViewListVisibilityChanged(isVisible: self.viewListDisplayState != .hidden)
+                }
+            }
+        }
+
+        /// VoiceOver: список просмотревших — модальное окно. При открытии курсор
+        /// уходит внутрь списка (и не блуждает по истории под ним), при
+        /// закрытии возвращается на панель просмотров внизу истории.
+        private func voViewListVisibilityChanged(isVisible: Bool) {
+            guard UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            // Ждём, пока список встанет на место (анимация ~0.4с).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                guard let self, let component = self.component else {
+                    return
+                }
+                for (id, viewList) in self.viewLists {
+                    viewList.view.view?.accessibilityViewIsModal = isVisible && self.viewListDisplayState != .hidden && id == component.slice.item.id
+                }
+                if isVisible {
+                    guard self.viewListDisplayState != .hidden, let viewListView = self.viewLists[component.slice.item.id]?.view.view else {
+                        return
+                    }
+                    UIAccessibility.post(notification: .screenChanged, argument: viewListView)
+                } else {
+                    guard self.viewListDisplayState == .hidden else {
+                        return
+                    }
+                    let footerView = self.visibleItems[component.slice.item.id]?.footerPanel?.view
+                    UIAccessibility.post(notification: .screenChanged, argument: footerView)
+                }
+            }
+        }
         
         private var targetViewListDisplayStateIsFull: Bool = false
         private var viewListMetrics: (minHeight: CGFloat, maxHeight: CGFloat, currentHeight: CGFloat)?
@@ -5747,7 +5783,18 @@ public final class StoryItemSetContainerComponent: Component {
                 self?.component?.navigate(direction)
             }
             contentView.accessibilityClose = { [weak self] in
-                self?.component?.close()
+                guard let self else {
+                    return
+                }
+                // Жест «назад» при открытом списке просмотревших закрывает
+                // только список, а не всю историю — как кнопка закрытия.
+                if self.viewListDisplayState != .hidden {
+                    self.viewListDisplayState = .hidden
+                    self.isSearchActive = false
+                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
+                } else {
+                    self.component?.close()
+                }
             }
             
             let contentFrame = contentView.convert(contentView.bounds, to: self.componentContainerView)

@@ -272,6 +272,9 @@
 "Settings.NY.Style.lightning" = "Молнии";
 "Settings.NY.Notice" = "Доступны только на ограниченное время!";
 
+"VoiceOver.Story.ViewListSort" = "Сортировка";
+"VoiceOver.Story.ViewerReaction" = "Реакция";
+"VoiceOver.Story.ViewerReactionStars" = "Реакция: звёзды";
 "VoiceOver.Story.Like" = "Поставить лайк";
 "VoiceOver.Story.Liked" = "Лайк поставлен";
 "VoiceOver.Message.RepostToStory" = "Опубликовать в истории";

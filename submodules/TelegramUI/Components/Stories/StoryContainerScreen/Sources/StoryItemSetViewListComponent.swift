@@ -18,6 +18,7 @@ import Markdown
 import ButtonComponent
 import NavigationSearchComponent
 import TabSelectorComponent
+import SGStrings
 import OptionButtonComponent
 import ContextUI
 import BalancedTextComponent
@@ -1286,6 +1287,16 @@ public final class StoryItemSetViewListComponent: Component {
     }
 
     public final class View: UIView, UIScrollViewDelegate {
+        /// VoiceOver: жест «назад» (зигзаг двумя пальцами) внутри списка
+        /// просмотревших сворачивает список, а не закрывает историю.
+        override public func accessibilityPerformEscape() -> Bool {
+            guard let component = self.component else {
+                return false
+            }
+            component.close()
+            return true
+        }
+
         private let navigationBarBackground: BlurredBackgroundView
         private let navigationSearch = ComponentView<Empty>()
         private let navigationSeparator: SimpleLayer
@@ -1763,6 +1774,20 @@ public final class StoryItemSetViewListComponent: Component {
                 transition.setAlpha(view: orderSelectorView, alpha: component.isSearchActive ? 0.0 : 1.0)
                 
                 orderSelectorView.isHidden = !displaySortSelector
+                // VoiceOver: кнопка-иконка сортировки была без подписи.
+                let sortModeTitle: String
+                switch self.sortMode {
+                case .repostsFirst:
+                    sortModeTitle = component.strings.Story_ViewList_ContextSortReposts
+                case .reactionsFirst:
+                    sortModeTitle = component.strings.Story_ViewList_ContextSortReactions
+                case .recentFirst:
+                    sortModeTitle = component.strings.Story_ViewList_ContextSortRecent
+                }
+                orderSelectorView.isAccessibilityElement = displaySortSelector && !component.isSearchActive
+                orderSelectorView.accessibilityLabel = i18n("VoiceOver.Story.ViewListSort", component.strings.baseLanguageCode)
+                orderSelectorView.accessibilityValue = sortModeTitle
+                orderSelectorView.accessibilityTraits = .button
             }
             
             let navigationBarFrame = CGRect(origin: CGPoint(x: 0.0, y: availableSize.height - visualHeight + 12.0), size: CGSize(width: availableSize.width, height: navigationHeight))

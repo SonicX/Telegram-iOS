@@ -461,7 +461,14 @@ public final class NavigationContainer: ASDisplayNode, ASGestureRecognizerDelega
     public var shouldAnimateDisappearance: Bool = false
     
     private func topTransition(from fromValue: Child?, to toValue: Child?, transitionType: PendingChild.TransitionType, layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
-        if case .animated = transition, let fromValue = fromValue, let toValue = toValue {
+        // С VoiceOver переход между экранами — мгновенный. Пока шла анимация
+        // (~0.5с), оба экрана были в окне: VoiceOver ставил курсор на первый
+        // элемент нового экрана, уходящий экран слал свои события фокуса, и
+        // курсор потом секунду-две «искал» плашку непрочитанных или чат, из
+        // которого вернулись (жалоба тестировщиков 2026-10-15). Незрячему
+        // пользователю анимация ничего не даёт. Интерактивный свайп «назад»
+        // пальцем идёт другим путём и не затрагивается.
+        if case .animated = transition, !UIAccessibility.isVoiceOverRunning, let fromValue = fromValue, let toValue = toValue {
             if let currentTransition = self.state.transition {
                 currentTransition.coordinator.performCompletion(completion: {
                 })

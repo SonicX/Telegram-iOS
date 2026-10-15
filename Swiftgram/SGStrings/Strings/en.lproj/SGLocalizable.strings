@@ -272,6 +272,9 @@
 "Settings.NY.Style.lightning" = "Lightning";
 "Settings.NY.Notice" = "Available for a limited time only!";
 
+"VoiceOver.Story.ViewListSort" = "Sort";
+"VoiceOver.Story.ViewerReaction" = "Reaction";
+"VoiceOver.Story.ViewerReactionStars" = "Reaction: stars";
 "VoiceOver.Story.Like" = "Like";
 "VoiceOver.Story.Liked" = "Liked";
 "VoiceOver.Message.RepostToStory" = "Repost to Story";

@@ -6788,9 +6788,18 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                         isPlainInitialOpen = true
                     }
                     if isPlainInitialOpen {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak strongSelf] in
-                            guard let strongSelf, UIAccessibility.isVoiceOverRunning, strongSelf.isNodeLoaded, strongSelf.view.window != nil else {
-                                return
+                        // Цель выбираем СРАЗУ после первой транзакции (строки
+                        // уже на месте — Telegram сам ставит плашку на экран) и
+                        // сразу же «держим» её: пока курсор не дошёл, VoiceOver
+                        // видит ленту начиная с цели, и его собственный фокус
+                        // после пуша встаёт прямо на неё. Раньше пост шёл через
+                        // 0.6с, а iOS после пуша ставила курсор на самое старое
+                        // загруженное сообщение (y=-12000) — дальше курсор
+                        // секунду-две «искал» плашку, а то и не находил (лог
+                        // 2026-10-14, сборка 261018).
+                        let findTarget: () -> (Any, String)? = { [weak strongSelf] in
+                            guard let strongSelf else {
+                                return nil
                             }
                             var unreadNode: ChatUnreadItemNode?
                             var trailingNode: ListViewItemNode?
@@ -6802,21 +6811,40 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                                     trailingNode = itemNode
                                 }
                             }
+                            // Плашка — item node: постим в её пуловый VO-элемент
+                            // (пост в сырую вьюшку VO может не применить).
                             if let unreadNode {
-                                // Плашка — item node: постим в её пуловый VO-элемент
-                                // (пост в сырую вьюшку VO может не применить).
-                                let target: Any = strongSelf.accessibilityFocusTarget(for: unreadNode)
-                                voDiagLog("[VO-DIAG] initial-focus → unread-plaque target=\(type(of: target))")
-                                strongSelf.accessibilityHoldInitialFocus(on: target)
-                                UIAccessibility.post(notification: .layoutChanged, argument: target)
+                                return (strongSelf.accessibilityFocusTarget(for: unreadNode), "unread-plaque")
                             } else if let trailingNode {
-                                let target: Any = strongSelf.accessibilityFocusTarget(for: trailingNode)
-                                voDiagLog("[VO-DIAG] initial-focus → trailing-message target=\(type(of: target))")
-                                strongSelf.accessibilityHoldInitialFocus(on: target)
-                                UIAccessibility.post(notification: .layoutChanged, argument: target)
-                            } else {
-                                voDiagLog("[VO-DIAG] initial-focus → no-target")
+                                return (strongSelf.accessibilityFocusTarget(for: trailingNode), "trailing-message")
                             }
+                            return nil
+                        }
+                        DispatchQueue.main.async { [weak strongSelf] in
+                            guard let strongSelf, UIAccessibility.isVoiceOverRunning, strongSelf.isNodeLoaded else {
+                                return
+                            }
+                            guard let (target, kind) = findTarget() else {
+                                voDiagLog("[VO-DIAG] initial-focus → no-target")
+                                return
+                            }
+                            voDiagLog("[VO-DIAG] initial-focus → \(kind) target=\(type(of: target))")
+                            strongSelf.accessibilityHoldInitialFocus(on: target, duration: 3.0)
+                            if strongSelf.view.window != nil {
+                                UIAccessibility.post(notification: .layoutChanged, argument: target)
+                            }
+                        }
+                        // Страховка: если к концу пуша курсор так и не на цели —
+                        // ещё один пост (держатель цели при этом жив).
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak strongSelf] in
+                            guard let strongSelf, UIAccessibility.isVoiceOverRunning, strongSelf.isNodeLoaded, strongSelf.view.window != nil else {
+                                return
+                            }
+                            guard strongSelf.accessibilityInitialFocusPending, let (target, kind) = findTarget() else {
+                                return
+                            }
+                            voDiagLog("[VO-DIAG] initial-focus-retry → \(kind)")
+                            UIAccessibility.post(notification: .layoutChanged, argument: target)
                         }
                     }
                 }
