@@ -55,6 +55,19 @@ public enum ChatTitleActivityNodeState: Equatable {
         }
         return nil
     }
+
+    /// Текст подстроки для VoiceOver — то, что сейчас показано под названием
+    /// чата: «N участников», «был(а) …», «печатает…».
+    public var accessibilityText: String? {
+        switch self {
+        case .none:
+            return nil
+        case let .info(text, _):
+            return text.string.isEmpty ? nil : text.string
+        case let .typingText(text, _), let .uploading(text, _), let .recordingVoice(text, _), let .recordingVideo(text, _), let .playingGame(text, _), let .choosingSticker(text, _), let .interactingWithEmoji(text, _):
+            return text.string.isEmpty ? nil : text.string
+        }
+    }
 }
 
 public class ChatTitleActivityNode: ASDisplayNode {

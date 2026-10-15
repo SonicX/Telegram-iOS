@@ -5139,11 +5139,31 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     strongSelf.view.accessibilityLabel = strongSelf.accessibilityLabel
                     strongSelf.view.accessibilityValue = strongSelf.accessibilityValue
                     
+                    // VoiceOver: объекты действий («Прочитано», «Закрепить»…)
+                    // переиспользуем между обновлениями строки. Раньше на каждое
+                    // обновление (новое сообщение, счётчик, статус — в каналах и
+                    // группах постоянно) создавались новые, и действие, выбранное
+                    // свайпом вниз, к двойному тапу уже было заменено — «Прочитано»
+                    // срабатывало не с первого раза (отзыв тестировщиков 2026-10-15).
                     if !customActions.isEmpty {
-                        strongSelf.view.accessibilityCustomActions = customActions.map({ action -> UIAccessibilityCustomAction in
-                            return ChatListItemAccessibilityCustomAction(name: action.name, target: strongSelf, selector: #selector(strongSelf.performLocalAccessibilityCustomAction(_:)), key: action.key)
+                        var updatedCache: [Int32: ChatListItemAccessibilityCustomAction] = [:]
+                        let mappedActions = customActions.map({ action -> UIAccessibilityCustomAction in
+                            let mapped: ChatListItemAccessibilityCustomAction
+                            if let cached = strongSelf.accessibilityCustomActionCache[action.key], cached.name == action.name {
+                                mapped = cached
+                            } else {
+                                mapped = ChatListItemAccessibilityCustomAction(name: action.name, target: strongSelf, selector: #selector(strongSelf.performLocalAccessibilityCustomAction(_:)), key: action.key)
+                            }
+                            updatedCache[action.key] = mapped
+                            return mapped
                         })
+                        strongSelf.accessibilityCustomActionCache = updatedCache
+                        let current = strongSelf.view.accessibilityCustomActions ?? []
+                        if current.count != mappedActions.count || zip(current, mappedActions).contains(where: { $0 !== $1 }) {
+                            strongSelf.view.accessibilityCustomActions = mappedActions
+                        }
                     } else {
+                        strongSelf.accessibilityCustomActionCache = [:]
                         strongSelf.view.accessibilityCustomActions = nil
                     }
                     
@@ -5466,10 +5486,16 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         }
     }
     
-    @objc private func performLocalAccessibilityCustomAction(_ action: UIAccessibilityCustomAction) {
+    private var accessibilityCustomActionCache: [Int32: ChatListItemAccessibilityCustomAction] = [:]
+
+    // Селектор действия VoiceOver должен вернуть Bool (успех) — без него
+    // iOS получала мусор вместо результата.
+    @objc private func performLocalAccessibilityCustomAction(_ action: UIAccessibilityCustomAction) -> Bool {
         if let action = action as? ChatListItemAccessibilityCustomAction {
             self.revealOptionSelected(ItemListRevealOption(key: action.key, title: "", icon: .none, color: .black, textColor: .white), animated: false)
+            return true
         }
+        return false
     }
     
     override public func snapshotForReordering() -> UIView? {

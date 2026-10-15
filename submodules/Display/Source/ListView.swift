@@ -6150,7 +6150,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             // Индекс строки пулового элемента — по нему видно, на сколько
             // строк реально прыгнул курсор.
             let pinString = (focused as? FocusTrackingAccessibilityElement)?.pinnedLocalIndex.map { " pin=\($0)" } ?? ""
-            voDiagLog("[VO-DIAG] focus → type=\(typeName) label=«\(String(label.prefix(48)))» frame=\(frameString)\(pinString)")
+            var valueString = ""
+            if let value = (focused as? NSObject)?.accessibilityValue, !value.isEmpty {
+                valueString = " value=«\(String(value.replacingOccurrences(of: "\n", with: " ").prefix(40)))»"
+            }
+            voDiagLog("[VO-DIAG] focus → type=\(typeName) label=«\(String(label.prefix(48)))»\(valueString) frame=\(frameString)\(pinString)")
         }
     }()
 

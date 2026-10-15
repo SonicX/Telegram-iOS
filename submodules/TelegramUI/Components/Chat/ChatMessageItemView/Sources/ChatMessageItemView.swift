@@ -598,6 +598,10 @@ public final class ChatMessageAccessibilityData {
             label = "\(forwardLabel). \(label)"
         }
         
+        // Реакции и просмотры — в конце озвучки сообщения, после даты и статуса
+        // (просьба тестировщика 2026-10-15: раньше их было слышно только в
+        // роторе действий).
+        var voSummarySuffix: String?
         if isSelected == nil {
             var canReply = item.controllerInteraction.canSetupReply(item.message) == .reply
             for media in item.content.firstMessage.media {
@@ -634,7 +638,7 @@ public final class ChatMessageAccessibilityData {
             // озвучка), в конце «Открыть меню». Свайпы влево/вправо в роторе
             // действий iOS всегда уводят на соседний элемент — перехватить их
             // нельзя, поэтому перебор сделан свайпами вниз/вверх.
-            var voReactionEntries: [(title: String, value: MessageReaction.Reaction)] = []
+            var voReactionEntries: [(name: String, count: Int32, value: MessageReaction.Reaction)] = []
             if let reactionsAttribute = item.message.reactionsAttribute {
                 for reaction in reactionsAttribute.reactions {
                     let title: String
@@ -655,7 +659,7 @@ public final class ChatMessageAccessibilityData {
                     case .stars:
                         title = isRussianBaseLanguage(item: item) ? "Звёзды" : "Stars"
                     }
-                    voReactionEntries.append((title: "\(title): \(reaction.count)", value: reaction.value))
+                    voReactionEntries.append((name: title, count: reaction.count, value: reaction.value))
                 }
             }
             var voViewCount: Int?
@@ -677,6 +681,21 @@ public final class ChatMessageAccessibilityData {
                 }
             }
 
+            do {
+                let isRu = isRussianBaseLanguage(item: item)
+                var summaryParts: [String] = []
+                if !voReactionEntries.isEmpty {
+                    let reactionList = voReactionEntries.map { "\($0.name) \($0.count)" }
+                    summaryParts.append("\(isRu ? "Реакции" : "Reactions"): \(reactionList.joined(separator: ", "))")
+                }
+                if let voViewCount {
+                    summaryParts.append(isRu ? "\(voViewCount) \(russianPluralViews(voViewCount))" : (voViewCount == 1 ? "1 view" : "\(voViewCount) views"))
+                }
+                if !summaryParts.isEmpty {
+                    voSummarySuffix = summaryParts.joined(separator: ". ")
+                }
+            }
+
             if !voReactionEntries.isEmpty || voViewCount != nil {
                 // Заголовок «Реакции и просмотры» убран по просьбе незрячих
                 // пользователей — лишний информационный стоп в цепочке.
@@ -684,7 +703,7 @@ public final class ChatMessageAccessibilityData {
                 for entry in voReactionEntries {
                     // Двойной тап по пункту-реакции ставит/снимает её (обработка
                     // в performLocalAccessibilityCustomAction нод сообщений).
-                    customActions.append(ChatMessageAccessibilityCustomAction(name: entry.title, target: nil, selector: #selector(self.noop), action: .toggleReaction(entry.value)))
+                    customActions.append(ChatMessageAccessibilityCustomAction(name: "\(entry.name): \(entry.count)", target: nil, selector: #selector(self.noop), action: .toggleReaction(entry.value)))
                 }
                 if let voViewCount {
                     let viewsTitle: String
@@ -712,6 +731,9 @@ public final class ChatMessageAccessibilityData {
         
         if let replyValue {
             value = "\(value). \(item.presentationData.strings.VoiceOver_Chat_ReplyingToMessage(replyValue).string)"
+        }
+        if let voSummarySuffix {
+            value = value.isEmpty ? voSummarySuffix : "\(value)\n\(voSummarySuffix)"
         }
         
         self.label = label

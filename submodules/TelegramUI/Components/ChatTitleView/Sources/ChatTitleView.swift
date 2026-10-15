@@ -160,6 +160,18 @@ private enum ChatTitleCredibilityIcon: Equatable {
 }
 
 public final class ChatTitleView: UIView, NavigationBarTitleView {
+    /// VoiceOver: значение — ВСЕГДА то, что сейчас показано под названием
+    /// («Жемчужная библиотечка, 600 участников»). Сохранённое значение
+    /// обновлялось только на одном пути обновления заголовка и могло
+    /// отставать или пустовать (отзыв тестировщиков 2026-10-15).
+    override public var accessibilityValue: String? {
+        get {
+            return self.activityNode.state.accessibilityText ?? super.accessibilityValue
+        } set(value) {
+            super.accessibilityValue = value
+        }
+    }
+
     public enum AnimateFromSnapshotDirection {
         case up
         case down
