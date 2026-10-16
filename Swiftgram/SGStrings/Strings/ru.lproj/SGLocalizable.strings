@@ -272,6 +272,8 @@
 "Settings.NY.Style.lightning" = "Молнии";
 "Settings.NY.Notice" = "Доступны только на ограниченное время!";
 
+"VoiceOver.File.DownloadStarted" = "Загрузка файла началась";
+"VoiceOver.File.DownloadCancelled" = "Загрузка файла отменена";
 "VoiceOver.Story.ViewListSort" = "Сортировка";
 "VoiceOver.Story.ViewerReaction" = "Реакция";
 "VoiceOver.Story.ViewerReactionStars" = "Реакция: звёзды";

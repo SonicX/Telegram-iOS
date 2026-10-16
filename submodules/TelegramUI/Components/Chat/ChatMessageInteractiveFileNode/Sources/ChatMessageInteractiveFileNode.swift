@@ -306,6 +306,52 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
         }
     }
     
+    public enum AccessibilityPrimaryActionResult {
+        case startedDownload
+        case cancelledDownload
+        case performed
+        case notHandled
+    }
+
+    /// VoiceOver: двойной тап по файлу — то же, что тап зрячего: нескачанный
+    /// файл начинает загружаться (повторно — отмена), скачанный открывается,
+    /// аудио — play/pause. Раньше активация сразу открывала просмотрщик, и для
+    /// нескачанного файла он был пустым («Нет файлов для просмотра», видео
+    /// тестировщика 2026-10-16). Отправляемый файл не трогаем: тап по нему
+    /// удаляет сообщение.
+    public func performAccessibilityPrimaryAction() -> AccessibilityPrimaryActionResult {
+        if self.arguments?.attributes.updatingMedia != nil {
+            return .notHandled
+        }
+        if let message = self.message, message.flags.isSending {
+            return .notHandled
+        }
+        guard let resourceStatus = self.resourceStatus else {
+            return .notHandled
+        }
+        if let file = self.file, isMatroskaDocument(file) {
+            self.progressPressed()
+            return .performed
+        }
+        switch resourceStatus.mediaStatus {
+        case let .fetchStatus(fetchStatus):
+            switch fetchStatus {
+            case .Remote, .Paused:
+                self.progressPressed()
+                return .startedDownload
+            case .Fetching:
+                self.progressPressed()
+                return .cancelledDownload
+            case .Local:
+                self.progressPressed()
+                return .performed
+            }
+        case .playbackStatus:
+            self.progressPressed()
+            return .performed
+        }
+    }
+
     @objc private func progressPressed() {
         if let _ = self.arguments?.attributes.updatingMedia {
             if let message = self.message {
@@ -318,6 +364,12 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                 if let context = self.context, let message = self.message, message.flags.isSending {
                     let _ = context.engine.messages.deleteMessagesInteractively(messageIds: [message.id], type: .forEveryone).startStandalone()
                 } else {
+                    if let file = self.file, isMatroskaDocument(file) {
+                        // .mkv сразу открывается во встроенном проигрывателе
+                        // с потоковой загрузкой — ждать скачивания фильма не нужно.
+                        self.activateLocalContent()
+                        return
+                    }
                     switch fetchStatus {
                     case .Fetching:
                         if let cancel = self.fetchControls.with({ return $0?.cancel }) {

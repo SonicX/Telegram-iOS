@@ -247,7 +247,7 @@ public func galleryItemForEntry(
             present: present
         )
     } else if let file = media as? TelegramMediaFile {
-        if file.isVideo {
+        if file.isVideo || isMatroskaDocument(file) {
             let content: UniversalVideoContent
             let captureProtected = message.isCopyProtected() || message.containsSecretMedia || message.minAutoremoveOrClearTimeout == viewOnceTimeout || message.paidContent != nil
             if file.isAnimated {

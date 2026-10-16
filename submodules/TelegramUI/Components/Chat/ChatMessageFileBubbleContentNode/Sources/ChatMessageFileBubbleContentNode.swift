@@ -1,4 +1,5 @@
 import Foundation
+import SGStrings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -86,7 +87,18 @@ public class ChatMessageFileBubbleContentNode: ChatMessageBubbleContentNode {
     }
         
     override public func accessibilityActivate() -> Bool {
-        if let item = self.item {
+        guard let item = self.item else {
+            return true
+        }
+        let locale = item.presentationData.strings.baseLanguageCode
+        switch self.interactiveFileNode.performAccessibilityPrimaryAction() {
+        case .startedDownload:
+            UIAccessibility.post(notification: .announcement, argument: i18n("VoiceOver.File.DownloadStarted", locale))
+        case .cancelledDownload:
+            UIAccessibility.post(notification: .announcement, argument: i18n("VoiceOver.File.DownloadCancelled", locale))
+        case .performed:
+            break
+        case .notHandled:
             let _ = item.controllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
         }
         return true

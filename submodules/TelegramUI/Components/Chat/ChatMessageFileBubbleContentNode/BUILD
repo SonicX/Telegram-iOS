@@ -10,6 +10,7 @@ swift_library(
         "-warnings-as-errors",
     ],
     deps = [
+        "//Swiftgram/SGStrings:SGStrings",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
         "//submodules/SSignalKit/SwiftSignalKit",

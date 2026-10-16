@@ -525,6 +525,54 @@ public final class ChatMessageAccessibilityData {
         
         var (label, value) = dataForMessage(item.message, false)
         var replyValue: String?
+
+        // VoiceOver: пост из нескольких файлов (музыка, документы) — бабл один,
+        // а озвучка строилась только по первому файлу: не было ни количества,
+        // ни остальных названий, ни подписи (она обычно у последнего файла)
+        // — отзыв тестировщика 2026-10-16. Перечисляем все и читаем подписи.
+        var groupMessages: [Message] = []
+        for (contentMessage, _) in item.content {
+            groupMessages.append(contentMessage)
+        }
+        if groupMessages.count > 1 {
+            let isRu = isRussianBaseLanguage(item: item)
+            var fileTitles: [String] = []
+            var allFiles = true
+            for groupMessage in groupMessages {
+                var title: String?
+                for media in groupMessage.media {
+                    if let file = media as? TelegramMediaFile, !file.isVideo, !file.isInstantVideo, !file.isSticker {
+                        var audioTitle: String?
+                        for attribute in file.attributes {
+                            if case let .Audio(isVoice, _, trackTitle, performer, _) = attribute, !isVoice {
+                                let parts = [performer, trackTitle].compactMap { $0 }.filter { !$0.isEmpty }
+                                if !parts.isEmpty {
+                                    audioTitle = parts.joined(separator: " — ")
+                                }
+                            }
+                        }
+                        title = audioTitle ?? file.fileName ?? (isRu ? "Файл" : "File")
+                    }
+                }
+                if let title {
+                    fileTitles.append(title)
+                } else {
+                    allFiles = false
+                }
+            }
+            var groupSummary: String
+            let count = groupMessages.count
+            if allFiles {
+                let numbered = fileTitles.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: ", ")
+                groupSummary = (isRu ? "\(count) \(russianPluralFiles(count))" : "\(count) files") + ": " + numbered
+            } else {
+                groupSummary = isRu ? "Альбом, вложений: \(count)" : "Album, \(count) items"
+            }
+            for groupMessage in groupMessages where groupMessage.id != item.message.id && !groupMessage.text.isEmpty {
+                groupSummary += "\n" + item.presentationData.strings.VoiceOver_Chat_Caption(groupMessage.text).string
+            }
+            value = value.isEmpty ? groupSummary : "\(groupSummary)\n\(value)"
+        }
         
         for attribute in item.message.attributes {
             if let attribute = attribute as? TextEntitiesMessageAttribute {
@@ -756,6 +804,21 @@ private func isRussianBaseLanguage(item: ChatMessageItem) -> Bool {
 }
 
 /// Русское склонение слова «просмотр» для VO-озвучки счётчика.
+private func russianPluralFiles(_ count: Int) -> String {
+    let mod100 = count % 100
+    if mod100 >= 11 && mod100 <= 14 {
+        return "файлов"
+    }
+    switch count % 10 {
+    case 1:
+        return "файл"
+    case 2, 3, 4:
+        return "файла"
+    default:
+        return "файлов"
+    }
+}
+
 private func russianPluralViews(_ count: Int) -> String {
     let mod100 = count % 100
     if mod100 >= 11 && mod100 <= 14 {

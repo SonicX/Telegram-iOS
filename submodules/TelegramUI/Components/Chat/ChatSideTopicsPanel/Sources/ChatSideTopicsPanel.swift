@@ -276,6 +276,11 @@ public final class ChatSideTopicsPanel: Component {
                 preconditionFailure()
             }
             
+            override func accessibilityActivate() -> Bool {
+                self.component?.action?()
+                return true
+            }
+
             @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
                 if case .ended = recognizer.state {
                     if let iconView = self.icon?.view as? EmojiStatusComponent.View {
@@ -461,6 +466,12 @@ public final class ChatSideTopicsPanel: Component {
                     )
                 }
                 
+                // VoiceOver: вкладка темы — кнопка с названием и отметкой
+                // «выбрано». Раньше это был view с распознавателем тапа без
+                // подписи, и переключаться между темами вслепую было нельзя.
+                self.isAccessibilityElement = true
+                self.accessibilityLabel = titleText.trimmingCharacters(in: .whitespaces)
+                self.accessibilityTraits = component.isSelected ? [.button, .selected] : [.button]
                 let titleSize = self.title.update(
                     transition: .immediate,
                     component: AnyComponent(MultilineTextComponent(
@@ -715,6 +726,11 @@ public final class ChatSideTopicsPanel: Component {
                 preconditionFailure()
             }
             
+            override func accessibilityActivate() -> Bool {
+                self.component?.action?()
+                return true
+            }
+
             @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
                 if case .ended = recognizer.state {
                     if let iconView = self.icon?.view as? EmojiStatusComponent.View {
@@ -894,6 +910,12 @@ public final class ChatSideTopicsPanel: Component {
                     )
                 }
                 
+                // VoiceOver: вкладка темы — кнопка с названием и отметкой
+                // «выбрано». Раньше это был view с распознавателем тапа без
+                // подписи, и переключаться между темами вслепую было нельзя.
+                self.isAccessibilityElement = true
+                self.accessibilityLabel = titleText.trimmingCharacters(in: .whitespaces)
+                self.accessibilityTraits = component.isSelected ? [.button, .selected] : [.button]
                 let titleSize = self.title.update(
                     transition: .immediate,
                     component: AnyComponent(MultilineTextComponent(
@@ -1214,6 +1236,11 @@ public final class ChatSideTopicsPanel: Component {
                 fatalError("init(coder:) has not been implemented")
             }
             
+            override func accessibilityActivate() -> Bool {
+                self.component?.action?()
+                return true
+            }
+
             @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
                 if case .ended = recognizer.state {
                     self.component?.action?()
@@ -1254,6 +1281,12 @@ public final class ChatSideTopicsPanel: Component {
                 } else {
                     titleText = component.strings.Chat_InlineTopicMenu_AllTab
                 }
+                // VoiceOver: вкладка темы — кнопка с названием и отметкой
+                // «выбрано». Раньше это был view с распознавателем тапа без
+                // подписи, и переключаться между темами вслепую было нельзя.
+                self.isAccessibilityElement = true
+                self.accessibilityLabel = titleText.trimmingCharacters(in: .whitespaces)
+                self.accessibilityTraits = component.isSelected ? [.button, .selected] : [.button]
                 let titleSize = self.title.update(
                     transition: .immediate,
                     component: AnyComponent(MultilineTextComponent(
@@ -1363,6 +1396,11 @@ public final class ChatSideTopicsPanel: Component {
                 fatalError("init(coder:) has not been implemented")
             }
             
+            override func accessibilityActivate() -> Bool {
+                self.component?.action?()
+                return true
+            }
+
             @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
                 if case .ended = recognizer.state {
                     self.component?.action?()
@@ -1391,6 +1429,12 @@ public final class ChatSideTopicsPanel: Component {
                 } else {
                     titleText = component.strings.Chat_InlineTopicMenu_AllTab
                 }
+                // VoiceOver: вкладка темы — кнопка с названием и отметкой
+                // «выбрано». Раньше это был view с распознавателем тапа без
+                // подписи, и переключаться между темами вслепую было нельзя.
+                self.isAccessibilityElement = true
+                self.accessibilityLabel = titleText.trimmingCharacters(in: .whitespaces)
+                self.accessibilityTraits = component.isSelected ? [.button, .selected] : [.button]
                 let titleSize = self.title.update(
                     transition: .immediate,
                     component: AnyComponent(MultilineTextComponent(

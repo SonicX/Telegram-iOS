@@ -97,6 +97,10 @@ public final class NativeVideoContent: UniversalVideoContent {
                 }
             }
             self.dimensions = dimensions.cgSize
+        } else if let thumbnail = fileReference.media.previewRepresentations.last {
+            // Видео, отправленное документом (.mkv), без размеров — пропорции
+            // берём по превью, иначе картинка растягивалась в квадрат.
+            self.dimensions = thumbnail.dimensions.cgSize
         } else {
             self.dimensions = CGSize(width: 128.0, height: 128.0)
         }

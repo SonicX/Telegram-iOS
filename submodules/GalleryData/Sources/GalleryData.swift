@@ -253,7 +253,10 @@ public func chatMessageGalleryControllerData(context: AccountContext, chatLocati
                     return .gallery(.single(gallery))
                 }
                 
-                if !file.isVideo {
+                // .mkv — во встроенный видеопроигрыватель (ниже), а не в
+                // просмотрщик документов: тот .mkv не играет, а нескачанный
+                // файл показывал пустым.
+                if !file.isVideo && !isMatroskaDocument(file) {
                     return .document(file, false)
                 }
             }

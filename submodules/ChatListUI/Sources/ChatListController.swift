@@ -3089,7 +3089,11 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 chatListTitle: secondaryContext.chatListTitle,
                 leftButton: secondaryContext.leftButton,
                 rightButtons: secondaryContext.rightButtons,
-                backTitle: nil,
+                // VoiceOver: у списка тем группы (открыт поверх списка чатов)
+                // не было кнопки «Назад» — зрячие выходят тапом по колонке
+                // аватарок или свайпом, незрячим выйти было нечем (отзыв
+                // тестировщика 2026-10-16). Показываем её только с VoiceOver.
+                backTitle: UIAccessibility.isVoiceOverRunning ? self.presentationData.strings.Common_Back : nil,
                 backPressed: { [weak self] in
                     guard let self else {
                         return
@@ -3980,6 +3984,16 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         }
     }
     
+    /// VoiceOver: жест «назад» (зигзаг двумя пальцами) в списке тем группы
+    /// возвращает в основную папку.
+    override public func accessibilityPerformEscape() -> Bool {
+        if self.secondaryContext != nil {
+            self.setInlineChatList(location: nil)
+            return true
+        }
+        return super.accessibilityPerformEscape()
+    }
+
     public func setInlineChatList(location: ChatListControllerLocation?, animated: Bool = true) {
         if let location {
             let inlineNode = self.chatListDisplayNode.makeInlineChatList(location: location)

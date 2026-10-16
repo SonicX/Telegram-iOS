@@ -453,6 +453,17 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             } else {
                 appendNode(self.textInputAccessibilityArea)
             }
+            // VoiceOver: «Отправить» — СРАЗУ после поля ввода (если видна, то
+            // есть набран текст). Раньше её место зависело от того, как
+            // открыли поле, а после первой отправки она уезжала в конец — за
+            // скрепку, меню, эмодзи: до неё приходилось домахивать четыре
+            // кнопки (отзыв тестировщиков 2026-10-16). На экране кнопка
+            // остаётся на привычном месте справа, меняется только порядок
+            // свайпов. При пустом поле в этом месте была бы кнопка микрофона —
+            // её порядок не трогаем.
+            if (self.textInputNode?.attributedText?.length ?? 0) > 0 {
+                appendSendButtonIfNeeded()
+            }
             // VoiceOver: кнопка «Отменить ответ»/«Отменить пересылку». Зона
             // `cancelReplyForwardAccessibilityArea` уже спозиционирована и
             // помечена, показывается (isHidden=false) только при активном
@@ -461,14 +472,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             // отменить ответ можно было прямо из режима ввода.
             appendNode(self.cancelReplyForwardAccessibilityArea)
             appendNode(self.hideKeyboardAccessibilityArea)
-            if self.accessibilitySendButtonAnchor == .textInput {
-                appendSendButtonIfNeeded()
-            }
             appendNode(self.mediaRecordingAccessibilityArea)
             appendView(self.attachmentButton)
-            if self.accessibilitySendButtonAnchor == .attachment {
-                appendSendButtonIfNeeded()
-            }
             appendNode(self.menuButton)
 
             for (_, button) in self.accessoryItemButtons {

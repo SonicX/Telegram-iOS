@@ -25,11 +25,23 @@ public func isMediaStreamable(message: Message, media: TelegramMediaFile) -> Boo
             break
         }
     }
-    #if DEBUG
-    if let fileName = media.fileName, fileName.hasSuffix(".mkv") {
+    // OpenGram: .mkv играем встроенным проигрывателем (FFmpeg, демуксер
+    // matroska в сборке есть) с потоковой загрузкой — в Telegram это было
+    // включено только в DEBUG.
+    if isMatroskaDocument(media) {
         return true
     }
-    #endif
+    return false
+}
+
+/// Видеофайл .mkv, отправленный документом (без атрибута видео).
+public func isMatroskaDocument(_ file: TelegramMediaFile) -> Bool {
+    if file.mimeType == "video/x-matroska" {
+        return true
+    }
+    if let fileName = file.fileName, fileName.lowercased().hasSuffix(".mkv") {
+        return true
+    }
     return false
 }
 
