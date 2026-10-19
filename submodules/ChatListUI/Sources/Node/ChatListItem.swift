@@ -1,5 +1,6 @@
 import SGSimpleSettings
 import Foundation
+import SGStrings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -1525,6 +1526,15 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                             result += "\n\(item.presentationData.strings.VoiceOver_ChatList_MessageRead)"
                         }
                         result += "\n\(messageText)"
+                        // VoiceOver: значки «реакция» и «@» в строке чата —
+                        // в конце озвучки (просьба тестировщика 2026-10-17).
+                        let locale = item.presentationData.strings.baseLanguageCode
+                        if peerData.hasUnseenReactions {
+                            result += "\n\(i18n("VoiceOver.ChatList.NewReactions", locale))"
+                        }
+                        if peerData.hasUnseenMentions {
+                            result += "\n\(i18n("VoiceOver.ChatList.NewMentions", locale))"
+                        }
                         return result
                     } else {
                         return item.presentationData.strings.VoiceOver_ChatList_MessageEmpty

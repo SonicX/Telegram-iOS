@@ -403,6 +403,18 @@ final class EditableTokenListNode: ASDisplayNode, UITextFieldDelegate {
                 self.tokenNodes.append(tokenNode)
                 self.scrollNode.addSubnode(tokenNode)
                 animateIn = true
+                // VoiceOver: «фишка» выбранного человека в поле поиска —
+                // элемент с именем и действием «Удалить» (зрячий убирает её
+                // двумя тапами). Раньше VO видел лишь безымянные части фишки.
+                tokenNode.isAccessibilityElement = true
+                tokenNode.accessibilityLabel = token.title
+                tokenNode.accessibilityTraits = .button
+                let tokenId = token.id
+                let deleteTitle = self.context.sharedContext.currentPresentationData.with({ $0 }).strings.Common_Delete
+                tokenNode.view.accessibilityCustomActions = [UIAccessibilityCustomAction(name: deleteTitle, actionHandler: { [weak self] _ in
+                    self?.deleteToken?(tokenId)
+                    return true
+                })]
             }
             
             let tokenSize = tokenNode.measure(CGSize(width: max(1.0, width - sideInset - sideInset), height: CGFloat.greatestFiniteMagnitude))

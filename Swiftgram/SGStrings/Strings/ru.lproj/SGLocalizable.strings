@@ -274,6 +274,8 @@
 
 "VoiceOver.File.DownloadStarted" = "Загрузка файла началась";
 "VoiceOver.File.DownloadCancelled" = "Загрузка файла отменена";
+"VoiceOver.ChatList.NewReactions" = "Новые реакции";
+"VoiceOver.ChatList.NewMentions" = "Вас упомянули";
 "VoiceOver.Story.ViewListSort" = "Сортировка";
 "VoiceOver.Story.ViewerReaction" = "Реакция";
 "VoiceOver.Story.ViewerReactionStars" = "Реакция: звёзды";

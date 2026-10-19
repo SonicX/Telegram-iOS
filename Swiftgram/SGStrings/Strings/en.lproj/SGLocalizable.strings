@@ -274,6 +274,8 @@
 
 "VoiceOver.File.DownloadStarted" = "Download started";
 "VoiceOver.File.DownloadCancelled" = "Download cancelled";
+"VoiceOver.ChatList.NewReactions" = "New reactions";
+"VoiceOver.ChatList.NewMentions" = "You were mentioned";
 "VoiceOver.Story.ViewListSort" = "Sort";
 "VoiceOver.Story.ViewerReaction" = "Reaction";
 "VoiceOver.Story.ViewerReactionStars" = "Reaction: stars";
