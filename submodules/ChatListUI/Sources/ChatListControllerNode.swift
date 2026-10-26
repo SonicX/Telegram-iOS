@@ -1021,6 +1021,17 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
                     self.itemNodes[id] = itemNode
                 }
             }
+            // VoiceOver: соседние папки (создаются заранее для мгновенного
+            // переключения) лежат за краем экрана, но VoiceOver их видел —
+            // свайп уводил курсор в чужую папку (лог 2026-10-26: строка с
+            // x=390, pin=93), а возврат ставил его на пару чатов назад.
+            // Скрыто всё, кроме текущей папки.
+            for (_, itemNode) in self.itemNodes {
+                let shouldHide = itemNode !== self.currentItemNodeValue
+                if itemNode.accessibilityElementsHidden != shouldHide {
+                    itemNode.accessibilityElementsHidden = shouldHide
+                }
+            }
             
             var removeIds: [ChatListFilterTabEntryId] = []
             var animateSlidingIds: [ChatListFilterTabEntryId] = []
