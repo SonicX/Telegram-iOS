@@ -473,6 +473,15 @@ public class ItemListSingleLineInputItemNode: ListViewItemNode, UITextFieldDeleg
                     strongSelf.textNode.alpha = item.enabled ? 1.0 : 0.4
                     
                     strongSelf.clearButtonNode.accessibilityLabel = item.presentationData.strings.VoiceOver_Editing_ClearText
+                    // VoiceOver: подпись поля — заголовок, а если его нет — плейсхолдер
+                    // («Сервер», «Порт», «Пароль»…). Раньше плейсхолдер был только
+                    // подсказкой: с выключенными подсказками и после ввода VoiceOver
+                    // читал одно значение, не говоря, что это за поле (экран прокси).
+                    if strongSelf.isNodeLoaded {
+                        let fieldLabel = item.title.string.isEmpty ? item.placeholder : item.title.string
+                        strongSelf.textNode.textField.accessibilityLabel = fieldLabel.isEmpty ? nil : fieldLabel
+                        strongSelf.textNode.textField.accessibilityHint = item.title.string.isEmpty ? nil : item.placeholder
+                    }
                 }
             })
         }

@@ -285,6 +285,21 @@ private final class ProxySettingsServerItemNode: ItemListRevealOptionsItemNode {
                     strongSelf.layoutParams = params
                     
                     strongSelf.infoButtonNode.accessibilityLabel = item.strings.Conversation_Info
+                    // VoiceOver: удаление прокси у зрячих — свайпом влево, у VO его
+                    // не было. «Информация» и «Удалить» — в роторе действий строки.
+                    let removeServer = item.removeServer
+                    let infoAction = item.infoAction
+                    let server = item.server
+                    strongSelf.activateArea.accessibilityCustomActions = [
+                        UIAccessibilityCustomAction(name: item.strings.Conversation_Info, actionHandler: { _ in
+                            infoAction()
+                            return true
+                        }),
+                        UIAccessibilityCustomAction(name: item.strings.Common_Delete, actionHandler: { _ in
+                            removeServer(server)
+                            return true
+                        })
+                    ]
                     strongSelf.activateArea.accessibilityLabel = "\(titleAttributedString.string)\n\(statusAttributedString.string)"
                     if item.active {
                         strongSelf.activateArea.accessibilityValue = item.strings.ProxyServer_VoiceOver_Active
