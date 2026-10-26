@@ -1993,6 +1993,24 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         return nil
     }
 
+    /// VoiceOver: пункты ротора («Ссылки», «Вложения»), которые пузырь вешает
+    /// на свою AccessibilityAreaNode, — переносим на ноду строки, откуда их
+    /// забирает пуловый элемент ListView (как и custom actions).
+    static func voCollectAreaRotors(in node: ASDisplayNode) -> [UIAccessibilityCustomRotor]? {
+        if node.isLayerBacked || !node.isNodeLoaded {
+            return nil
+        }
+        if node is AccessibilityAreaNode {
+            return node.view.accessibilityCustomRotors
+        }
+        for subnode in node.subnodes ?? [] {
+            if let rotors = ChatHistoryListNodeImpl.voCollectAreaRotors(in: subnode) {
+                return rotors
+            }
+        }
+        return nil
+    }
+
     private func composeBubbleAccessibilityPayload(for itemNode: ListViewItemNode, clippedTo visibleScreenRect: CGRect) -> (label: String, value: String?, hint: String?, identifier: String?, traits: UIAccessibilityTraits, customActions: [UIAccessibilityCustomAction]?)? {
         // AAN-only label so VoiceOver speaks the message text — and just
         // the message text — when the cursor lands on the bubble.  Inner
@@ -2274,6 +2292,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     itemNode.accessibilityIdentifier = payload.identifier
                     itemNode.accessibilityTraits = payload.traits
                     itemNode.view.accessibilityCustomActions = payload.customActions
+                    itemNode.view.accessibilityCustomRotors = ChatHistoryListNodeImpl.voCollectAreaRotors(in: itemNode)
                     // VO-фрейм штампуем ОБРЕЗАННЫМ прямо на вьюшку: VoiceOver
                     // читает accessibilityFrame у _ASDisplayView, а мост
                     // AsyncDisplayKit не заглядывает в override ноды. Без этого
@@ -2561,6 +2580,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     itemNode.accessibilityIdentifier = payload.identifier
                     itemNode.accessibilityTraits = payload.traits
                     itemNode.view.accessibilityCustomActions = payload.customActions
+                    itemNode.view.accessibilityCustomRotors = ChatHistoryListNodeImpl.voCollectAreaRotors(in: itemNode)
                     // См. комментарий в experiment-ветке: обрезка только сверху
                     // (навбар), снизу фрейм остаётся реальным — цель свайпа.
                     ChatHistoryListNodeImpl.voSetAccessibilityFrameIfChanged(itemNode.view, ChatHistoryListNodeImpl.voClipFrameToVisibleBand(realFrame, clip: synthClip, screenBottom: UIAccessibility.convertToScreenCoordinates(self.bounds, in: self.view).maxY))

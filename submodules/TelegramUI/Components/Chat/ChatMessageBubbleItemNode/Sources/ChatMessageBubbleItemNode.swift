@@ -5267,6 +5267,113 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         } else {
             self.messageAccessibilityArea.accessibilityCustomActions = nil
         }
+        self.updateAccessibilityRotors(accessibilityData)
+    }
+
+    /// VoiceOver: элемент-цель ротора «Ссылки»/«Вложения». Его фрейм —
+    /// фрейм сообщения, двойной тап — открыть ссылку / вложение.
+    private final class RotorTargetElement: UIAccessibilityElement {
+        var activate: (() -> Bool)?
+
+        override func accessibilityActivate() -> Bool {
+            return self.activate?() ?? false
+        }
+    }
+
+    private var rotorLinkElements: [RotorTargetElement] = []
+    private var rotorAttachmentElements: [RotorTargetElement] = []
+    private var rotorLinksSignature: [String] = []
+    private var rotorAttachmentsSignature: [MessageId] = []
+
+    /// VoiceOver: пункты ротора «Ссылки» и «Вложения» на сообщении (идея
+    /// тестировщиков 2026-10-17): выбрал пункт ротора — свайпами вверх/вниз
+    /// перебираешь ссылки или файлы поста, двойной тап — открыть. Основные
+    /// действия сообщения при этом не загромождаются.
+    private func updateAccessibilityRotors(_ accessibilityData: ChatMessageAccessibilityData) {
+        let linksSignature = accessibilityData.rotorLinks.map { "\($0.title)|\($0.url)" }
+        if linksSignature != self.rotorLinksSignature {
+            self.rotorLinksSignature = linksSignature
+            self.rotorLinkElements = accessibilityData.rotorLinks.map { link -> RotorTargetElement in
+                let element = RotorTargetElement(accessibilityContainer: self.view)
+                element.accessibilityLabel = link.title
+                element.accessibilityValue = link.value
+                element.accessibilityTraits = .link
+                let url = link.url
+                element.activate = { [weak self] in
+                    guard let self, let item = self.item else {
+                        return false
+                    }
+                    item.controllerInteraction.openUrl(ChatControllerInteraction.OpenUrl(url: url, concealed: false, external: false, message: item.content.firstMessage))
+                    return true
+                }
+                return element
+            }
+        }
+        let attachmentsSignature = accessibilityData.rotorAttachments.map(\.messageId)
+        if attachmentsSignature != self.rotorAttachmentsSignature || self.rotorAttachmentElements.count != accessibilityData.rotorAttachments.count {
+            self.rotorAttachmentsSignature = attachmentsSignature
+            self.rotorAttachmentElements = accessibilityData.rotorAttachments.map { attachment -> RotorTargetElement in
+                let element = RotorTargetElement(accessibilityContainer: self.view)
+                element.accessibilityLabel = attachment.title
+                element.accessibilityTraits = .button
+                let messageId = attachment.messageId
+                element.activate = { [weak self] in
+                    guard let self, let item = self.item else {
+                        return false
+                    }
+                    // Тот же путь, что двойной тап по файлу: нескачанный
+                    // начинает загружаться, скачанный открывается, трек играет.
+                    for contentNode in self.contentNodes where contentNode.item?.message.id == messageId {
+                        if contentNode.accessibilityActivate() {
+                            return true
+                        }
+                    }
+                    for (message, _) in item.content where message.id == messageId {
+                        let _ = item.controllerInteraction.openMessage(message, OpenMessageParams(mode: .default))
+                        return true
+                    }
+                    return false
+                }
+                return element
+            }
+        }
+
+        let isRu = (self.item?.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")) ?? false
+        var rotors: [UIAccessibilityCustomRotor] = []
+        if !self.rotorLinkElements.isEmpty {
+            rotors.append(self.makeAccessibilityRotor(name: isRu ? "Ссылки" : "Links", elements: { [weak self] in self?.rotorLinkElements ?? [] }))
+        }
+        if !self.rotorAttachmentElements.isEmpty {
+            rotors.append(self.makeAccessibilityRotor(name: isRu ? "Вложения" : "Attachments", elements: { [weak self] in self?.rotorAttachmentElements ?? [] }))
+        }
+        self.messageAccessibilityArea.view.accessibilityCustomRotors = rotors.isEmpty ? nil : rotors
+    }
+
+    private func makeAccessibilityRotor(name: String, elements: @escaping () -> [RotorTargetElement]) -> UIAccessibilityCustomRotor {
+        return UIAccessibilityCustomRotor(name: name, itemSearch: { [weak self] predicate in
+            guard let self else {
+                return nil
+            }
+            let targets = elements()
+            guard !targets.isEmpty else {
+                return nil
+            }
+            var index: Int
+            if let current = predicate.currentItem.targetElement as? RotorTargetElement, let currentIndex = targets.firstIndex(where: { $0 === current }) {
+                index = predicate.searchDirection == .next ? currentIndex + 1 : currentIndex - 1
+            } else {
+                index = predicate.searchDirection == .next ? 0 : targets.count - 1
+            }
+            guard index >= 0, index < targets.count else {
+                return nil
+            }
+            // Фрейм — текущий экранный фрейм сообщения (оно могло сдвинуться).
+            let frame = UIAccessibility.convertToScreenCoordinates(self.messageAccessibilityArea.bounds, in: self.messageAccessibilityArea.view)
+            let target = targets[index]
+            target.accessibilityFrame = frame
+            target.accessibilityActivationPoint = CGPoint(x: frame.midX, y: frame.midY)
+            return UIAccessibilityCustomRotorItemResult(targetElement: target, targetRange: nil)
+        })
     }
     
     @objc private func performLocalAccessibilityCustomAction(_ action: UIAccessibilityCustomAction) {

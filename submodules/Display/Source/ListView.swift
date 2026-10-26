@@ -890,6 +890,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                     element.accessibilityHint = itemNode.accessibilityHint
                     element.accessibilityIdentifier = itemNode.accessibilityIdentifier
                     element.accessibilityCustomActions = itemNode.view.accessibilityCustomActions
+                    element.accessibilityCustomRotors = itemNode.view.accessibilityCustomRotors
                     directionalCandidates.append((localIndex: itemIndex, order: 0, element: element))
                 } else if let nodeChildren = itemNode.accessibilityElements {
                     for (order, childElement) in nodeChildren.enumerated() {
@@ -906,6 +907,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                             element.accessibilityHint = child.accessibilityHint
                             element.accessibilityIdentifier = child.accessibilityIdentifier
                             element.accessibilityCustomActions = child.accessibilityCustomActions
+                            element.accessibilityCustomRotors = child.accessibilityCustomRotors
                             directionalCandidates.append((localIndex: itemIndex, order: order, element: element))
                         } else {
                             directionalCandidates.append((localIndex: itemIndex, order: order, element: childElement))

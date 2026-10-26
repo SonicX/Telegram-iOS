@@ -103,6 +103,11 @@ public final class ChatMessageAccessibilityData {
     public let traits: UIAccessibilityTraits
     public let customActions: [ChatMessageAccessibilityCustomAction]?
     public let singleUrl: String?
+    /// VoiceOver-ротор «Ссылки»: все ссылки из текста сообщения (и всех
+    /// сообщений альбома) — название, адрес для озвучки, URL для открытия.
+    public let rotorLinks: [(title: String, value: String?, url: String)]
+    /// VoiceOver-ротор «Вложения»: файлы поста из нескольких вложений.
+    public let rotorAttachments: [(title: String, messageId: MessageId)]
     
     public init(item: ChatMessageItem, isSelected: Bool?) {
         var hint: String?
@@ -534,44 +539,104 @@ public final class ChatMessageAccessibilityData {
         for (contentMessage, _) in item.content {
             groupMessages.append(contentMessage)
         }
+        var rotorAttachments: [(title: String, messageId: MessageId)] = []
         if groupMessages.count > 1 {
+            // Озвучка — коротко: «2 вложения, музыка» и подписи. Сами файлы —
+            // в роторе «Вложения» (свайп вверх/вниз, двойной тап — открыть /
+            // проиграть). Решение тестировщиков 2026-10-17.
             let isRu = isRussianBaseLanguage(item: item)
-            var fileTitles: [String] = []
-            var allFiles = true
+            var kinds = Set<String>()
             for groupMessage in groupMessages {
+                var kind = "file"
                 var title: String?
                 for media in groupMessage.media {
-                    if let file = media as? TelegramMediaFile, !file.isVideo, !file.isInstantVideo, !file.isSticker {
+                    if let file = media as? TelegramMediaFile {
                         var audioTitle: String?
+                        var isVoice = false
+                        var isAudio = false
                         for attribute in file.attributes {
-                            if case let .Audio(isVoice, _, trackTitle, performer, _) = attribute, !isVoice {
+                            if case let .Audio(voice, _, trackTitle, performer, _) = attribute {
+                                isAudio = true
+                                isVoice = voice
                                 let parts = [performer, trackTitle].compactMap { $0 }.filter { !$0.isEmpty }
                                 if !parts.isEmpty {
                                     audioTitle = parts.joined(separator: " — ")
                                 }
                             }
                         }
-                        title = audioTitle ?? file.fileName ?? (isRu ? "Файл" : "File")
+                        if isVoice {
+                            kind = "voice"
+                            title = isRu ? "Голосовое сообщение" : "Voice message"
+                        } else if isAudio {
+                            kind = "music"
+                            title = audioTitle ?? file.fileName
+                        } else if file.isVideo {
+                            kind = "video"
+                            title = file.fileName ?? (isRu ? "Видео" : "Video")
+                        } else {
+                            kind = "file"
+                            title = file.fileName
+                        }
+                    } else if media is TelegramMediaImage {
+                        kind = "photo"
+                        title = isRu ? "Фото" : "Photo"
                     }
                 }
-                if let title {
-                    fileTitles.append(title)
-                } else {
-                    allFiles = false
-                }
+                kinds.insert(kind)
+                let fallback = isRu ? "Вложение" : "Attachment"
+                rotorAttachments.append((title: "\(rotorAttachments.count + 1). \(title ?? fallback)", messageId: groupMessage.id))
             }
-            var groupSummary: String
             let count = groupMessages.count
-            if allFiles {
-                let numbered = fileTitles.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: ", ")
-                groupSummary = (isRu ? "\(count) \(russianPluralFiles(count))" : "\(count) files") + ": " + numbered
+            let kindTitle: String
+            if kinds.count == 1, let kind = kinds.first {
+                switch kind {
+                case "music":
+                    kindTitle = isRu ? "музыка" : "music"
+                case "voice":
+                    kindTitle = isRu ? "голосовые сообщения" : "voice messages"
+                case "video":
+                    kindTitle = isRu ? "видео" : "videos"
+                case "photo":
+                    kindTitle = isRu ? "фото" : "photos"
+                default:
+                    kindTitle = isRu ? "файлы" : "files"
+                }
             } else {
-                groupSummary = isRu ? "Альбом, вложений: \(count)" : "Album, \(count) items"
+                kindTitle = isRu ? "разные" : "mixed"
             }
+            var groupSummary = isRu ? "\(count) \(russianPluralAttachments(count)), \(kindTitle)" : "\(count) attachments, \(kindTitle)"
             for groupMessage in groupMessages where groupMessage.id != item.message.id && !groupMessage.text.isEmpty {
                 groupSummary += "\n" + item.presentationData.strings.VoiceOver_Chat_Caption(groupMessage.text).string
             }
             value = value.isEmpty ? groupSummary : "\(groupSummary)\n\(value)"
+        }
+
+        // Ссылки из текста всех сообщений поста — для ротора «Ссылки».
+        var rotorLinks: [(title: String, value: String?, url: String)] = []
+        for linkMessage in (groupMessages.isEmpty ? [item.message] : groupMessages) {
+            let text = linkMessage.text as NSString
+            for attribute in linkMessage.attributes {
+                guard let attribute = attribute as? TextEntitiesMessageAttribute else {
+                    continue
+                }
+                for entity in attribute.entities {
+                    let range = NSRange(location: entity.range.lowerBound, length: entity.range.count)
+                    guard range.location >= 0, range.location + range.length <= text.length else {
+                        continue
+                    }
+                    let substring = text.substring(with: range)
+                    switch entity.type {
+                    case .Url:
+                        rotorLinks.append((title: substring, value: nil, url: substring))
+                    case let .TextUrl(url):
+                        rotorLinks.append((title: substring, value: URL(string: url)?.host ?? url, url: url))
+                    case .Email:
+                        rotorLinks.append((title: substring, value: nil, url: "mailto:\(substring)"))
+                    default:
+                        break
+                    }
+                }
+            }
         }
         
         for attribute in item.message.attributes {
@@ -790,6 +855,8 @@ public final class ChatMessageAccessibilityData {
         self.traits = traits
         self.customActions = customActions.isEmpty ? nil : customActions
         self.singleUrl = singleUrl
+        self.rotorLinks = rotorLinks
+        self.rotorAttachments = rotorAttachments
     }
     
     @objc private func noop() {
@@ -804,18 +871,18 @@ private func isRussianBaseLanguage(item: ChatMessageItem) -> Bool {
 }
 
 /// Русское склонение слова «просмотр» для VO-озвучки счётчика.
-private func russianPluralFiles(_ count: Int) -> String {
+private func russianPluralAttachments(_ count: Int) -> String {
     let mod100 = count % 100
     if mod100 >= 11 && mod100 <= 14 {
-        return "файлов"
+        return "вложений"
     }
     switch count % 10 {
     case 1:
-        return "файл"
+        return "вложение"
     case 2, 3, 4:
-        return "файла"
+        return "вложения"
     default:
-        return "файлов"
+        return "вложений"
     }
 }
 
