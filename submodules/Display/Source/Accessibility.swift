@@ -72,6 +72,13 @@ public struct ListViewAccessibilityTrailingElement {
     }
 }
 
+/// Строка списка, у которой временно есть вспомогательные VO-элементы
+/// (цели ротора). ListView вставляет их в массив сразу после элемента строки;
+/// `container` — контейнер, который им надо проставить (вьюшка ListView).
+public protocol ListViewAccessibilityAuxiliaryElementsSource: AnyObject {
+    func accessibilityAuxiliaryElements(focused: Any?, container: UIView) -> [NSObject]
+}
+
 public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
     public var directionalFocusIndex: Int?
     public var directionalSnapshotId: Int?

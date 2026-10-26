@@ -551,6 +551,15 @@ public final class NavigationContainer: ASDisplayNode, ASGestureRecognizerDelega
                 strongSelf.ignoreInputHeight = false
             })
         } else {
+            // VO-диагностика: сколько длится мгновенный переход (жалобы
+            // «при выходе из канала приложение ненадолго виснет»).
+            let voTransitionStart = CACurrentMediaTime()
+            defer {
+                if UIAccessibility.isVoiceOverRunning, fromValue != nil, toValue != nil {
+                    let elapsed = (CACurrentMediaTime() - voTransitionStart) * 1000.0
+                    voDiagLog("[VO-DIAG][NAV] immediate-\(transitionType == .push ? "push" : "pop") \(String(describing: type(of: fromValue!.value)))→\(String(describing: type(of: toValue!.value))) took=\(Int(elapsed))ms")
+                }
+            }
             if let fromValue = fromValue {
                 if viewTreeContainsFirstResponder(view: fromValue.value.view) {
                     self.ignoreInputHeight = true

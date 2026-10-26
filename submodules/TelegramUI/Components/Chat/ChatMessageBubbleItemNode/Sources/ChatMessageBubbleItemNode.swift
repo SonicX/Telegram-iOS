@@ -5280,6 +5280,12 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         }
     }
 
+    /// Цели ротора, которыми VoiceOver пользуется прямо сейчас: ListView
+    /// вставляет их в массив сразу после сообщения (см.
+    /// ListViewAccessibilityAuxiliaryElementsSource).
+    private var activeRotorElements: [RotorTargetElement] = []
+    private var activeRotorTimestamp: Double = 0.0
+
     private var rotorLinkElements: [RotorTargetElement] = []
     private var rotorAttachmentElements: [RotorTargetElement] = []
     private var rotorLinksSignature: [String] = []
@@ -5349,6 +5355,38 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         self.messageAccessibilityArea.view.accessibilityCustomRotors = rotors.isEmpty ? nil : rotors
     }
 
+    /// Фрейм целей — текущий экранный фрейм сообщения (оно могло сдвинуться).
+    private func updateRotorTargets(_ targets: [RotorTargetElement], container: UIView?) {
+        let frame = UIAccessibility.convertToScreenCoordinates(self.messageAccessibilityArea.bounds, in: self.messageAccessibilityArea.view)
+        for target in targets {
+            if let container {
+                target.accessibilityContainer = container
+            }
+            target.accessibilityFrame = frame
+            target.accessibilityActivationPoint = CGPoint(x: frame.midX, y: frame.midY)
+        }
+    }
+
+    public func accessibilityAuxiliaryElements(focused: Any?, container: UIView) -> [NSObject] {
+        if self.activeRotorElements.isEmpty {
+            return []
+        }
+        let isOnTarget: Bool
+        if let focused = focused as? RotorTargetElement {
+            isOnTarget = self.activeRotorElements.contains(where: { $0 === focused })
+        } else {
+            isOnTarget = false
+        }
+        // Держим цели в массиве, пока курсор на одной из них, и 2с после
+        // шага ротора (курсор ещё переезжает). Ушёл на другой элемент — убираем.
+        if !isOnTarget && CACurrentMediaTime() - self.activeRotorTimestamp > 2.0 {
+            self.activeRotorElements = []
+            return []
+        }
+        self.updateRotorTargets(self.activeRotorElements, container: container)
+        return self.activeRotorElements
+    }
+
     private func makeAccessibilityRotor(name: String, elements: @escaping () -> [RotorTargetElement]) -> UIAccessibilityCustomRotor {
         return UIAccessibilityCustomRotor(name: name, itemSearch: { [weak self] predicate in
             guard let self else {
@@ -5367,12 +5405,22 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
             guard index >= 0, index < targets.count else {
                 return nil
             }
-            // Фрейм — текущий экранный фрейм сообщения (оно могло сдвинуться).
-            let frame = UIAccessibility.convertToScreenCoordinates(self.messageAccessibilityArea.bounds, in: self.messageAccessibilityArea.view)
-            let target = targets[index]
-            target.accessibilityFrame = frame
-            target.accessibilityActivationPoint = CGPoint(x: frame.midX, y: frame.midY)
-            return UIAccessibilityCustomRotorItemResult(targetElement: target, targetRange: nil)
+            // Цели ротора становятся частью массива ленты (сразу после
+            // сообщения), иначе iOS считала их потерянными и возвращала курсор
+            // на пост. Контейнер — вьюшка ListView, как у остальных элементов.
+            self.activeRotorElements = targets
+            self.activeRotorTimestamp = CACurrentMediaTime()
+            var listNode: ASDisplayNode? = self.supernode
+            while let current = listNode, !(current is ListView) {
+                listNode = current.supernode
+            }
+            if let listView = listNode as? ListView {
+                self.updateRotorTargets(targets, container: listView.view)
+                listView.accessibilityInvalidateElementsCache()
+            } else {
+                self.updateRotorTargets(targets, container: nil)
+            }
+            return UIAccessibilityCustomRotorItemResult(targetElement: targets[index], targetRange: nil)
         })
     }
     
@@ -7520,4 +7568,7 @@ public final class NameNavigateButton: HighlightableButton {
             self.titleTopicIconComponent = nil
         }
     }
+}
+
+extension ChatMessageBubbleItemNode: ListViewAccessibilityAuxiliaryElementsSource {
 }

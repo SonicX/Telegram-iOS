@@ -1977,6 +1977,7 @@ open class NavigationController: UINavigationController, ContainableController, 
     }
     
     fileprivate func performBackActionFromAccessibility() -> Bool {
+        voDiagLog("[VO-DIAG][NAV] escape-gesture count=\(self._viewControllers.count)")
         voAccessibilityLog("[VO-ESCAPE] NavigationController.performBackActionFromAccessibility count=\(self._viewControllers.count) top=\(self._viewControllers.last.map { String(describing: type(of: $0)) } ?? "nil")")
         guard self._viewControllers.count > 1, let topController = self._viewControllers.last else {
             voAccessibilityLog("[VO-ESCAPE] performBackAction ABORT: count<=1")

@@ -533,6 +533,30 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 elements = current + trailing
             }
         }
+        // VoiceOver: вспомогательные элементы строки (цели ротора «Ссылки» /
+        // «Вложения») — сразу после её элемента, пока ротор ими пользуется.
+        // Без этого iOS при перепроверке не находила цель ротора в массиве и
+        // через ~1.3с возвращала курсор на пост; следующий шаг ротора начинался
+        // заново с первого вложения (лог 2026-10-26: «1. Фото» по кругу).
+        if UIAccessibility.isVoiceOverRunning, let current = elements, !current.isEmpty {
+            let focused = UIAccessibility.focusedElement(using: nil)
+            var expanded: [Any] = []
+            expanded.reserveCapacity(current.count)
+            var didExpand = false
+            for element in current {
+                expanded.append(element)
+                if let tracked = element as? FocusTrackingAccessibilityElement, let source = tracked.sourceView?.asyncdisplaykit_node as? ListViewAccessibilityAuxiliaryElementsSource {
+                    let auxiliary = source.accessibilityAuxiliaryElements(focused: focused, container: self.view)
+                    if !auxiliary.isEmpty {
+                        expanded.append(contentsOf: auxiliary)
+                        didExpand = true
+                    }
+                }
+            }
+            if didExpand {
+                elements = expanded
+            }
+        }
         // Пока держим начальный фокус (вход в чат / возврат в список),
         // VoiceOver видит массив НАЧИНАЯ С ЦЕЛИ: его собственный фокус после
         // смены экрана встаёт на первый элемент — то есть сразу на цель, без
@@ -558,6 +582,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// панели ввода. Подаются как есть, их контейнер остаётся родным, так что
     /// следующий свайп ведёт дальше по панели ввода.
     public var accessibilityTrailingRealElementsProvider: (() -> [NSObject])?
+
+    /// Сбросить кэш VO-массива (например, строка включила вспомогательные
+    /// элементы ротора и они должны попасть в массив немедленно).
+    public func accessibilityInvalidateElementsCache() {
+        self.voInvalidateAccessibilityElementsCache()
+    }
 
     fileprivate func voInvalidateAccessibilityElementsCache() {
         self.voAccessibilityElementsCache = nil
