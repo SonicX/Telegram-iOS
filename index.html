@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenGram — код входа для App Review</title>
+<style>
+  :root { --bg:#fff; --fg:#1c1c1e; --muted:#6b6b70; --card:#f2f2f7; --accent:#0a84ff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#000; --fg:#f2f2f7; --muted:#9a9aa0; --card:#1c1c1e; } }
+  body { margin:0; padding:24px 16px; background:var(--bg); color:var(--fg); font:17px/1.45 -apple-system,system-ui,sans-serif; }
+  main { max-width:520px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 8px; }
+  .card { background:var(--card); border-radius:16px; padding:20px; margin:16px 0; text-align:center; }
+  #code { font:700 44px/1.2 ui-monospace,Menlo,monospace; letter-spacing:6px; }
+  #status { color:var(--muted); font-size:15px; margin-top:6px; }
+  ol { padding-left:22px; } li { margin:6px 0; }
+  .en { color:var(--muted); font-size:15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>OpenGram — код входа / login code</h1>
+  <p>Демо-аккаунт: <b>+7 952 926-02-91</b></p>
+  <ol>
+    <li>В приложении введите номер и нажмите «Продолжить».</li>
+    <li>Код появится ниже в течение нескольких секунд (страница обновляется сама).</li>
+    <li>Введите код в приложении. Если включён пароль — он указан в Review Notes.</li>
+  </ol>
+  <p class="en">Enter the number in the app and tap Continue. The code shows up below within seconds; this page refreshes by itself. If a password is requested, it is in the Review Notes.</p>
+  <div class="card">
+    <div id="code">— — — — —</div>
+    <div id="status">Ожидание кода… / Waiting for the code…</div>
+  </div>
+</main>
+<script>
+  const REPO = "SonicX/Telegram-iOS";
+  const API = `https://api.github.com/repos/${REPO}/contents/code.json`;
+  const codeEl = document.getElementById("code");
+  const statusEl = document.getElementById("status");
+  let etag = null;
+
+  function render(data) {
+    const age = data && data.code ? Math.floor(Date.now() / 1000) - data.ts : null;
+    if (data && data.code && age >= 0 && age < data.ttl) {
+      codeEl.textContent = data.code;
+      statusEl.textContent = `Получен ${age} с назад / received ${age}s ago`;
+    } else {
+      codeEl.textContent = "— — — — —";
+      statusEl.textContent = "Ожидание кода… / Waiting for the code…";
+    }
+  }
+
+  async function poll() {
+    try {
+      const headers = { Accept: "application/vnd.github.raw+json" };
+      if (etag) headers["If-None-Match"] = etag;
+      const res = await fetch(`${API}?ref=review-code`, { headers, cache: "no-store" });
+      if (res.status === 200) {
+        etag = res.headers.get("ETag");
+        render(await res.json());
+      }
+    } catch (e) {
+      statusEl.textContent = "Нет связи, повтор… / Retrying…";
+    }
+  }
+  poll();
+  setInterval(poll, 5000);
+</script>
+</body>
+</html>
