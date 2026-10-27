@@ -61,6 +61,15 @@ public final class ListViewBackingView: UIView {
         } set(value) {
         }
     }
+
+    // VoiceOver: hit-test приходит при ОЩУПЫВАНИИ экрана пальцем (не при
+    // свайпах) — запоминаем момент, чтобы не прокручивать ленту к элементу,
+    // на который палец попал у края (см. voAccessibilityLastTouchExplorationTimestamp).
+    @available(iOS 18.0, *)
+    override public func accessibilityHitTest(_ point: CGPoint, event: UIEvent?) -> Any? {
+        voAccessibilityLastTouchExplorationTimestamp = CACurrentMediaTime()
+        return super.accessibilityHitTest(point, event: event)
+    }
     
     override public func setNeedsLayout() {
     }
@@ -748,6 +757,32 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         return true
     }
 
+    private static func accessibilitySortFrame(_ element: Any) -> CGRect {
+        if let element = element as? UIAccessibilityElement {
+            return element.accessibilityFrame
+        }
+        if let view = element as? UIView, view.window != nil {
+            return UIAccessibility.convertToScreenCoordinates(view.bounds, in: view)
+        }
+        return .null
+    }
+
+    /// Листья доступности поддерева (view-backed ноды с isAccessibilityElement).
+    private static func appendAccessibilityLeaves(of node: ASDisplayNode, to list: inout [Any]) {
+        if node.isLayerBacked || node.isHidden || node.alpha < 0.01 {
+            return
+        }
+        if node.isAccessibilityElement {
+            if node.isNodeLoaded {
+                list.append(node.view)
+            }
+            return
+        }
+        for subnode in node.subnodes ?? [] {
+            ListView.appendAccessibilityLeaves(of: subnode, to: &list)
+        }
+    }
+
     @objc open func customAccessibilityElements() -> [Any]? {
         // Баг 1: пока список приостановлен (уходим в чат — см.
         // accessibilityFocusHandlingSuspended), отдаём VoiceOver ПУСТОЙ набор.
@@ -970,6 +1005,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         if !trackDirectionalFocus {
             self.cleanupStableAccessibilityElementPool(activeKeys: stableActiveKeys)
+            // VoiceOver: заголовки секций — плавающие ноды, а не строки, и в
+            // массив не попадали вместе со своими кнопками («Очистить» у
+            // недавних в глобальном поиске — отзыв тестировщика 2026-10-26).
+            // Порядок ниже — по положению на экране, так что заголовок встаёт
+            // над своими строками.
+            for (_, headerNode) in self.itemHeaderNodes {
+                if headerNode.isHidden || headerNode.alpha < 0.01 || !headerNode.isNodeLoaded {
+                    continue
+                }
+                let intersection = headerNode.frame.intersection(visibleRect)
+                if intersection.isNull || intersection.height < 1.0 {
+                    continue
+                }
+                ListView.appendAccessibilityLeaves(of: headerNode, to: &accessibilityElements)
+            }
         }
         if trackDirectionalFocus {
             // Баг 2: дописываем реальные trailing-элементы (кнопки) как пуловые
@@ -1055,8 +1105,8 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             self.cleanupDirectionalElementPool(activeLocalIndices: activeLocalIndices)
         } else {
             accessibilityElements = accessibilityElements.enumerated().sorted(by: { lhs, rhs in
-                let lhsFrame = (lhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
-                let rhsFrame = (rhs.element as? UIAccessibilityElement)?.accessibilityFrame ?? .null
+                let lhsFrame = ListView.accessibilitySortFrame(lhs.element)
+                let rhsFrame = ListView.accessibilitySortFrame(rhs.element)
                 if lhsFrame.isNull != rhsFrame.isNull {
                     return !lhsFrame.isNull
                 }
@@ -8136,18 +8186,39 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         var viewToIndex: [ObjectIdentifier: Int] = [:]
+        var stableKeyToIndex: [AnyHashable: Int] = [:]
         self.forEachItemNode({ node in
             if let itemNode = node as? ListViewItemNode, let index = itemNode.index, itemNode.isNodeLoaded {
                 viewToIndex[ObjectIdentifier(itemNode.view)] = index
+                if let provider = self.accessibilityStableItemKey, index >= 0, index < self.items.count, let stableKey = provider(self.items[index]) {
+                    stableKeyToIndex[stableKey] = index
+                }
             }
         })
         if viewToIndex.isEmpty {
             return
         }
+        // Индекс строки элемента: сначала по её вьюшке, а если ListView
+        // создал для переехавшей строки новую ноду — по стабильному ключу
+        // (id чата). Без этого элемент, на котором стоит курсор, оставался на
+        // старом индексе и начинал означать соседний чат: курсор «прыгал», а
+        // двойной тап открывал другой чат (отзыв тестировщика 2026-10-26).
+        func currentIndex(of elements: [FocusTrackingAccessibilityElement]) -> Int? {
+            guard let first = elements.first else {
+                return nil
+            }
+            if let sourceView = first.sourceView, let index = viewToIndex[ObjectIdentifier(sourceView)] {
+                return index
+            }
+            if let stableKey = first.stableItemKey, let index = stableKeyToIndex[stableKey] {
+                return index
+            }
+            return nil
+        }
         var moved: [Int: [FocusTrackingAccessibilityElement]] = [:]
         var movedCount = 0
         for (key, elements) in self.accessibilityDirectionalElementPool {
-            guard let sourceView = elements.first?.sourceView, let currentIndex = viewToIndex[ObjectIdentifier(sourceView)] else {
+            guard let currentIndex = currentIndex(of: elements) else {
                 continue
             }
             if currentIndex != key {
@@ -8161,7 +8232,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         for (key, elements) in self.accessibilityDirectionalElementPool where moved[key] == nil {
             // Старый ключ переехавшей записи освобождаем; не переехавшие
             // записи с чужим ключом (их строка ушла) уступают место переехавшим.
-            if let sourceView = elements.first?.sourceView, let currentIndex = viewToIndex[ObjectIdentifier(sourceView)], currentIndex != key {
+            if let currentIndex = currentIndex(of: elements), currentIndex != key {
                 continue
             }
             moved[key] = elements
@@ -8175,6 +8246,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         voDiagLog("[VO-DIAG][POOL] remapped=\(movedCount) pool=\(moved.count)")
     }
     
+    /// Стабильный ключ строки для VO-пула (id чата и т. п.), см.
+    /// FocusTrackingAccessibilityElement.stableItemKey.
+    public var accessibilityStableItemKey: ((ListViewItem) -> AnyHashable?)?
+
     public func reuseOrCreateDirectionalElement(localIndex: Int, childOrder: Int, sourceView: UIView) -> FocusTrackingAccessibilityElement {
         var elements = self.accessibilityDirectionalElementPool[localIndex] ?? []
         while elements.count <= childOrder {
@@ -8194,6 +8269,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // focus continuity across scrolls.
         elements[childOrder].sourceView = sourceView
         elements[childOrder].pinnedLocalIndex = localIndex
+        if let provider = self.accessibilityStableItemKey, localIndex >= 0, localIndex < self.items.count {
+            elements[childOrder].stableItemKey = provider(self.items[localIndex])
+        }
         self.accessibilityDirectionalElementPool[localIndex] = elements
         return elements[childOrder]
     }
@@ -8233,6 +8311,15 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         if self.voFocusScrollsInhibited {
             voDiagLog("[VO-DIAG][SCROLL] focus-scroll-skip reason=inhibited index=\(localIndex)")
+            return
+        }
+        // Курсор пришёл от касания пальцем, а не от свайпа: не прокручиваем.
+        // Иначе у края списка палец попадал на полувидимый элемент, лента
+        // прокручивалась, под пальцем оказывался следующий — и так «сама
+        // листала вглубь» (отзыв тестировщиков 2026-10-27). Так ведут себя и
+        // обычные списки iOS: касание озвучивает то, что под пальцем.
+        if CACurrentMediaTime() - voAccessibilityLastTouchExplorationTimestamp < 0.5 {
+            voDiagLog("[VO-DIAG][SCROLL] focus-scroll-skip reason=touch index=\(localIndex)")
             return
         }
 
@@ -8713,6 +8800,18 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         // Курсор на цели — дальше пользователь ходит сам.
         if self.isInitialFocusTarget(target, focused: focused) {
+            self.clearInitialFocusHold()
+            return false
+        }
+        // Курсор уже ДАЛЬШЕ цели по порядку чтения (например, на сообщении
+        // сразу под плашкой «Непрочитанные») — человек читает дальше, тянуть
+        // его назад нельзя (отзыв тестировщика 2026-10-26: «навёлся на
+        // сообщение, курсор ускочил на непрочитанные»). Возвращаем только с
+        // элементов ДО цели — туда iOS ставит курсор по умолчанию.
+        if let elements = self.customAccessibilityElements(),
+           let targetIndex = elements.firstIndex(where: { ($0 as AnyObject) === target }),
+           let focusedIndex = elements.firstIndex(where: { ($0 as AnyObject) === (focused as AnyObject) }),
+           focusedIndex > targetIndex {
             self.clearInitialFocusHold()
             return false
         }

@@ -1495,6 +1495,20 @@ public final class ChatListNode: ListView {
         // порождает каскады с зачитыванием случайных чатов. Включаем нативное
         // поведение для нелинейных перескоков (только для списка, не история).
         self.accessibilityUsesNativeScrollForNonSequentialFocus = true
+        // VoiceOver: элемент строки привязан к чату (id пира / темы), а не к
+        // позиции — при перестановке чатов курсор и двойной тап остаются на
+        // том же чате.
+        self.accessibilityStableItemKey = { item in
+            guard let item = item as? ChatListItem else {
+                return nil
+            }
+            switch item.index {
+            case let .chatList(index):
+                return AnyHashable(index.messageIndex.id.peerId)
+            case let .forum(_, _, threadId, _, _):
+                return AnyHashable(threadId)
+            }
+        }
         self.accessibilityDirectionalAnnouncement = { [weak self] fromIndex, toIndex in
             guard let self, abs(toIndex - fromIndex) == 1 else { return nil }
             let strings = self.currentState.presentationData.strings

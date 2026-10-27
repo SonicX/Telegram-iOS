@@ -31,6 +31,10 @@ public func voAccessibilityLog(_ message: @autoclosure () -> String) {
 /// Debug → Send Logs. Без подключения диагностика идёт только в консоль.
 public var voDiagnosticsSink: ((String) -> Void)?
 
+/// Момент последнего accessibility hit-test (ощупывание экрана пальцем при
+/// VoiceOver, iOS 18+). По нему отличаем касание от свайпа.
+public var voAccessibilityLastTouchExplorationTimestamp: Double = 0.0
+
 /// Диагностический принт [VO-DIAG]: в консоль + в файловый лог (если подключён)
 /// + в системный журнал устройства.
 public func voDiagLog(_ message: @autoclosure () -> String) {
@@ -92,6 +96,10 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
     /// bypassing geometric off-screen-frame computations that fail for
     /// rotated chat history with very tall message bubbles.
     public var pinnedLocalIndex: Int?
+    /// Стабильный ключ элемента списка (например, id чата): по нему пул
+    /// переносит элемент за строкой, когда та переехала на другой индекс,
+    /// даже если ListView создал для неё новую ноду.
+    public var stableItemKey: AnyHashable?
 
     override public func accessibilityElementDidBecomeFocused() {
         super.accessibilityElementDidBecomeFocused()
