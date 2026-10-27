@@ -1214,6 +1214,19 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         // на панель ввода. С дублем порядок становился несимметричным —
         // свайпы влево с «Написать сообщение» уходили в навбар по кругу.
         self.historyNode.accessibilityTrailingRealElementsProvider = nil
+        // После новейшего сообщения идёт навбар (см. accessibilityElementsReorder).
+        self.historyNode.accessibilityElementAfterTrailingEdgeProvider = { [weak self] in
+            guard let self, let navigationBar = self.navigationBar, navigationBar.isNodeLoaded else {
+                return nil
+            }
+            guard let first = navigationBar.accessibilityElements?.first else {
+                return nil
+            }
+            if let node = first as? ASDisplayNode {
+                return node.isNodeLoaded && !node.isLayerBacked ? node.view : nil
+            }
+            return first as? NSObject
+        }
         // VoiceOver (Баг 2): trailing-кнопки в ленте истории. Info возвращает
         // подпись если кнопку надо показать (иначе nil); Activate — действие.
         self.historyNode.accessibilityComposeButtonInfo = { [weak self] in

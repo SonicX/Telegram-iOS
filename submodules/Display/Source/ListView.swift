@@ -592,6 +592,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// следующий свайп ведёт дальше по панели ввода.
     public var accessibilityTrailingRealElementsProvider: (() -> [NSObject])?
 
+    /// VoiceOver: элемент экрана, который идёт сразу ПОСЛЕ последнего
+    /// элемента ленты (в чате — «Назад» навбара). Нужен, чтобы доделать свайп
+    /// вперёд с высокого новейшего сообщения, который iOS заворачивает назад.
+    public var accessibilityElementAfterTrailingEdgeProvider: (() -> NSObject?)?
+
     /// Сбросить кэш VO-массива (например, строка включила вспомогательные
     /// элементы ротора и они должны попасть в массив немедленно).
     public func accessibilityInvalidateElementsCache() {
@@ -7099,6 +7104,28 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
            previousSourceView.bounds.height >= clip.height * 0.7,
            !focusedData.frame.isNull, focusedData.frame.maxY <= clip.minY + 1.0 {
             voDiagLog("[VO-DIAG][CC] tall-wrap-back from=\(fromIndex) to=\(toIndex) count=\(elements.count) prevH=\(Int(previousSourceView.bounds.height)) clipH=\(Int(clip.height))")
+            // Высокое сообщение — ПОСЛЕДНЕЕ в ленте: следующего элемента ленты
+            // нет, и advance возвращал курсор на то же сообщение (лог
+            // 2026-10-27, канал: пост → «Непрочитанные» → снова пост, а
+            // следующий свайп назад уводил ленту). Свайп вперёд отсюда ведёт
+            // туда же, куда с обычного новейшего сообщения, — в навбар.
+            if fromIndex >= elements.count - 1, let afterTrailing = self.accessibilityElementAfterTrailingEdgeProvider?() {
+                self.accessibilityRingRepostGeneration &+= 1
+                guard CACurrentMediaTime() - self.accessibilityLastTallAdvanceTimestamp > 0.5 else {
+                    return
+                }
+                self.accessibilityLastTallAdvanceTimestamp = CACurrentMediaTime()
+                // Уход в навбар — штатный выход с края ленты, не «выпад».
+                self.accessibilityLastInListFocusAtTrailingEdge = true
+                voDiagLog("[VO-DIAG][CC] tall-wrap-back-trailing → «\(String((afterTrailing.accessibilityLabel ?? "-").prefix(24)))»")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak afterTrailing] in
+                    guard let afterTrailing, UIAccessibility.isVoiceOverRunning else {
+                        return
+                    }
+                    UIAccessibility.post(notification: .layoutChanged, argument: afterTrailing)
+                }
+                return
+            }
             if self.advanceAccessibilityFocusPastTallItem(fromArrayIndex: fromIndex, reason: "tall-wrap-back") {
                 // Рамку уже запланировали на элемент, куда завернуло, — отменяем.
                 self.accessibilityRingRepostGeneration &+= 1
