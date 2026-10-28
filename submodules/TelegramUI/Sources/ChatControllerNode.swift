@@ -166,7 +166,7 @@ private final class ChatControllerNodeView: UITracingLayerView, WindowInputAcces
 
     @available(iOS 18.0, *)
     override func accessibilityHitTest(_ point: CGPoint, event: UIEvent?) -> Any? {
-        voAccessibilityLastTouchExplorationTimestamp = CACurrentMediaTime()
+        voNoteAccessibilityHitTest(point, in: self)
         if let node = self.node {
             if let navigationBar = node.navigationBar, let result = prioritizedAccessibilityHitTest(in: navigationBar.view, point: point, event: event) {
                 return result

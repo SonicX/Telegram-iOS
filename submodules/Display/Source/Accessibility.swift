@@ -35,6 +35,16 @@ public var voDiagnosticsSink: ((String) -> Void)?
 /// VoiceOver, iOS 18+). По нему отличаем касание от свайпа.
 public var voAccessibilityLastTouchExplorationTimestamp: Double = 0.0
 
+/// Точка того же hit-test в экранных координатах. iOS 27 зовёт hit-test и
+/// при СВАЙПАХ (лог 2026-10-27: «касания» по элементам за экраном), поэтому
+/// касанием считаем только hit-test, попавший в видимую часть элемента.
+public var voAccessibilityLastTouchExplorationPoint: CGPoint?
+
+public func voNoteAccessibilityHitTest(_ point: CGPoint, in view: UIView) {
+    voAccessibilityLastTouchExplorationTimestamp = CACurrentMediaTime()
+    voAccessibilityLastTouchExplorationPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: point, size: CGSize(width: 1.0, height: 1.0)), in: view).origin
+}
+
 /// Диагностический принт [VO-DIAG]: в консоль + в файловый лог (если подключён)
 /// + в системный журнал устройства.
 public func voDiagLog(_ message: @autoclosure () -> String) {

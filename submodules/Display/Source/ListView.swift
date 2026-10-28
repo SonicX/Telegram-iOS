@@ -67,7 +67,7 @@ public final class ListViewBackingView: UIView {
     // на который палец попал у края (см. voAccessibilityLastTouchExplorationTimestamp).
     @available(iOS 18.0, *)
     override public func accessibilityHitTest(_ point: CGPoint, event: UIEvent?) -> Any? {
-        voAccessibilityLastTouchExplorationTimestamp = CACurrentMediaTime()
+        voNoteAccessibilityHitTest(point, in: self)
         return super.accessibilityHitTest(point, event: event)
     }
     
@@ -8345,10 +8345,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // прокручивалась, под пальцем оказывался следующий — и так «сама
         // листала вглубь» (отзыв тестировщиков 2026-10-27). Так ведут себя и
         // обычные списки iOS: касание озвучивает то, что под пальцем.
-        if CACurrentMediaTime() - voAccessibilityLastTouchExplorationTimestamp < 0.5 {
-            voDiagLog("[VO-DIAG][SCROLL] focus-scroll-skip reason=touch index=\(localIndex)")
-            return
-        }
+        // Касание — только если точка hit-test лежит в ВИДИМОЙ части элемента:
+        // iOS 27 зовёт hit-test и при свайпах, и без этой проверки свайп на
+        // элемент за экраном не прокручивал ленту — курсор оставался на
+        // невидимом посте, и iOS через секунду перекидывала его на соседний
+        // (лог 2026-10-27: «начинает читать пост и улетает на пост выше»).
+        let touchIsRecent = CACurrentMediaTime() - voAccessibilityLastTouchExplorationTimestamp < 0.5
 
         // **Skip if already on-screen.**
         // Without this guard, every focus notification — including the
@@ -8383,6 +8385,14 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             if !itemScreenFrame.isNull, !listClipFrame.isNull {
                 let intersection = itemScreenFrame.intersection(listClipFrame)
                 let intersectionHeight = intersection.isNull ? 0.0 : intersection.height
+                if touchIsRecent, let touchPoint = voAccessibilityLastTouchExplorationPoint, !intersection.isNull, intersection.contains(touchPoint) {
+                    voDiagLog("[VO-DIAG][SCROLL] focus-scroll-skip reason=touch index=\(localIndex)")
+                    return
+                }
+                if touchIsRecent {
+                    let touchPoint = voAccessibilityLastTouchExplorationPoint ?? .zero
+                    voDiagLog("[VO-DIAG][SCROLL] hit-test-not-touch index=\(localIndex) point=(\(Int(touchPoint.x)),\(Int(touchPoint.y))) item=(\(Int(itemScreenFrame.minY))..\(Int(itemScreenFrame.maxY)))")
+                }
                 if itemScreenFrame.height >= listClipFrame.height {
                     // Сообщение ВЫШЕ вьюпорта. Предраскрытие его низа (раунды
                     // 4-5) НЕ работает: iOS-овская AX-машинерия тут же
