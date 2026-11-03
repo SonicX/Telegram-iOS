@@ -327,3 +327,10 @@
 "VoiceOver.Editor.CoverFrame" = "Cover frame";
 "VoiceOver.Editor.CoverFrame.Value" = "%@ of %@ seconds";
 "VoiceOver.Editor.CoverFrame.Hint" = "Swipe up or down to choose another frame";
+"VoiceOver.Player.Opened" = "Video player";
+"VoiceOver.Player.Backward15" = "Back 15 seconds";
+"VoiceOver.Player.Forward15" = "Forward 15 seconds";
+"VoiceOver.Player.Download" = "Download video";
+"VoiceOver.Player.CancelDownload" = "Cancel download";
+"VoiceOver.Player.Position" = "Playback position";
+"VoiceOver.Player.PositionValue" = "%@ of %@";

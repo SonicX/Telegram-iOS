@@ -4520,6 +4520,13 @@ extension ChatControllerImpl {
                 }))
             }
 
+            // «Отменить голос» в опросе — как в контекстном меню.
+            if let poll = message.media.first(where: { $0 is TelegramMediaPoll }) as? TelegramMediaPoll, case .poll = poll.kind, poll.results.voters?.contains(where: { $0.selected }) == true, !poll.isClosed {
+                result.append((strings.Conversation_UnvotePoll, { [weak self] in
+                    self?.interfaceInteraction?.requestUnvoteInMessage(message.id)
+                }))
+            }
+
             // «Оставить комментарий» / «N комментариев» / «Просмотреть ответ».
             // Тестировщики: «пункт оставить комментарий пропал из меню» — в
             // f4ee0516ef его убрали в расчёте на кнопку-футер под постом, но в

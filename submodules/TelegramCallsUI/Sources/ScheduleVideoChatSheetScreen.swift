@@ -257,6 +257,8 @@ private final class ScheduleVideoChatSheetContentComponent: Component {
                 if buttonView.superview == nil {
                     self.addSubview(buttonView)
                 }
+                // VoiceOver: у ButtonComponent с HStack-содержимым подписи нет.
+                buttonView.accessibilityLabel = buttonTitle
                 transition.setFrame(view: buttonView, frame: buttonFrame)
             }
             contentHeight += buttonSize.height
@@ -291,6 +293,7 @@ private final class ScheduleVideoChatSheetContentComponent: Component {
                 if cancelButtonView.superview == nil {
                     self.addSubview(cancelButtonView)
                 }
+                cancelButtonView.accessibilityLabel = environment.strings.Common_Cancel
                 transition.setFrame(view: cancelButtonView, frame: cancelButtonFrame)
             }
             contentHeight += cancelButtonSize.height

@@ -5494,6 +5494,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                     // Быстрое действие («Ответить», «Скопировать», …) —
                     // замыкание сформировано чат-контроллером.
                     f()
+                case let .messageButton(button):
+                    self.performMessageButtonAction(button: button, progress: nil)
             }
         }
     }

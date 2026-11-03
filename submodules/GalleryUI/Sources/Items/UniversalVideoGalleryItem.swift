@@ -1514,6 +1514,7 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                 chapters = parseMediaPlayerChapters(description)
             }
             let scrubberView = ChatVideoGalleryItemScrubberView(chapters: chapters)
+            scrubberView.accessibilityLocale = item.presentationData.strings.baseLanguageCode
             self.scrubberView = scrubberView
             scrubberView.seek = { [weak self] timecode in
                 self?.videoNode?.seek(timecode)
@@ -2292,6 +2293,12 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
     override func activateAsInitial() {
         if let videoNode = self.videoNode, self.isCentral == true, !self.initiallyActivated {
             self.initiallyActivated = true
+            if UIAccessibility.isVoiceOverRunning {
+                // После анимации открытия — иначе iOS ставит курсор на навбар.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    self?.footerContentNode.accessibilityFocusPlayer()
+                }
+            }
 
             var isAnimated = false
             var seek = MediaPlayerSeek.start

@@ -1253,11 +1253,18 @@ final class VideoChatParticipantsComponent: Component {
                         if let participantPeer = participant.peer {
                             isSpeaking = component.speakingParticipants.contains(participantPeer.id)
                         }
+                        var accessibilityStatus: String?
+                        if participant.hasRaiseHand {
+                            accessibilityStatus = component.strings.VoiceChat_StatusWantsToSpeak
+                        } else if let muteState = participant.muteState {
+                            accessibilityStatus = muteState.canUnmute ? component.strings.VoiceChat_Muted : component.strings.VoiceChat_MutedByAdmin
+                        }
                         let rightAccessoryComponent: AnyComponent<Empty> = AnyComponent(VideoChatParticipantStatusComponent(
                             muteState: participant.muteState,
                             hasRaiseHand: participant.hasRaiseHand,
                             isSpeaking: isSpeaking,
-                            theme: component.theme
+                            theme: component.theme,
+                            accessibilityStatus: accessibilityStatus
                         ))
                         
                         peerItemComponent = PeerListItemComponent(

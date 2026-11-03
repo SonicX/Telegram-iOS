@@ -84,6 +84,9 @@ public enum ChatMessageAccessibilityCustomActionType {
     /// чат-контроллером (accessibilityMessageQuickActions), активация
     /// просто выполняет его.
     case perform(() -> Void)
+    /// Кнопка инлайн-клавиатуры бота под сообщением («Подписаться», «Открыть»…):
+    /// под VoiceOver сообщение — один элемент, и сами кнопки недостижимы.
+    case messageButton(ReplyMarkupButton)
 }
 
 public final class ChatMessageAccessibilityCustomAction: UIAccessibilityCustomAction {
@@ -375,36 +378,58 @@ public final class ChatMessageAccessibilityData {
                             text.append(".")
                         }
                     } else if let poll = media as? TelegramMediaPoll {
+                        // VoiceOver: тип опроса по факту (раньше всегда звучало
+                        // «Анонимный опрос»), все отмеченные варианты, верный
+                        // ответ викторины, дедлайн как закрытие.
+                        let isRu = isRussianBaseLanguage(item: item)
+                        let strings = item.presentationData.strings
+                        let isClosed = isPollEffectivelyClosed(message: item.message, poll: poll)
+                        let kindLabel: String
+                        switch (poll.kind, poll.publicity) {
+                        case (.quiz, .anonymous):
+                            kindLabel = strings.MessagePoll_LabelAnonymousQuiz
+                        case (.quiz, .public):
+                            kindLabel = strings.MessagePoll_LabelQuiz
+                        case (.poll, .anonymous):
+                            kindLabel = strings.MessagePoll_LabelAnonymous
+                        case (.poll, .public):
+                            kindLabel = strings.MessagePoll_LabelPoll
+                        }
                         if isIncoming {
                             if announceIncomingAuthors, let authorName = authorName {
-                                label = item.presentationData.strings.VoiceOver_Chat_AnonymousPollFrom(authorName).string
+                                label = "\(kindLabel), \(authorName)"
                             } else {
-                                label = item.presentationData.strings.VoiceOver_Chat_AnonymousPoll
+                                label = kindLabel
                             }
                         } else {
-                            label = item.presentationData.strings.VoiceOver_Chat_YourAnonymousPoll
+                            label = "\(kindLabel), \(isRu ? "ваш" : "yours")"
                         }
                         
                         var optionVoterCount: [Int: Int32] = [:]
                         var maxOptionVoterCount: Int32 = 0
                         var totalVoterCount: Int32 = 0
                         let voters: [TelegramMediaPollOptionVoters]?
-                        if poll.isClosed {
+                        if isClosed {
                             voters = poll.results.voters ?? []
                         } else {
                             voters = poll.results.voters
                         }
-                        var selectedOptionId: Data?
-                        if let voters = voters, let totalVoters = poll.results.totalVoters {
-                            var didVote = false
+                        var selectedOptionIds = Set<Data>()
+                        var correctOptionIds = Set<Data>()
+                        if let voters = voters {
                             for voter in voters {
                                 if voter.selected {
-                                    didVote = true
-                                    selectedOptionId = voter.opaqueIdentifier
+                                    selectedOptionIds.insert(voter.opaqueIdentifier)
+                                }
+                                if voter.isCorrect {
+                                    correctOptionIds.insert(voter.opaqueIdentifier)
                                 }
                             }
+                        }
+                        let didVote = !selectedOptionIds.isEmpty
+                        if let voters = voters, let totalVoters = poll.results.totalVoters {
                             totalVoterCount = totalVoters
-                            if didVote || poll.isClosed {
+                            if didVote || isClosed {
                                 for i in 0 ..< poll.options.count {
                                     inner: for optionVoters in voters {
                                         if optionVoters.opaqueIdentifier == poll.options[i].opaqueIdentifier {
@@ -424,10 +449,10 @@ public final class ChatMessageAccessibilityData {
                             optionVoterCounts = Array(repeating: 0, count: poll.options.count)
                         }
                         
-                        text = item.presentationData.strings.VoiceOver_Chat_Title(poll.text).string
+                        text = strings.VoiceOver_Chat_Title(poll.text).string
                         text.append(". ")
                         
-                        text.append(item.presentationData.strings.VoiceOver_Chat_PollOptionCount(Int32(poll.options.count)))
+                        text.append(strings.VoiceOver_Chat_PollOptionCount(Int32(poll.options.count)))
                         text.append(": ")
                         var optionsText = ""
                         for i in 0 ..< poll.options.count {
@@ -437,9 +462,12 @@ public final class ChatMessageAccessibilityData {
                                 optionsText.append(", ")
                             }
                             optionsText.append(option.text)
-                            if let selectedOptionId = selectedOptionId, selectedOptionId == option.opaqueIdentifier {
+                            if selectedOptionIds.contains(option.opaqueIdentifier) {
                                 optionsText.append(", ")
-                                optionsText.append(item.presentationData.strings.VoiceOver_Chat_OptionSelected)
+                                optionsText.append(strings.VoiceOver_Chat_OptionSelected)
+                            }
+                            if case .quiz = poll.kind, (didVote || isClosed), correctOptionIds.contains(option.opaqueIdentifier) {
+                                optionsText.append(isRu ? ", правильный ответ" : ", correct answer")
                             }
                             
                             if let _ = optionVoterCount[i] {
@@ -450,12 +478,14 @@ public final class ChatMessageAccessibilityData {
                         }
                         text.append("\(optionsText). ")
                         if totalVoterCount != 0 {
-                            text.append(item.presentationData.strings.VoiceOver_Chat_PollVotes(Int32(totalVoterCount)))
+                            text.append(strings.VoiceOver_Chat_PollVotes(Int32(totalVoterCount)))
                         } else {
-                            text.append(item.presentationData.strings.VoiceOver_Chat_PollNoVotes)
+                            text.append(strings.VoiceOver_Chat_PollNoVotes)
                         }
-                        if poll.isClosed {
-                            text.append(item.presentationData.strings.VoiceOver_Chat_PollFinalResults)
+                        if isClosed {
+                            text.append(strings.VoiceOver_Chat_PollFinalResults)
+                        } else if !didVote, item.message.id.namespace == Namespaces.Message.Cloud, poll.pollId.namespace == Namespaces.Media.CloudPoll {
+                            text.append(isRu ? ". Чтобы проголосовать, смахните вниз" : ". Swipe down to vote")
                         }
                     }
                 }
@@ -788,6 +818,32 @@ public final class ChatMessageAccessibilityData {
             // и реакции. Список и замыкания формирует чат-контроллер
             // (accessibilityMessageQuickActions), он же решает доступность
             // каждого действия по правам и состоянию чата.
+            // VoiceOver: опрос — голосование действиями сообщения (варианты
+            // внутри бабла под VoiceOver недостижимы: сообщение — один элемент).
+            customActions.append(contentsOf: voPollAccessibilityActions(item: item))
+
+            // VoiceOver: инлайн-кнопки бота — первыми в цепочке свайпа вниз
+            // (ради них сообщение обычно и открывают). Фильтр — как у бабла.
+            if !item.message.isRestricted(platform: "ios", contentSettings: item.context.currentContentSettings.with { $0 }) {
+                let hasExtendedMedia = item.message.media.contains(where: { ($0 as? TelegramMediaInvoice)?.extendedMedia != nil })
+                for attribute in item.message.attributes {
+                    guard let attribute = attribute as? ReplyMarkupMessageAttribute, attribute.flags.contains(.inline) else {
+                        continue
+                    }
+                    for row in attribute.rows {
+                        for button in row.buttons {
+                            if hasExtendedMedia, case .payment = button.action {
+                                continue
+                            }
+                            let title = button.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if title.isEmpty {
+                                continue
+                            }
+                            customActions.append(ChatMessageAccessibilityCustomAction(name: title, target: nil, selector: #selector(self.noop), action: .messageButton(button)))
+                        }
+                    }
+                }
+            }
             if let quickActions = item.controllerInteraction.accessibilityMessageQuickActions?(item.message) {
                 for quickAction in quickActions {
                     customActions.append(ChatMessageAccessibilityCustomAction(name: quickAction.title, target: nil, selector: #selector(self.noop), action: .perform(quickAction.action)))
@@ -861,6 +917,76 @@ public final class ChatMessageAccessibilityData {
     
     @objc private func noop() {
     }
+
+    @objc fileprivate func voNoopSelector() {
+    }
+}
+
+// VoiceOver: выбранные (ещё не отправленные) варианты опроса с несколькими
+// ответами. Отметки бабла (радио-ноды) из действий сообщения недоступны,
+// поэтому выбор копим здесь и отправляем действием «Голосовать».
+private var voPollPendingSelections: [MessageId: [Data]] = [:]
+
+private func voPollAccessibilityActions(item: ChatMessageItem) -> [ChatMessageAccessibilityCustomAction] {
+    guard let poll = item.message.media.first(where: { $0 is TelegramMediaPoll }) as? TelegramMediaPoll else {
+        return []
+    }
+    let isRu = isRussianBaseLanguage(item: item)
+    let strings = item.presentationData.strings
+    let messageId = item.message.id
+    let controllerInteraction = item.controllerInteraction
+    let isClosed = isPollEffectivelyClosed(message: item.message, poll: poll)
+    let isCloud = (messageId.namespace == Namespaces.Message.Cloud || Namespaces.Message.allNonRegular.contains(messageId.namespace)) && poll.pollId.namespace == Namespaces.Media.CloudPoll
+    let hasVoted = poll.results.voters?.contains(where: { $0.selected }) ?? false
+    var result: [ChatMessageAccessibilityCustomAction] = []
+    let noop = #selector(ChatMessageAccessibilityData.voNoopSelector)
+
+    if isCloud, !isClosed, !hasVoted {
+        if case .poll(multipleAnswers: true) = poll.kind {
+            // Имена действий строятся вместе с данными сообщения и до его
+            // обновления не меняются — состояние отметки только озвучиваем.
+            for option in poll.options {
+                let opaque = option.opaqueIdentifier
+                result.append(ChatMessageAccessibilityCustomAction(name: "\(isRu ? "Отметить" : "Toggle"): \(option.text)", target: nil, selector: noop, action: .perform({
+                    var selection = voPollPendingSelections[messageId] ?? []
+                    let nowChecked: Bool
+                    if let index = selection.firstIndex(of: opaque) {
+                        selection.remove(at: index)
+                        nowChecked = false
+                    } else {
+                        selection.append(opaque)
+                        nowChecked = true
+                    }
+                    voPollPendingSelections[messageId] = selection
+                    let state = nowChecked ? (isRu ? "отмечено" : "selected") : (isRu ? "отметка снята" : "deselected")
+                    UIAccessibility.post(notification: .announcement, argument: "\(option.text), \(state)")
+                })))
+            }
+            result.append(ChatMessageAccessibilityCustomAction(name: strings.MessagePoll_SubmitVote, target: nil, selector: noop, action: .perform({
+                let selection = voPollPendingSelections[messageId] ?? []
+                if selection.isEmpty {
+                    UIAccessibility.post(notification: .announcement, argument: isRu ? "Сначала отметьте варианты" : "Select options first")
+                    return
+                }
+                voPollPendingSelections[messageId] = nil
+                controllerInteraction.requestSelectMessagePollOptions(messageId, selection)
+            })))
+        } else {
+            for option in poll.options {
+                let opaque = option.opaqueIdentifier
+                result.append(ChatMessageAccessibilityCustomAction(name: "\(isRu ? "Голосовать" : "Vote"): \(option.text)", target: nil, selector: noop, action: .perform({
+                    controllerInteraction.requestSelectMessagePollOptions(messageId, [opaque])
+                })))
+            }
+        }
+    }
+    if isCloud, poll.publicity == .public, hasVoted || isClosed, (poll.results.totalVoters ?? 0) > 0 {
+        let pollId = poll.pollId
+        result.append(ChatMessageAccessibilityCustomAction(name: strings.MessagePoll_ViewResults, target: nil, selector: noop, action: .perform({
+            controllerInteraction.requestOpenMessagePollResults(messageId, pollId)
+        })))
+    }
+    return result
 }
 
 // Наши кастомные ключи VoiceOver есть только в en.lproj — у русской

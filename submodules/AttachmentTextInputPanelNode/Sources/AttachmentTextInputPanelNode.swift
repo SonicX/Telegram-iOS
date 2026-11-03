@@ -658,6 +658,8 @@ public class AttachmentTextInputPanelNode: ASDisplayNode, TGCaptionPanelView, AS
         textInputNode.view.addGestureRecognizer(recognizer)
         
         textInputNode.textView.accessibilityHint = self.textPlaceholderNode.attributedText?.string
+        // VoiceOver: имя поля — сразу, а не подсказкой после паузы.
+        textInputNode.textView.accessibilityLabel = self.textPlaceholderNode.attributedText?.string
         self.initToolbarIfNeeded(context: self.context)
     }
     
@@ -831,6 +833,7 @@ public class AttachmentTextInputPanelNode: ASDisplayNode, TGCaptionPanelView, AS
                     let baseFontSize = max(minInputFontSize, interfaceState.fontSize.baseDisplaySize)
                     self.textPlaceholderNode.attributedText = NSAttributedString(string: placeholder, font: Font.regular(baseFontSize), textColor: interfaceState.theme.chat.inputPanel.inputPlaceholderColor)
                     self.textInputNode?.textView.accessibilityHint = placeholder
+                    self.textInputNode?.textView.accessibilityLabel = placeholder
                     let placeholderSize = self.textPlaceholderNode.updateLayout(CGSize(width: 320.0, height: CGFloat.greatestFiniteMagnitude))
                     if transition.isAnimated, let snapshotLayer = self.textPlaceholderNode.layer.snapshotContentTree() {
                         self.textPlaceholderNode.supernode?.layer.insertSublayer(snapshotLayer, above: self.textPlaceholderNode.layer)
@@ -844,6 +847,8 @@ public class AttachmentTextInputPanelNode: ASDisplayNode, TGCaptionPanelView, AS
             }
             
             let sendButtonHasApplyIcon = self.isCaption || interfaceState.interfaceState.editMessage != nil
+            self.actionButtons.accessibilityIsApply = sendButtonHasApplyIcon
+            self.actionButtons.accessibilitySelectedCount = interfaceState.interfaceState.forwardMessageIds?.count ?? 0
             
             if updateSendButtonIcon {
                 if !self.actionButtons.animatingSendButton {

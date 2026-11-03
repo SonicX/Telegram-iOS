@@ -62,6 +62,9 @@ final class MediaPickerTitleView: UIView {
     public var isEnabled: Bool = false {
         didSet {
             self.buttonNode.isUserInteractionEnabled = self.isEnabled
+            // ASControlNode снимает isAccessibilityElement вместе с
+            // userInteractionEnabled — возвращаем: заголовок должен звучать.
+            self.buttonNode.isAccessibilityElement = true
             self.arrowNode.isHidden = !self.isEnabled
         }
     }
@@ -140,6 +143,12 @@ final class MediaPickerTitleView: UIView {
         self.title = title
         self.subtitle = subtitle
         self.isEnabled = isEnabled
+        // VoiceOver: заголовок («Недавние» / альбом) — кнопка выбора альбома;
+        // раньше звучало только «кнопка». Неактивный — просто заголовок.
+        self.buttonNode.accessibilityLabel = title
+        self.buttonNode.accessibilityValue = subtitle.isEmpty ? nil : subtitle
+        self.buttonNode.accessibilityTraits = isEnabled ? [.button] : [.header]
+        self.buttonNode.isAccessibilityElement = true
     }
     
     public var isHighlighted: Bool = false {

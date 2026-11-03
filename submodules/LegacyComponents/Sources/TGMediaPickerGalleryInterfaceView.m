@@ -221,6 +221,9 @@
         [_muteButton setImage:[TGPhotoEditorInterfaceAssets muteActiveIcon] forState:UIControlStateSelected];
         [_muteButton setImage:[TGPhotoEditorInterfaceAssets muteActiveIcon]  forState:UIControlStateSelected | UIControlStateHighlighted];
         [_muteButton addTarget:self action:@selector(toggleSendAsGif) forControlEvents:UIControlEventTouchUpInside];
+        // VoiceOver: кнопки-иконки просмотра вложения были безымянными.
+        bool voIsRussian = [[TGLocalized(@"Common.Cancel") lowercaseString] hasPrefix:@"отм"];
+        _muteButton.accessibilityLabel = voIsRussian ? @"Без звука" : @"Mute";
         [_wrapperView addSubview:_muteButton];  
     
         _telescopeButton = [[TGModernButton alloc] initWithFrame:CGRectMake(0, 0, 39.0f, 39.0f)];
@@ -236,6 +239,7 @@
             _telescopeButton.fadeDisabled = true;
         }
         [_telescopeButton addTarget:self action:@selector(toggleSendAsTelescope) forControlEvents:UIControlEventTouchUpInside];
+        _telescopeButton.accessibilityLabel = voIsRussian ? @"Отправить кружком" : @"Send as round video";
         [_wrapperView addSubview:_telescopeButton];
         
         if (recipientName.length > 0)
@@ -261,6 +265,7 @@
             _checkButton = [[TGCheckButtonView alloc] initWithStyle:TGCheckButtonStyleGallery];
             _checkButton.frame = CGRectMake(self.frame.size.width - 53, 11, _checkButton.frame.size.width, _checkButton.frame.size.height);
             [_checkButton addTarget:self action:@selector(checkButtonPressed) forControlEvents:UIControlEventTouchUpInside];
+            _checkButton.accessibilityLabel = voIsRussian ? @"Выбрать" : @"Select";
             [_wrapperView addSubview:_checkButton];
             
             if (hasSelectionPanel)

@@ -1467,6 +1467,11 @@ public final class PeerListItemComponent: Component {
                     accessibilityValueParts.append(i18n("VoiceOver.Story.ViewerReactionStars", locale))
                 }
             }
+            // Правый значок строки (например, «микрофон выключен» у участника
+            // эфира) — если он подписан, дописываем к озвучке.
+            if let accessoryLabel = self.rightAccessoryComponentView?.view?.accessibilityLabel, !accessoryLabel.isEmpty {
+                accessibilityValueParts.append(accessoryLabel)
+            }
             self.containerButton.accessibilityValue = accessibilityValueParts.isEmpty ? nil : accessibilityValueParts.joined(separator: ", ")
             var accessibilityTraits: UIAccessibilityTraits = .button
             if case .editing(true, _) = component.selectionState {

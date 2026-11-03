@@ -3436,6 +3436,9 @@ public final class WebAppController: ViewController, AttachmentContainable {
         
         self.moreButtonNode = MoreButtonNode(theme: self.presentationData.theme)
         self.moreButtonNode.iconNode.enqueueState(.more, animated: false)
+        self.moreButtonNode.isAccessibilityElement = true
+        self.moreButtonNode.accessibilityLabel = self.presentationData.strings.Common_More
+        self.moreButtonNode.accessibilityTraits = [.button]
         
         let navigationBarPresentationData = NavigationBarPresentationData(theme: NavigationBarTheme(rootControllerTheme: self.presentationData.theme), strings: NavigationBarStrings(back: "", close: ""))
         super.init(navigationBarPresentationData: navigationBarPresentationData)
@@ -3586,6 +3589,8 @@ public final class WebAppController: ViewController, AttachmentContainable {
                 self.moreBarButtonNode = morehButtonNode
                 self.navigationItem.rightBarButtonItem = UIBarButtonItem(customDisplayNode: morehButtonNode)
             }
+            cancelButtonNode.componentAccessibilityLabel = self.controllerNode.hasBackButton ? self.presentationData.strings.Common_Back : self.presentationData.strings.Common_Close
+            morehButtonNode.componentAccessibilityLabel = self.presentationData.strings.Common_More
         }
             
         self.cancelButtonNode.setState(self.controllerNode.hasBackButton ? .back : .cancel, animated: true)

@@ -450,7 +450,7 @@ public final class MediaStreamComponent: CombinedComponent {
                             }
                         })
                     }
-                ).minSize(CGSize(width: 44.0, height: 44.0)))))
+                ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(environment.strings.Call_VoiceOver_Minimize))))
             }
             var topLeftButton: AnyComponent<Empty>?
             
@@ -658,7 +658,7 @@ public final class MediaStreamComponent: CombinedComponent {
                         let contextController = ContextController(presentationData: presentationData.withUpdated(theme: defaultDarkPresentationTheme), source: .reference(ReferenceContentSource(sourceView: anchorView)), items: .single(ContextController.Items(content: .list(items))), gesture: nil)
                         controller.presentInGlobalOverlay(contextController)
                     }
-                ).minSize(CGSize(width: 44.0, height: 44.0)).tagged(moreButtonTag))
+                ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(environment.strings.Common_More).tagged(moreButtonTag))
             }
             
             let navigationComponent = NavigationBarComponent(
@@ -793,7 +793,7 @@ public final class MediaStreamComponent: CombinedComponent {
                         }
                         controller.presentShare()
                     }
-                ).minSize(CGSize(width: 65, height: 80))),
+                ).minSize(CGSize(width: 65, height: 80)).withAccessibilityLabel(presentationData.strings.VoiceChat_ShareShort.prefix(1).uppercased() + presentationData.strings.VoiceChat_ShareShort.dropFirst())),
                 rightItem: AnyComponent(Button(
                     content: AnyComponent(RoundGradientButtonComponent(
                         gradientColors: [
@@ -826,7 +826,7 @@ public final class MediaStreamComponent: CombinedComponent {
                     action: { [weak call] in
                         let _ = call?.leave(terminateIfPossible: false)
                     }
-                ).minSize(CGSize(width: 44.0, height: 44.0))),
+                ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(presentationData.strings.LiveStream_LeaveVoiceChat)),
                 centerItem: AnyComponent(Button(
                     content: AnyComponent(RoundGradientButtonComponent(
                         gradientColors: [
@@ -885,7 +885,7 @@ public final class MediaStreamComponent: CombinedComponent {
                             }
                         }
                     }
-                ).minSize(CGSize(width: 44.0, height: 44.0)))
+                ).minSize(CGSize(width: 44.0, height: 44.0)).withAccessibilityLabel(presentationData.strings.LiveStream_Expand.prefix(1).uppercased() + presentationData.strings.LiveStream_Expand.dropFirst()))
             ))
             
             let sheetHeight: CGFloat = max(requiredSheetHeight - dragOffset, requiredSheetHeight)
@@ -939,7 +939,7 @@ public final class MediaStreamComponent: CombinedComponent {
                         }
                         controller.presentShare()
                     }
-                ).minSize(CGSize(width: 64.0, height: 80))),
+                ).minSize(CGSize(width: 64.0, height: 80)).withAccessibilityLabel(environment.strings.VoiceChat_ShareButton)),
                 rightItem: /*state.hasVideo ?*/ AnyComponent(Button(
                     content: AnyComponent(BundleIconComponent(
                         name: isFullscreen ? "Media Gallery/Minimize" : "Media Gallery/Fullscreen",
@@ -956,7 +956,7 @@ public final class MediaStreamComponent: CombinedComponent {
                             }
                         }
                     }
-                ).minSize(CGSize(width: 64.0, height: 80.0))),
+                ).minSize(CGSize(width: 64.0, height: 80.0)).withAccessibilityLabel(environment.strings.Gallery_VoiceOver_Fullscreen)),
                 centerItem: infoItem
             ))
             

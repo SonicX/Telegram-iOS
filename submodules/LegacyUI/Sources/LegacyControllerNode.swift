@@ -5,6 +5,16 @@ import Display
 
 private class LegacyTracingLayerView: UITracingLayerView {
     var isSparse = false
+    var performAccessibilityEscape: (() -> Bool)?
+
+    // VoiceOver: жест «назад» для легаси-экранов (просмотр вложения перед
+    // отправкой) — раньше он не делал ничего.
+    override func accessibilityPerformEscape() -> Bool {
+        if let performAccessibilityEscape = self.performAccessibilityEscape, performAccessibilityEscape() {
+            return true
+        }
+        return super.accessibilityPerformEscape()
+    }
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let result = super.hitTest(point, with: event)
         if result === self && self.isSparse {
@@ -44,10 +54,19 @@ final class LegacyControllerNode: ASDisplayNode {
 //        self.clipsToBounds = true
     }
     
+    var performAccessibilityEscape: (() -> Bool)? {
+        didSet {
+            if self.isNodeLoaded {
+                (self.view as? LegacyTracingLayerView)?.performAccessibilityEscape = self.performAccessibilityEscape
+            }
+        }
+    }
+
     override func didLoad() {
         super.didLoad()
         
         (self.view as? LegacyTracingLayerView)?.isSparse = self.hasSparseContainerView
+        (self.view as? LegacyTracingLayerView)?.performAccessibilityEscape = self.performAccessibilityEscape
     }
     
     func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition) {

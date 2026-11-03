@@ -57,6 +57,7 @@
         _cancelButton.adjustsImageWhenHighlighted = false;
         [self setBackButtonType:backButton];
         [_cancelButton addTarget:self action:@selector(cancelButtonPressed) forControlEvents:UIControlEventTouchUpInside];
+        _cancelButton.accessibilityLabel = TGLocalized(@"Common.Cancel");
         [_backgroundView addSubview:_cancelButton];
         
         if (stickersContext != nil) {
@@ -75,6 +76,7 @@
             _doneButton.adjustsImageWhenHighlighted = false;
             [self setDoneButtonType:doneButton];
             [_doneButton addTarget:self action:@selector(doneButtonPressed) forControlEvents:UIControlEventTouchUpInside];
+            _doneButton.accessibilityLabel = TGLocalized(@"MediaPicker.Send");
             [_backgroundView addSubview:_doneButton];
         }
         
@@ -142,6 +144,31 @@
 - (UIButton *)doneButton
 {
     return _doneButton;
+}
+
+static bool TGPhotoToolbarAccessibilityIsRussian(void) {
+    return [[TGLocalized(@"Common.Cancel") lowercaseString] hasPrefix:@"отм"];
+}
+
+static NSString *TGPhotoToolbarAccessibilityLabelForTab(TGPhotoEditorTab tab) {
+    bool ru = TGPhotoToolbarAccessibilityIsRussian();
+    switch (tab) {
+        case TGPhotoEditorCropTab: return ru ? @"Обрезка" : @"Crop";
+        case TGPhotoEditorToolsTab: return ru ? @"Коррекция" : @"Adjust";
+        case TGPhotoEditorRotateTab: return ru ? @"Повернуть" : @"Rotate";
+        case TGPhotoEditorPaintTab: return ru ? @"Рисование" : @"Draw";
+        case TGPhotoEditorStickerTab: return ru ? @"Стикеры" : @"Stickers";
+        case TGPhotoEditorTextTab: return ru ? @"Текст" : @"Text";
+        case TGPhotoEditorQualityTab: return ru ? @"Качество видео" : @"Video quality";
+        case TGPhotoEditorTimerTab: return ru ? @"Таймер самоуничтожения" : @"Self-destruct timer";
+        case TGPhotoEditorEraserTab: return ru ? @"Ластик" : @"Eraser";
+        case TGPhotoEditorMirrorTab: return ru ? @"Отразить" : @"Mirror";
+        case TGPhotoEditorAspectRatioTab: return ru ? @"Пропорции" : @"Aspect ratio";
+        case TGPhotoEditorTintTab: return ru ? @"Оттенок" : @"Tint";
+        case TGPhotoEditorBlurTab: return ru ? @"Размытие" : @"Blur";
+        case TGPhotoEditorCurvesTab: return ru ? @"Кривые" : @"Curves";
+        default: return nil;
+    }
 }
 
 - (TGPhotoEditorButton *)createButtonForTab:(TGPhotoEditorTab)editorTab
@@ -218,6 +245,14 @@
         default:
             button = nil;
             break;
+    }
+    
+    // VoiceOver: TGPhotoEditorButton — UIControl без подписи, VoiceOver его не
+    // видел вовсе (обрезка, рисование, качество и т.д. были недоступны).
+    if (button != nil) {
+        button.isAccessibilityElement = true;
+        button.accessibilityTraits = UIAccessibilityTraitButton;
+        button.accessibilityLabel = TGPhotoToolbarAccessibilityLabelForTab(editorTab);
     }
     
     return button;

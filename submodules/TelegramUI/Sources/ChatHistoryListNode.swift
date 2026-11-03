@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 import Postbox
 import SwiftSignalKit
+import ChatMessageActionButtonsNode
 import Display
 import AsyncDisplayKit
 import TelegramCore
@@ -2029,6 +2030,13 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
 
         func walk(_ node: ASDisplayNode, isRoot: Bool) {
             if node.isHidden {
+                return
+            }
+            // Инлайн-кнопки бота озвучиваются действиями сообщения
+            // (ChatMessageAccessibilityData, .messageButton). Их собственные
+            // области стоят в дереве РАНЬШЕ области сообщения, и подпись первой
+            // кнопки («Подписаться») подменяла подпись всего сообщения.
+            if node is ChatMessageActionButtonsNode {
                 return
             }
             if let area = node as? AccessibilityAreaNode {

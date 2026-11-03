@@ -1130,6 +1130,16 @@ public final class ListMessageFileItemNode: ListMessageNode {
                     strongSelf.appliedItem = item
                     strongSelf.layoutParams = params
                     strongSelf.contentSizeValue = nodeLayout.contentSize
+                    // VoiceOver: строка файла (вкладка «Файл» вложений, общие
+                    // медиа) — название и описание; раньше молчала.
+                    if let titleString = titleText?.string, !titleString.isEmpty {
+                        strongSelf.isAccessibilityElement = true
+                        strongSelf.accessibilityLabel = titleString
+                        strongSelf.accessibilityValue = descriptionText?.string
+                        strongSelf.accessibilityTraits = [.button]
+                    } else {
+                        strongSelf.isAccessibilityElement = false
+                    }
                     strongSelf.currentLeftOffset = leftOffset
                     
                     if let _ = updatedTheme {

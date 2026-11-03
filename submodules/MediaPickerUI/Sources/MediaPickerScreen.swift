@@ -361,7 +361,7 @@ public final class MediaPickerScreenImpl: ViewController, MediaPickerScreen, Att
             self.cameraWrapperView.clipsToBounds = true
             
             self.cameraActivateAreaNode = AccessibilityAreaNode()
-            self.cameraActivateAreaNode.accessibilityLabel = "Camera"
+            self.cameraActivateAreaNode.accessibilityLabel = controller.presentationData.strings.Attachment_Camera
             self.cameraActivateAreaNode.accessibilityTraits = [.button]
             
             self.topEdgeEffectView = EdgeEffectView()
@@ -2529,6 +2529,9 @@ public final class MediaPickerScreenImpl: ViewController, MediaPickerScreen, Att
             isBack = !isEnabled
             
             let selectedSize = self.selectedButtonNode.update(count: count)
+            // VoiceOver: «N выбрано» — переход к списку выбранного.
+            self.selectedButtonNode.accessibilityLabel = self.presentationData.strings.Attachment_SelectedMedia(count)
+            self.selectedButtonNode.accessibilityTraits = [.button]
             
             var safeInset: CGFloat = 0.0
             if layout.safeInsets.right > 0.0 {
@@ -2539,6 +2542,7 @@ public final class MediaPickerScreenImpl: ViewController, MediaPickerScreen, Att
             self.selectedButtonNode.frame = CGRect(origin: CGPoint(x: self.view.bounds.width - selectedButtonInset - selectedSize.width - safeInset, y: self._hasGlassStyle ? 16.0 : floorToScreenPixels((navigationHeight - selectedSize.height) / 2.0) + 1.0), size: selectedSize)
             
             let isSelectionButtonVisible = count > 0 && self.controllerNode.currentDisplayMode == .all
+            self.selectedButtonNode.isAccessibilityElement = isSelectionButtonVisible
             transition.updateAlpha(node: self.selectedButtonNode, alpha: isSelectionButtonVisible ? 1.0 : 0.0)
             transition.updateTransformScale(node: self.selectedButtonNode, scale: isSelectionButtonVisible ? 1.0 : 0.01)
             
@@ -2606,6 +2610,7 @@ public final class MediaPickerScreenImpl: ViewController, MediaPickerScreen, Att
                 if view.superview == nil {
                     self.view.addSubview(view)
                 }
+                view.accessibilityLabel = isBack ? self.presentationData.strings.Common_Back : self.presentationData.strings.Common_Close
                 view.bounds = CGRect(origin: .zero, size: cancelButtonFrame.size)
                 view.center = cancelButtonFrame.center
             }
@@ -2641,6 +2646,7 @@ public final class MediaPickerScreenImpl: ViewController, MediaPickerScreen, Att
                 if view.superview == nil {
                     self.view.addSubview(view)
                 }
+                view.accessibilityLabel = self.presentationData.strings.Common_More
                 view.bounds = CGRect(origin: .zero, size: moreButtonFrame.size)
                 view.center = moreButtonFrame.center
             }

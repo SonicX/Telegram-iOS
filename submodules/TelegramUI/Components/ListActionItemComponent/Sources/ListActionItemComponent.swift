@@ -965,6 +965,16 @@ public final class ListActionItemComponent: Component {
             } else {
                 self.button.isAccessibilityElement = false
                 self.button.accessibilityLabel = nil
+                // Ненажимаемая строка с переключателем: VoiceOver доходил до
+                // голого «переключатель, выкл» без названия (создание опроса:
+                // «Анонимный», «Несколько ответов», «Викторина»).
+                let titleText = self.title.view.flatMap(listActionItemAccessibilityText)
+                if let switchNode = self.switchNode, switchNode.isNodeLoaded {
+                    switchNode.view.accessibilityLabel = titleText
+                }
+                if let iconSwitchNode = self.iconSwitchNode, iconSwitchNode.isNodeLoaded {
+                    iconSwitchNode.view.accessibilityLabel = titleText
+                }
             }
             
             return size

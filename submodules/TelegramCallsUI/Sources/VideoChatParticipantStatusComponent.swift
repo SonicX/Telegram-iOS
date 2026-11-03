@@ -12,17 +12,22 @@ final class VideoChatParticipantStatusComponent: Component {
     let hasRaiseHand: Bool
     let isSpeaking: Bool
     let theme: PresentationTheme
+    /// VoiceOver: состояние значка (микрофон выключен / хочет выступить) —
+    /// дописывается к озвучке строки участника.
+    let accessibilityStatus: String?
 
     init(
         muteState: GroupCallParticipantsContext.Participant.MuteState?,
         hasRaiseHand: Bool,
         isSpeaking: Bool,
-        theme: PresentationTheme
+        theme: PresentationTheme,
+        accessibilityStatus: String? = nil
     ) {
         self.muteState = muteState
         self.hasRaiseHand = hasRaiseHand
         self.isSpeaking = isSpeaking
         self.theme = theme
+        self.accessibilityStatus = accessibilityStatus
     }
 
     static func ==(lhs: VideoChatParticipantStatusComponent, rhs: VideoChatParticipantStatusComponent) -> Bool {
@@ -36,6 +41,9 @@ final class VideoChatParticipantStatusComponent: Component {
             return false
         }
         if lhs.theme !== rhs.theme {
+            return false
+        }
+        if lhs.accessibilityStatus != rhs.accessibilityStatus {
             return false
         }
         return true
@@ -64,6 +72,7 @@ final class VideoChatParticipantStatusComponent: Component {
             defer {
                 self.isUpdating = false
             }
+            self.accessibilityLabel = component.accessibilityStatus
             
             let alphaTransition: ComponentTransition
             if !transition.animation.isImmediate {

@@ -652,6 +652,21 @@ public final class ListComposePollOptionComponent: Component {
                 
                 transition.setAlpha(view: textFieldView, alpha: component.isEnabled ? 1.0 : 0.3)
                 textFieldView.isUserInteractionEnabled = component.isEnabled
+                if let textFieldView = textFieldView as? TextFieldComponent.View {
+                    if let placeholder = component.placeholder?.string, !placeholder.isEmpty {
+                        textFieldView.textViewAccessibilityLabel = placeholder
+                    }
+                    // VoiceOver: удаление варианта — только свайпом-раскрытием,
+                    // недоступным под VoiceOver; даём действие «Удалить».
+                    if component.deleteAction != nil {
+                        textFieldView.textViewAccessibilityCustomActions = [UIAccessibilityCustomAction(name: component.strings.Common_Delete, actionHandler: { [weak self] _ in
+                            self?.component?.deleteAction?()
+                            return true
+                        })]
+                    } else {
+                        textFieldView.textViewAccessibilityCustomActions = nil
+                    }
+                }
             }
             
             if let selection = component.selection {
@@ -672,6 +687,9 @@ public final class ListComposePollOptionComponent: Component {
                         component.selection?.toggle()
                     }
                 }
+                checkView.isAccessibilityElement = true
+                checkView.accessibilityLabel = component.strings.CreatePoll_QuizTip
+                checkView.accessibilityTraits = selection.isSelected ? [.button, .selected] : [.button]
                 let checkSize = CGSize(width: 22.0, height: 22.0)
                 let checkFrame = CGRect(origin: CGPoint(x: floor((leftInset - checkSize.width) * 0.5) + self.revealOffset, y: floor((size.height - checkSize.height) * 0.5)), size: checkSize)
                 
@@ -885,6 +903,9 @@ public final class ListComposePollOptionComponent: Component {
                 leftInset += 34.0
             }
             
+            if !value.isEmpty, let textFieldView = self.textField.view as? TextFieldComponent.View {
+                textFieldView.textViewAccessibilityLabel = value
+            }
             if !value.isEmpty {
                 let customPlaceholder: ComponentView<Empty>
                 var customPlaceholderTransition = transition
@@ -909,6 +930,8 @@ public final class ListComposePollOptionComponent: Component {
                     if placeholderView.superview == nil {
                         placeholderView.layer.anchorPoint = CGPoint()
                         placeholderView.isUserInteractionEnabled = false
+                        placeholderView.isAccessibilityElement = false
+                        placeholderView.accessibilityElementsHidden = true
                         self.insertSubview(placeholderView, at: 0)
                     }
                     transition.setPosition(view: placeholderView, position: placeholderFrame.origin)

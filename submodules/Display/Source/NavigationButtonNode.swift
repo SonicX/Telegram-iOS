@@ -161,8 +161,12 @@ private final class NavigationButtonItemNode: ImmediateTextNode {
         get {
             if let item = self.item, let accessibilityLabel = item.accessibilityLabel {
                 return accessibilityLabel
+            } else if let text = self.attributedText?.string, !text.isEmpty {
+                return text
             } else {
-                return self.attributedText?.string
+                // Кнопка-нода без текста (стеклянные иконки): подпись берём у
+                // самой ноды — иначе VoiceOver говорил просто «кнопка».
+                return self.node?.accessibilityLabel
             }
         } set(value) {
             

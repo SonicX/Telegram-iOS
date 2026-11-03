@@ -186,10 +186,31 @@ final class AttachmentTextInputActionButtonsNode: ASDisplayNode, ChatSendMessage
         return buttonSize
     }
     
+    /// VoiceOver: в режиме подписи (редактор вложения) кнопка применяет
+    /// подпись, а не отправляет — «Готово» вместо «Отправить».
+    var accessibilityIsApply: Bool = false
+    /// VoiceOver: сколько вложений уйдёт по нажатию («Отправить, 3 выбрано»).
+    var accessibilitySelectedCount: Int = 0
+
     func updateAccessibility() {
         self.accessibilityTraits = .button
-        self.accessibilityLabel = self.strings.MediaPicker_Send
+        self.accessibilityLabel = self.accessibilityIsApply ? self.strings.Common_Done : self.strings.MediaPicker_Send
+        self.accessibilityValue = !self.accessibilityIsApply && self.accessibilitySelectedCount > 0 ? self.strings.Attachment_SelectedMedia(Int32(self.accessibilitySelectedCount)) : nil
         self.accessibilityHint = nil
+        // VoiceOver: «Без звука / Отложить» — только долгим нажатием; даём
+        // действием «Параметры отправки».
+        if !self.accessibilityIsApply, self.sendButtonLongPressEnabled, self.sendButtonLongPressed != nil {
+            let isRu = self.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            self.accessibilityCustomActions = [UIAccessibilityCustomAction(name: isRu ? "Параметры отправки" : "Send options", actionHandler: { [weak self] _ in
+                guard let self, let gestureRecognizer = self.gestureRecognizer else {
+                    return false
+                }
+                self.sendButtonLongPressed?(self, gestureRecognizer)
+                return true
+            })]
+        } else {
+            self.accessibilityCustomActions = nil
+        }
     }
     
     func makeCustomContents() -> UIView? {

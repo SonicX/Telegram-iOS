@@ -1416,7 +1416,9 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
         self.scrollNode.view.showsHorizontalScrollIndicator = false
         self.scrollNode.view.showsVerticalScrollIndicator = false
         
-        self.view.accessibilityTraits = .tabBar
+        // Признак панели вкладок — только у ряда вкладок: на всей панели он
+        // накрывал и поле подписи с «Отправить».
+        self.scrollNode.view.accessibilityTraits = .tabBar
     }
     
     @objc private func mainButtonPressed() {
@@ -1631,7 +1633,8 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
             }
             buttonView.isAccessibilityElement = true
             buttonView.accessibilityLabel = accessibilityTitle
-            buttonView.accessibilityTraits = [.button]
+            // VoiceOver: активная вкладка — с признаком «выбрано».
+            buttonView.accessibilityTraits = i == self.selectedIndex ? [.button, .selected] : [.button]
         }
         var removeIds: [AnyHashable] = []
         for (id, itemView) in self.buttonViews {

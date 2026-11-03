@@ -33,6 +33,44 @@ open class CallStatusBarNode: ASDisplayNode {
 
 private final class StatusBarView: UITracingLayerView {
     weak var node: StatusBar?
+
+    // VoiceOver: зелёная полоска свёрнутого звонка/эфира — единственный путь
+    // обратно в звонок, а была только жестом касания (VoiceOver её не видел).
+    override var isAccessibilityElement: Bool {
+        get {
+            return self.node?.callStatusBarNode != nil
+        } set(value) {
+        }
+    }
+
+    override var accessibilityLabel: String? {
+        get {
+            return self.node?.callStatusBarNode?.accessibilityLabel
+        } set(value) {
+        }
+    }
+
+    override var accessibilityValue: String? {
+        get {
+            return self.node?.callStatusBarNode?.accessibilityValue
+        } set(value) {
+        }
+    }
+
+    override var accessibilityTraits: UIAccessibilityTraits {
+        get {
+            return .button
+        } set(value) {
+        }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard let node = self.node, node.callStatusBarNode != nil else {
+            return false
+        }
+        node.inCallNavigate?()
+        return true
+    }
     
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let node = self.node {

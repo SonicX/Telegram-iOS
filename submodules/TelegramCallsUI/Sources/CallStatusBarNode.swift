@@ -621,6 +621,9 @@ public class CallStatusBarNodeImpl: CallStatusBarNode {
         alphaTransition.updateAlpha(node: self.speakerNode, alpha: displaySpeakerSubtitle && !isDisplayingMessage ? 1.0 : 0.0)
         
         self.titleNode.attributedText = NSAttributedString(string: title, font: Font.semibold(13.0), textColor: .white)
+        // VoiceOver: подпись зелёной полоски (читает StatusBarView).
+        self.accessibilityLabel = title
+        self.accessibilityValue = displaySpeakerSubtitle ? speakerSubtitle : nil
         
         if displaySpeakerSubtitle {
             self.speakerNode.attributedText = NSAttributedString(string: speakerSubtitle, font: Font.regular(13.0), textColor: .white)

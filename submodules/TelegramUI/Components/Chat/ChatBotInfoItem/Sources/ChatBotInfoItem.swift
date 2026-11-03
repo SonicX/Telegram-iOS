@@ -310,6 +310,12 @@ public final class ChatBotInfoItemNode: ListViewItemNode {
                     
                     let _ = titleApply()
                     let _ = textApply()
+                    // VoiceOver: карточка «Что умеет этот бот?» — текстовые
+                    // ноды недоступны, озвучиваем заголовок и описание целиком.
+                    strongSelf.offsetContainer.isAccessibilityElement = true
+                    strongSelf.offsetContainer.accessibilityLabel = item.title
+                    strongSelf.offsetContainer.accessibilityValue = updatedTextAndEntities.0
+                    strongSelf.offsetContainer.accessibilityTraits = [.staticText]
                     strongSelf.offsetContainer.frame = CGRect(origin: CGPoint(), size: itemLayout.contentSize)
                     strongSelf.backgroundNode.frame = backgroundFrame
                     strongSelf.titleNode.frame = titleFrame

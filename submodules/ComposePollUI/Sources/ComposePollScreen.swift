@@ -1683,6 +1683,7 @@ final class ComposePollScreenComponent: Component {
                 if cancelButtonView.superview == nil {
                     self.addSubview(cancelButtonView)
                 }
+                cancelButtonView.accessibilityLabel = environment.strings.Common_Close
                 transition.setFrame(view: cancelButtonView, frame: cancelButtonFrame)
             }
             
@@ -1716,6 +1717,9 @@ final class ComposePollScreenComponent: Component {
             )
             let doneButtonFrame = CGRect(origin: CGPoint(x: availableSize.width - environment.safeInsets.right - 16.0 - doneButtonSize.width, y: 16.0), size: doneButtonSize)
             if let doneButtonView = self.doneButton.view {
+                // VoiceOver: кнопка-иконка «Отправить» была безымянной.
+                doneButtonView.accessibilityLabel = environment.strings.CreatePoll_Create
+                doneButtonView.accessibilityTraits = isValid ? [.button] : [.button, .notEnabled]
                 if doneButtonView.superview == nil {
                     self.addSubview(doneButtonView)
                 }

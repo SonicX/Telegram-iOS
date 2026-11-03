@@ -78,10 +78,12 @@ final class MediaPickerGridItem: GridItem {
         switch self.content {
         case let .asset(fetchResult, index):
             let node = MediaPickerGridItemNode()
+            node.voStrings = self.strings
             node.setup(interaction: self.interaction, fetchResult: fetchResult, index: index, theme: self.theme, selectable: self.selectable, enableAnimations: self.enableAnimations, stories: self.stories)
             return node
         case let .media(media, index):
             let node = MediaPickerGridItemNode()
+            node.voStrings = self.strings
             node.setup(interaction: self.interaction, media: media, index: index, theme: self.theme, selectable: self.selectable, enableAnimations: self.enableAnimations, stories: self.stories)
             return node
         case let .draft(draft, index):
@@ -98,8 +100,10 @@ final class MediaPickerGridItem: GridItem {
         }
         switch self.content {
         case let .asset(fetchResult, index):
+            node.voStrings = self.strings
             node.setup(interaction: self.interaction, fetchResult: fetchResult, index: index, theme: self.theme, selectable: self.selectable, enableAnimations: self.enableAnimations, stories: self.stories)
         case let .media(media, index):
+            node.voStrings = self.strings
             node.setup(interaction: self.interaction, media: media, index: index, theme: self.theme, selectable: self.selectable, enableAnimations: self.enableAnimations, stories: self.stories)
         case let .draft(draft, index):
             node.setup(interaction: self.interaction, draft: draft, index: index, theme: self.theme, strings: self.strings, selectable: self.selectable, enableAnimations: self.enableAnimations, stories: self.stories)
@@ -186,6 +190,24 @@ final class MediaPickerGridItemNode: GridItemNode {
         self.activateAreaNode.accessibilityTraits = [.image]
                         
         super.init()
+
+        // VoiceOver: двойной тап по ячейке ОТМЕЧАЕТ фото/видео (раньше
+        // открывал полноэкранный просмотр, а кружок отметки был отдельным
+        // безымянным элементом — «прикрепление работает криво»). Просмотр —
+        // действием «Открыть» (свайп вниз).
+        self.activateAreaNode.activate = { [weak self] in
+            return self?.voToggleSelection() ?? false
+        }
+        self.activateAreaNode.customActionsProvider = { [weak self] in
+            guard let self, self.selectable, self.interaction?.selectionState != nil else {
+                return []
+            }
+            let isRu = self.voIsRussian
+            return [UIAccessibilityCustomAction(name: isRu ? "Открыть" : "Open", actionHandler: { [weak self] _ in
+                self?.voOpenPreview()
+                return true
+            })]
+        }
         
         self.clipsToBounds = true
         
@@ -199,6 +221,69 @@ final class MediaPickerGridItemNode: GridItemNode {
     
     deinit {
         self.spoilerDisposable.dispose()
+    }
+
+    var voStrings: PresentationStrings?
+    private var voBaseLabel: String?
+
+    private var voIsRussian: Bool {
+        return (self.voStrings?.baseLanguageCode ?? "en").lowercased().hasPrefix("ru")
+    }
+
+    private func voOpenPreview() {
+        if let (draft, _) = self.currentDraftState {
+            self.interaction?.openDraft(draft, self.imageNode.image)
+            return
+        }
+        guard let (fetchResult, index) = self.currentAssetState else {
+            return
+        }
+        self.interaction?.openMedia(fetchResult, index, self.imageNode.image)
+    }
+
+    private func voToggleSelection() -> Bool {
+        guard self.selectable, let interaction = self.interaction, let selectionState = interaction.selectionState, let selectableItem = self.selectableItem else {
+            self.voOpenPreview()
+            return true
+        }
+        let wasSelected = selectionState.isIdentifierSelected(self.identifier)
+        if interaction.toggleSelection(selectableItem, !wasSelected, false) {
+            self.updateSelectionState(animated: true)
+            let isRu = self.voIsRussian
+            let nowSelected = selectionState.isIdentifierSelected(self.identifier)
+            let count = selectionState.selectedItems().count
+            let announcement: String
+            if nowSelected {
+                announcement = isRu ? "Выбрано: \(count)" : "Selected: \(count)"
+            } else {
+                announcement = isRu ? "Отметка снята, выбрано: \(count)" : "Deselected, selected: \(count)"
+            }
+            UIAccessibility.post(notification: .announcement, argument: announcement)
+        } else if !wasSelected {
+            // Выбор не прошёл (например, лимит вложений) — визуально это
+            // видно по кружку, а VoiceOver молчал.
+            UIAccessibility.post(notification: .announcement, argument: self.voIsRussian ? "Не удалось выбрать" : "Could not select")
+        }
+        return true
+    }
+
+    private func voUpdateAccessibility() {
+        var traits: UIAccessibilityTraits = [.image, .button]
+        var value: String?
+        if let interaction = self.interaction, let selectionState = interaction.selectionState, self.selectable {
+            if selectionState.isIdentifierSelected(self.identifier) {
+                traits.insert(.selected)
+                if let selectableItem = self.selectableItem {
+                    let index = selectionState.index(of: selectableItem)
+                    if index != NSNotFound {
+                        value = self.voIsRussian ? "номер \(Int(index))" : "number \(Int(index))"
+                    }
+                }
+            }
+        }
+        self.activateAreaNode.accessibilityLabel = self.voBaseLabel ?? self.activateAreaNode.accessibilityLabel ?? self.voStrings?.VoiceOver_Chat_Photo
+        self.activateAreaNode.accessibilityTraits = traits
+        self.activateAreaNode.accessibilityValue = value
     }
 
     var identifier: String {
@@ -251,6 +336,10 @@ final class MediaPickerGridItemNode: GridItemNode {
                     }
                 }
             }
+            // Кружок отметки — не отдельный элемент VoiceOver: отметка идёт
+            // двойным тапом по самой ячейке.
+            checkNode.isAccessibilityElement = false
+            checkNode.accessibilityElementsHidden = true
             self.addSubnode(checkNode)
             self.checkNode = checkNode
             self.setNeedsLayout()
@@ -272,6 +361,7 @@ final class MediaPickerGridItemNode: GridItemNode {
                 }
             }
             self.checkNode?.setSelected(selected, animated: animated)
+            self.voUpdateAccessibility()
             self.selectionPromise.set(SelectionState(selected: selected, index: selectionIndex, count: selectionState.selectedItems().count))
         }
     }
@@ -478,8 +568,26 @@ final class MediaPickerGridItemNode: GridItemNode {
             
             self.backgroundNode.image = nil
             
-            if #available(iOS 15.0, *) {
-                self.activateAreaNode.accessibilityLabel = "Photo \(asset.creationDate?.formatted(date: .abbreviated, time: .standard) ?? "")"
+            do {
+                var parts: [String] = []
+                if asset.mediaType == .video {
+                    parts.append(self.voStrings?.VoiceOver_Chat_Video ?? "Video")
+                    parts.append(stringForDuration(Int32(asset.duration)))
+                } else {
+                    parts.append(self.voStrings?.VoiceOver_Chat_Photo ?? "Photo")
+                }
+                if asset.isFavorite {
+                    parts.append(self.voIsRussian ? "избранное" : "favorite")
+                }
+                if let creationDate = asset.creationDate {
+                    let formatter = DateFormatter()
+                    formatter.locale = Locale(identifier: self.voStrings?.baseLanguageCode ?? "en")
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .short
+                    parts.append(formatter.string(from: creationDate))
+                }
+                self.voBaseLabel = parts.joined(separator: ", ")
+                self.voUpdateAccessibility()
             }
             
             let editedSignal = Signal<UIImage?, NoError> { subscriber in

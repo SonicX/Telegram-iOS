@@ -226,6 +226,12 @@ final class VideoChatScreenComponent: Component {
 
     final class View: UIView, UIGestureRecognizerDelegate {
         let containerView: UIView
+
+        // VoiceOver: жест «назад» сворачивает эфир (как кнопка «Свернуть»).
+        override func accessibilityPerformEscape() -> Bool {
+            self.environment?.controller()?.dismiss()
+            return true
+        }
         
         var component: VideoChatScreenComponent?
         var environment: ViewControllerComponentContainer.Environment?
@@ -2324,6 +2330,7 @@ final class VideoChatScreenComponent: Component {
                 if navigationLeftButtonView.superview == nil {
                     self.containerView.addSubview(navigationLeftButtonView)
                 }
+                navigationLeftButtonView.accessibilityLabel = environment.strings.Common_More
                 transition.setFrame(view: navigationLeftButtonView, frame: navigationLeftButtonFrame)
                 alphaTransition.setAlpha(view: navigationLeftButtonView, alpha: self.isAnimatedOutFromPrivateCall ? 0.0 : 1.0)
             }
@@ -2333,6 +2340,7 @@ final class VideoChatScreenComponent: Component {
                 if navigationRightButtonView.superview == nil {
                     self.containerView.addSubview(navigationRightButtonView)
                 }
+                navigationRightButtonView.accessibilityLabel = environment.strings.Call_VoiceOver_Minimize
                 transition.setFrame(view: navigationRightButtonView, frame: navigationRightButtonFrame)
                 alphaTransition.setAlpha(view: navigationRightButtonView, alpha: self.isAnimatedOutFromPrivateCall ? 0.0 : 1.0)
             }

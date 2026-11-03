@@ -300,6 +300,32 @@ public final class VideoChatMicButtonComponent: Component {
             self.audioLevelDisposable?.dispose()
         }
         
+        // VoiceOver: двойной тап — переключение, без имитации касаний
+        // (push-to-talk на синтетическом касании ненадёжен).
+        override public func accessibilityActivate() -> Bool {
+            guard let component = self.component else {
+                return false
+            }
+            switch component.content {
+            case .connecting:
+                return false
+            case let .muted(forced):
+                if forced {
+                    return false
+                }
+                component.updateUnmutedStateIsPushToTalk(false)
+                UIAccessibility.post(notification: .announcement, argument: component.strings.VoiceChat_Live)
+            case .unmuted:
+                component.updateUnmutedStateIsPushToTalk(nil)
+                UIAccessibility.post(notification: .announcement, argument: component.strings.VoiceChat_Muted)
+            case .raiseHand:
+                component.raiseHand()
+            case .scheduled:
+                component.scheduleAction()
+            }
+            return true
+        }
+
         override public func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
             self.beginTrackingTimestamp = CFAbsoluteTimeGetCurrent()
             if let component = self.component {
@@ -419,6 +445,20 @@ public final class VideoChatMicButtonComponent: Component {
                 }
             }
             self.isEnabled = isEnabled
+            
+            // VoiceOver: микрофон — подпись по действию («Включить микрофон» /
+            // «выключить»), значение — текущее состояние; раньше «кнопка».
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = titleText.prefix(1).uppercased() + titleText.dropFirst()
+            switch component.content {
+            case .muted:
+                self.accessibilityValue = component.strings.VoiceChat_Muted
+            case .unmuted:
+                self.accessibilityValue = component.strings.VoiceChat_Live
+            default:
+                self.accessibilityValue = subtitleText
+            }
+            self.accessibilityTraits = isEnabled ? [.button] : [.button, .notEnabled]
             
             if component.isCompact {
                 titleText = titleText.lowercased()

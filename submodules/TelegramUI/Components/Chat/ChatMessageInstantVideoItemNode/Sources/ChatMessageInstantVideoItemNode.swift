@@ -301,6 +301,8 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
                     // Быстрое действие («Ответить», «Скопировать», …) —
                     // замыкание сформировано чат-контроллером.
                     f()
+                case let .messageButton(button):
+                    self.performMessageButtonAction(button: button, progress: nil)
             }
         }
     }

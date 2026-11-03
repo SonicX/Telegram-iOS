@@ -31,6 +31,7 @@ import TranslateUI
 import TelegramNotices
 import SolidRoundedButtonNode
 import UrlHandling
+import SGStrings
 
 private let deleteImage = generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Accessory Panels/MessageSelectionTrash"), color: .white)
 private let actionImage = generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Accessory Panels/MessageSelectionForward"), color: .white)
@@ -224,6 +225,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
                         if status == .Local && !self.isAd {
                             self.playbackControlButton.isHidden = false
                             self.playPauseIconNode.enqueueState(.play, animated: true)
+                            self.playbackControlButton.accessibilityLabel = self.strings.VoiceOver_Media_PlaybackPlay
                         } else {
                             self.playbackControlButton.isHidden = true
                         }
@@ -257,6 +259,15 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
                         }
                         self.statusNode.transitionToState(statusState, completion: {})
                         self.statusButtonNode.isUserInteractionEnabled = statusState != .none
+                        let locale = self.strings.baseLanguageCode
+                        if case let .Fetching(_, progress) = status {
+                            self.statusButtonNode.accessibilityLabel = i18n("VoiceOver.Player.CancelDownload", locale)
+                            self.statusButtonNode.accessibilityValue = "\(Int(progress * 100.0))%"
+                        } else {
+                            self.statusButtonNode.accessibilityLabel = i18n("VoiceOver.Player.Download", locale)
+                            self.statusButtonNode.accessibilityValue = nil
+                        }
+                        self.statusButtonNode.isAccessibilityElement = statusState != .none
                     case let .playback(paused, seekable):
                         self.currentIsPaused = paused
                         self.authorNameNode.isHidden = true
@@ -271,6 +282,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
                                 icon = paused ? .play : .pause
                             }
                             self.playPauseIconNode.enqueueState(icon, animated: true)
+                            self.playbackControlButton.accessibilityLabel = icon == .pause ? self.strings.VoiceOver_Media_PlaybackPause : self.strings.VoiceOver_Media_PlaybackPlay
                             self.hasSeekControls = seekable
                         } else {
                             self.hasSeekControls = false
@@ -290,6 +302,8 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
             transition.updateAlpha(node: self.forwardButton, alpha: alpha)
             self.backwardButton.isUserInteractionEnabled = self.hasSeekControls
             self.forwardButton.isUserInteractionEnabled = self.hasSeekControls
+            self.backwardButton.isAccessibilityElement = self.hasSeekControls
+            self.forwardButton.isAccessibilityElement = self.hasSeekControls
         }
     }
     
@@ -642,6 +656,21 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
         self.editButton.accessibilityTraits = [.button]
         self.editButton.accessibilityLabel = presentationData.strings.Gallery_VoiceOver_Edit
         
+        // VoiceOver: подписи управления плеером (раньше кнопки были немыми).
+        let locale = presentationData.strings.baseLanguageCode
+        self.backwardButton.isAccessibilityElement = false
+        self.backwardButton.accessibilityTraits = [.button]
+        self.backwardButton.accessibilityLabel = i18n("VoiceOver.Player.Backward15", locale)
+        self.forwardButton.isAccessibilityElement = false
+        self.forwardButton.accessibilityTraits = [.button]
+        self.forwardButton.accessibilityLabel = i18n("VoiceOver.Player.Forward15", locale)
+        self.playbackControlButton.isAccessibilityElement = true
+        self.playbackControlButton.accessibilityTraits = [.button]
+        self.playbackControlButton.accessibilityLabel = presentationData.strings.VoiceOver_Media_PlaybackPlay
+        self.statusButtonNode.isAccessibilityElement = true
+        self.statusButtonNode.accessibilityTraits = [.button]
+        self.statusButtonNode.accessibilityLabel = i18n("VoiceOver.Player.Download", locale)
+
         self.backwardButton.addTarget(self, action: #selector(self.backwardButtonPressed), forControlEvents: .touchUpInside)
         self.forwardButton.addTarget(self, action: #selector(self.forwardButtonPressed), forControlEvents: .touchUpInside)
         self.playbackControlButton.addTarget(self, action: #selector(self.playbackControlPressed), forControlEvents: .touchUpInside)
@@ -2055,6 +2084,26 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
         self.controllerInteraction?.editMedia(message.id)
     }
     
+    /// VoiceOver: при открытии видео — курсор на «Воспроизвести/Пауза» и
+    /// озвучка «Видеоплеер» (отзыв 2026-10: «непонятно, открылся ли плеер»).
+    func accessibilityFocusPlayer() {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        let target: ASDisplayNode
+        if !self.playbackControlButton.isHidden {
+            target = self.playbackControlButton
+        } else if !self.statusButtonNode.isHidden && self.statusButtonNode.isAccessibilityElement {
+            target = self.statusButtonNode
+        } else {
+            UIAccessibility.post(notification: .announcement, argument: i18n("VoiceOver.Player.Opened", self.strings.baseLanguageCode))
+            return
+        }
+        UIAccessibility.post(notification: .screenChanged, argument: target.view)
+        let announcement = NSAttributedString(string: i18n("VoiceOver.Player.Opened", self.strings.baseLanguageCode), attributes: [.accessibilitySpeechQueueAnnouncement: true])
+        UIAccessibility.post(notification: .announcement, argument: announcement)
+    }
+
     @objc func playbackControlPressed() {
         self.playbackControl?()
     }

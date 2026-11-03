@@ -3580,6 +3580,20 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                         return
                     }
                     
+                    // VoiceOver: итог голосования вслух (визуально — анимация
+                    // бабла и конфетти, незрячему без озвучки непонятно).
+                    if UIAccessibility.isVoiceOverRunning, !opaqueIdentifiers.isEmpty {
+                        let isRu = strongSelf.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                        var announcement = isRu ? "Голос учтён" : "Vote counted"
+                        if case .quiz = resultPoll.kind, let voters = resultPoll.results.voters, let selected = voters.first(where: { $0.selected }) {
+                            announcement = selected.isCorrect ? (isRu ? "Правильно" : "Correct") : (isRu ? "Неправильно" : "Incorrect")
+                            if !selected.isCorrect, let solution = resultPoll.results.solution, !solution.text.isEmpty {
+                                announcement += ". \(solution.text)"
+                            }
+                        }
+                        UIAccessibility.post(notification: .announcement, argument: announcement)
+                    }
+                    
                     switch resultPoll.kind {
                     case .poll:
                         if strongSelf.selectPollOptionFeedback == nil {

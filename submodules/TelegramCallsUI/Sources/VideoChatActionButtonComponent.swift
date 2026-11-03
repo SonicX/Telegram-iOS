@@ -219,6 +219,27 @@ final class VideoChatActionButtonComponent: Component {
                 iconDiameter = 22.0
             }
             
+            // VoiceOver: подпись кнопки — её же заголовок под иконкой (раньше
+            // «кнопка» без названия); состояние вкл/выкл — значением.
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = titleText.prefix(1).uppercased() + titleText.dropFirst()
+            self.accessibilityTraits = isEnabled ? [.button] : [.button, .notEnabled]
+            switch component.content {
+            case let .audio(audio, isEnabledValue):
+                switch audio {
+                case .speaker:
+                    self.accessibilityValue = isEnabledValue ? component.strings.VoiceOver_Common_On : component.strings.VoiceOver_Common_Off
+                case .none, .builtin:
+                    self.accessibilityValue = component.strings.VoiceOver_Common_Off
+                case .headphones, .bluetooth:
+                    self.accessibilityValue = component.strings.Call_AudioRouteHeadphones
+                }
+            case let .video(isActive):
+                self.accessibilityValue = isActive ? component.strings.VoiceOver_Common_On : component.strings.VoiceOver_Common_Off
+            default:
+                self.accessibilityValue = nil
+            }
+
             if self.contentImage == nil || previousComponent?.content.iconType != component.content.iconType {
                 switch component.content.iconType {
                 case let .audio(audio):

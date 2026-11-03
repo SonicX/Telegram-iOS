@@ -123,6 +123,9 @@ final class VideoChatListInviteComponent: Component {
             }
             
             self.component = component
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = component.title
+            self.accessibilityTraits = [.button]
             
             let titleSize = self.title.update(
                 transition: .immediate,

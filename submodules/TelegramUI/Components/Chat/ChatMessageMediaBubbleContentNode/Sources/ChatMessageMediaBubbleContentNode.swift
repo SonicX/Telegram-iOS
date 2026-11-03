@@ -526,6 +526,10 @@ public class ChatMessageMediaBubbleContentNode: ChatMessageBubbleContentNode {
         return self.interactiveImageNode.playMediaWithSound()
     }
     
+    override public func accessibilityActivate() -> Bool {
+        return self.interactiveImageNode.performAccessibilityActivate()
+    }
+
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {
         if self.interactiveImageNode.ignoreTapActionAtPoint(point) {
             return ChatMessageBubbleContentTapAction(content: .ignore)

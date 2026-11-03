@@ -738,6 +738,27 @@ public final class ChatMessageInteractiveMediaNode: ASDisplayNode, GalleryItemTr
         return result
     }
     
+    /// VoiceOver: двойной тап по сообщению с фото/видео открывает его в
+    /// галерее (видео не с устройства — потоком). Раньше активация падала в
+    /// синтезированный тап по центру рамки: у поста с видео и текстом центр
+    /// приходился на текст, и видео открывалось «через раз».
+    public func performAccessibilityActivate() -> Bool {
+        if let _ = self.attributes?.updatingMedia {
+            return false
+        }
+        if let message = self.message, message.flags.isSending {
+            return false
+        }
+        if let fetchStatus = self.fetchStatus, case .Local = fetchStatus {
+            self.activateLocalContent(.default)
+        } else if let file = self.media as? TelegramMediaFile, file.isVideo {
+            self.activateLocalContent(.stream)
+        } else {
+            self.activateLocalContent(.default)
+        }
+        return true
+    }
+
     @objc private func imageTap(_ recognizer: UITapGestureRecognizer) {
         if case .ended = recognizer.state {
             let point = recognizer.location(in: self.imageNode.view)

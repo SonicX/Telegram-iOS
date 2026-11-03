@@ -288,6 +288,32 @@ final class VideoChatTitleComponent: Component {
             }
             
             self.currentSize = size
+
+            // VoiceOver: заголовок эфира и «N участников» — тексты компонентов
+            // не читаются; озвучиваем одним элементом-заголовком.
+            var statusText = ""
+            for item in component.status {
+                switch item.content {
+                case let .text(text):
+                    statusText += text
+                case let .number(value, _):
+                    statusText += "\(value)"
+                case .icon:
+                    break
+                }
+            }
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = component.title
+            self.accessibilityValue = statusText.isEmpty ? nil : statusText
+            self.accessibilityTraits = [.header]
+            if let longTapAction = component.longTapAction {
+                self.accessibilityCustomActions = [UIAccessibilityCustomAction(name: component.strings.VoiceChat_EditTitle, actionHandler: { _ in
+                    longTapAction()
+                    return true
+                })]
+            } else {
+                self.accessibilityCustomActions = nil
+            }
             
             return size
         }

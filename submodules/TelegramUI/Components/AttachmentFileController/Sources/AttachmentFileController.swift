@@ -484,6 +484,7 @@ public func makeAttachmentFileControllerImpl(context: AccountContext, updatedPre
             } else {
                 buttonNode = BarComponentHostNode(component: closeButtonComponent, size: barButtonSize)
             }
+            buttonNode.componentAccessibilityLabel = presentationData.strings.Common_Close
             return buttonNode
         }
                 
@@ -517,6 +518,7 @@ public func makeAttachmentFileControllerImpl(context: AccountContext, updatedPre
             } else {
                 buttonNode = BarComponentHostNode(component: searchButtonComponent, size: barButtonSize)
             }
+            buttonNode.componentAccessibilityLabel = presentationData.strings.Common_Search
             return buttonNode
         }
                 

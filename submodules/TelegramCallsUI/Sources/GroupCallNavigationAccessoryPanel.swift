@@ -785,6 +785,17 @@ public final class GroupCallNavigationAccessoryPanel: ASDisplayNode {
         self.joinButton.isHidden = self.currentData?.groupCall != nil
         self.micButton.isHidden = self.currentData?.groupCall == nil
         
+        // VoiceOver: полоска эфира в чате («Видеочат / Трансляция — N
+        // участников — Присоединиться»): все элементы были безымянными.
+        self.tapButton.accessibilityLabel = title
+        self.tapButton.accessibilityValue = text
+        self.tapButton.accessibilityTraits = [.button]
+        self.joinButton.accessibilityLabel = self.joinButtonTitleNode.attributedText?.string
+        self.joinButton.accessibilityTraits = [.button]
+        self.micButton.accessibilityLabel = isMuted ? self.strings.VoiceChat_Unmute : (self.strings.VoiceChat_MuteShort.prefix(1).uppercased() + self.strings.VoiceChat_MuteShort.dropFirst())
+        self.micButton.accessibilityValue = isMuted ? self.strings.VoiceChat_Muted : self.strings.VoiceChat_Live
+        self.micButton.accessibilityTraits = [.button]
+        
         transition.updateFrame(node: self.separatorNode, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: size.width, height: UIScreenPixel)))
         transition.updateFrame(node: self.backgroundNode, frame: CGRect(origin: CGPoint(), size: CGSize(width: size.width, height: panelHeight)))
     }

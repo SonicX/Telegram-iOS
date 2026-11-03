@@ -522,6 +522,16 @@ open class LegacyController: ViewController, PresentableController {
         self.displayNodeDidLoad()
         
         self.controllerNode.hasSparseContainerView = self.hasSparseContainerView
+        self.controllerNode.performAccessibilityEscape = { [weak self] in
+            guard let self else {
+                return false
+            }
+            if let galleryController = self.legacyController as? TGModernGalleryController {
+                galleryController.dismissWhenReady(animated: true)
+                return true
+            }
+            return false
+        }
     }
     
     override open func viewWillAppear(_ animated: Bool) {

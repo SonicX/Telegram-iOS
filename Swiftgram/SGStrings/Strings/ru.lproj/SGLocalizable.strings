@@ -327,3 +327,10 @@
 "VoiceOver.Editor.CoverFrame" = "Кадр обложки";
 "VoiceOver.Editor.CoverFrame.Value" = "%@ из %@ секунд";
 "VoiceOver.Editor.CoverFrame.Hint" = "Смахните вверх или вниз, чтобы выбрать другой кадр";
+"VoiceOver.Player.Opened" = "Видеоплеер";
+"VoiceOver.Player.Backward15" = "Назад на 15 секунд";
+"VoiceOver.Player.Forward15" = "Вперёд на 15 секунд";
+"VoiceOver.Player.Download" = "Загрузить видео";
+"VoiceOver.Player.CancelDownload" = "Отменить загрузку";
+"VoiceOver.Player.Position" = "Позиция воспроизведения";
+"VoiceOver.Player.PositionValue" = "%@ из %@";

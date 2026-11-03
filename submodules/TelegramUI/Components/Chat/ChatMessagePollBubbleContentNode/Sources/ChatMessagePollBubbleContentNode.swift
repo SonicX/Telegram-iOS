@@ -635,7 +635,12 @@ private final class ChatMessagePollOptionNode: ASDisplayNode {
                     
                     node.highlightedBackgroundNode.backgroundColor = incoming ? presentationData.theme.theme.chat.message.incoming.polls.highlight : presentationData.theme.theme.chat.message.outgoing.polls.highlight
                     
-                    node.buttonNode.accessibilityLabel = option.text
+                    // VoiceOver голосует действиями сообщения (см.
+                    // voPollAccessibilityActions): с подписью кнопка варианта
+                    // давала в цепочке пустое действие, которое ничего не делало.
+                    // isAccessibilityElement не трогаем — ASControlNode
+                    // перезаписывает его при смене isUserInteractionEnabled.
+                    node.buttonNode.accessibilityLabel = nil
                     
                     if animated {
                         if let titleNode = node.titleNode, let cachedLayout = titleNode.textNode.cachedLayout {

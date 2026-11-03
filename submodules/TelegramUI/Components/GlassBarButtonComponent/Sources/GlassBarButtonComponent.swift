@@ -260,6 +260,15 @@ public final class BarComponentHostNode: ASDisplayNode {
     private var componentView: ComponentView<Empty>?
     
     private let size: CGSize
+
+    /// VoiceOver: подпись кнопки-иконки (у GlassBarButtonComponent своей нет).
+    public var componentAccessibilityLabel: String? {
+        didSet {
+            self.componentView?.view?.accessibilityLabel = self.componentAccessibilityLabel
+            // Для обёртки навбара (NavigationButtonItemNode читает подпись ноды).
+            self.accessibilityLabel = self.componentAccessibilityLabel
+        }
+    }
     
     public init(component: AnyComponentWithIdentity<Empty>?, size: CGSize) {
         self.component = component
@@ -311,6 +320,9 @@ public final class BarComponentHostNode: ASDisplayNode {
                     }
                 }
                 view.frame = CGRect(origin: CGPoint(x: 0.0, y: 3.0), size: self.size)
+                if let componentAccessibilityLabel = self.componentAccessibilityLabel {
+                    view.accessibilityLabel = componentAccessibilityLabel
+                }
             }
         }
     }

@@ -10,6 +10,7 @@ import TelegramPresentationData
 import RangeSet
 import ShimmerEffect
 import TelegramUniversalVideoContent
+import SGStrings
 
 private let textFont = Font.with(size: 13.0, design: .regular, weight: .regular, traits: [.monospacedNumbers])
 
@@ -68,6 +69,79 @@ final class ChatVideoGalleryItemScrubberView: UIView {
     var updateScrubbingVisual: (Double?) -> Void = { _ in }
     var updateScrubbingHandlePosition: (CGFloat) -> Void = { _ in }
     var seek: (Double) -> Void = { _ in }
+
+    /// Язык подписей VoiceOver (baseLanguageCode строк приложения).
+    var accessibilityLocale: String = "en"
+
+    // VoiceOver: полоса прокрутки — регулируемый элемент «Позиция
+    // воспроизведения»: значение «1:23 из 5:40», смахивание вверх/вниз —
+    // перемотка на 15 секунд.
+    private var currentAccessibilityTimestamp: Double? {
+        guard let status = self.playbackStatus, status.duration > 0.0 else {
+            return nil
+        }
+        var timestamp = status.timestamp
+        if case .playing = status.status {
+            timestamp += (CACurrentMediaTime() - status.generationTimestamp) * status.baseRate
+        }
+        return max(0.0, min(status.duration, timestamp))
+    }
+
+    private static func accessibilityTimeString(_ value: Double) -> String {
+        let total = Int(value.rounded(.down))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    override var isAccessibilityElement: Bool {
+        get {
+            return self.playbackStatus.flatMap({ $0.duration > 0.0 }) ?? false
+        } set(value) {
+        }
+    }
+
+    override var accessibilityLabel: String? {
+        get {
+            return i18n("VoiceOver.Player.Position", self.accessibilityLocale)
+        } set(value) {
+        }
+    }
+
+    override var accessibilityValue: String? {
+        get {
+            guard let status = self.playbackStatus, let timestamp = self.currentAccessibilityTimestamp else {
+                return nil
+            }
+            return i18n("VoiceOver.Player.PositionValue", self.accessibilityLocale, ChatVideoGalleryItemScrubberView.accessibilityTimeString(timestamp), ChatVideoGalleryItemScrubberView.accessibilityTimeString(status.duration))
+        } set(value) {
+        }
+    }
+
+    override var accessibilityTraits: UIAccessibilityTraits {
+        get {
+            return .adjustable
+        } set(value) {
+        }
+    }
+
+    override func accessibilityIncrement() {
+        guard let status = self.playbackStatus, let timestamp = self.currentAccessibilityTimestamp else {
+            return
+        }
+        self.seek(min(status.duration, timestamp + 15.0))
+    }
+
+    override func accessibilityDecrement() {
+        guard let timestamp = self.currentAccessibilityTimestamp else {
+            return
+        }
+        self.seek(max(0.0, timestamp - 15.0))
+    }
     
     init(chapters: [MediaPlayerScrubbingChapter]) {
         self.chapters = chapters

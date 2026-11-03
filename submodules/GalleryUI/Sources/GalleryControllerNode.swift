@@ -329,6 +329,11 @@ open class GalleryControllerNode: ASDisplayNode, ASScrollViewDelegate, ASGesture
         guard self.areControlsHidden != hidden && (!self.isDismissed || hidden) else {
             return
         }
+        // VoiceOver: элементы управления не прячем — незрячий пользователь
+        // не видит, что они исчезли, и теряет кнопки плеера и «Закрыть».
+        if hidden && !self.isDismissed && UIAccessibility.isVoiceOverRunning {
+            return
+        }
         self.areControlsHidden = hidden
         self.controlsVisibilityChanged?(!hidden)
         if animated {

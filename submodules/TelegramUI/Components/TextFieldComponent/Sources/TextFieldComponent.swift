@@ -305,6 +305,24 @@ public final class TextFieldComponent: Component {
         private var placeholder: ComponentView<Empty>?
         private let textView: ChatInputTextView
         private let inputMenu: TextInputMenu
+
+        /// VoiceOver: имя поля (у полей с собственным плейсхолдером-вьюшкой
+        /// текстовое поле было безымянным, особенно после ввода текста).
+        public var textViewAccessibilityLabel: String? {
+            get {
+                return self.textView.accessibilityLabel
+            } set(value) {
+                self.textView.accessibilityLabel = value
+            }
+        }
+
+        public var textViewAccessibilityCustomActions: [UIAccessibilityCustomAction]? {
+            get {
+                return self.textView.accessibilityCustomActions
+            } set(value) {
+                self.textView.accessibilityCustomActions = value
+            }
+        }
         
         private var spoilerView: InvisibleInkDustView?
         private var customEmojiContainerView: CustomEmojiContainerView?

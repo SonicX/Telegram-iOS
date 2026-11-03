@@ -464,8 +464,24 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         } else {
             self.accessibilityLabel = self.strings.MediaPicker_Send
             self.accessibilityHint = nil
-            self.accessibilityCustomActions = nil
+            self.accessibilityCustomActions = self.voSendOptionsActions()
         }
+    }
+
+    /// VoiceOver: меню «Без звука / Отложить» открывается только долгим
+    /// нажатием — даём его действием «Параметры отправки».
+    private func voSendOptionsActions() -> [UIAccessibilityCustomAction]? {
+        guard self.sendButtonLongPressEnabled, self.sendButtonLongPressed != nil else {
+            return nil
+        }
+        let isRu = self.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        return [UIAccessibilityCustomAction(name: isRu ? "Параметры отправки" : "Send options", actionHandler: { [weak self] _ in
+            guard let self, let gestureRecognizer = self.gestureRecognizer else {
+                return false
+            }
+            self.sendButtonLongPressed?(self, gestureRecognizer)
+            return true
+        })]
     }
     
     public func makeCustomContents() -> UIView? {

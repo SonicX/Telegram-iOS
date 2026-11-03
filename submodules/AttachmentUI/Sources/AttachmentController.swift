@@ -861,6 +861,24 @@ public class AttachmentController: ViewController, MinimizableController {
             }
         }
         
+        // VoiceOver: жест «назад» (зигзаг двумя пальцами) закрывает панель
+        // вложений тем же путём, что и тап по затемнению, — с запросом
+        // подтверждения при выбранных файлах. Без override жест доходил до
+        // навигации, и та выкидывала контроллер мимо dismiss/анимации.
+        override func accessibilityPerformEscape() -> Bool {
+            guard !self.isDismissing else {
+                return true
+            }
+            if let lastController = self.currentControllers.last {
+                lastController.requestDismiss(completion: { [weak self] in
+                    self?.controller?.dismiss(animated: true)
+                })
+            } else {
+                self.controller?.dismiss(animated: true)
+            }
+            return true
+        }
+
         @objc func dimTapGesture(_ recognizer: UITapGestureRecognizer) {
             guard !self.isDismissing else {
                 return
