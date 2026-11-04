@@ -420,6 +420,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             // поле скрыто, работает встроенная панель предпрослушивания; отдаём
             // её контейнером (VO сам обойдёт её кнопки) и кнопку отправки.
             if self.presentationInterfaceState?.interfaceState.mediaDraftState != nil, let mediaPreviewPanelNode = self.mediaPreviewPanelNode {
+                // Корзина («Удалить запись») — это кнопка вложений слева.
+                appendView(self.attachmentButton)
                 elements.append(mediaPreviewPanelNode.view)
                 appendNode(self.viewOnceButton)
                 appendNode(self.recordMoreButton)
@@ -1836,6 +1838,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         transition.updateAlpha(layer: self.attachmentButtonBackground.layer, alpha: attachmentButtonAlpha)
         self.attachmentButton.isEnabled = isMediaEnabled && !isRecording
+        // VoiceOver: на паузе записи кнопка вложений превращается в корзину.
+        self.attachmentButton.accessibilityLabel = interfaceState.interfaceState.mediaDraftState != nil ? "Удалить запись" : interfaceState.strings.VoiceOver_AttachMedia
         self.attachmentButton.accessibilityTraits = (!isSlowmodeActive || isMediaEnabled) ? [.button] : [.button, .notEnabled]
         self.attachmentButtonDisabledNode.isHidden = !isSlowmodeActive || isMediaEnabled
         
@@ -3648,6 +3652,23 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                             return true
                         }))
                     } else {
+                        // Пауза доступна и без закрепления (отзыв 2026-11:
+                        // «кнопка пауза так и не появилась»): закрепляем и
+                        // сразу ставим на паузу.
+                        actions.append(UIAccessibilityCustomAction(name: "Пауза", actionHandler: { [weak self] _ in
+                            guard let self else {
+                                return false
+                            }
+                            self.interfaceInteraction?.lockMediaRecording()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                                guard let self, self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState != nil else {
+                                    return
+                                }
+                                self.announcePauseForAccessibility()
+                                self.interfaceInteraction?.stopMediaRecording()
+                            }
+                            return true
+                        }))
                         actions.append(UIAccessibilityCustomAction(name: "Закрепить запись", actionHandler: { [weak self] _ in
                             guard let self else {
                                 return false
@@ -3978,7 +3999,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             return
         }
         let duration = self.audioRecordingTimeNode?.currentTimestamp ?? 0.0
-        UIAccessibility.post(notification: .announcement, argument: "Пауза. Записано " + ChatTextInputAudioRecordingTimeNode.accessibilityDurationString(duration) + ". Продолжить — кнопка «Продолжить запись», отправить — кнопка «Отправить»")
+        UIAccessibility.post(notification: .announcement, argument: "Пауза. Записано " + ChatTextInputAudioRecordingTimeNode.accessibilityDurationString(duration) + ". Продолжить — кнопка «Продолжить запись», отправить — кнопка «Отправить», удалить — кнопка «Удалить запись» слева")
     }
     
     private func displayViewOnceTooltip(text: String) {

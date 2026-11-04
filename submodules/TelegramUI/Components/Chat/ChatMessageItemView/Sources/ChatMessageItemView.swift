@@ -821,6 +821,9 @@ public final class ChatMessageAccessibilityData {
             // VoiceOver: опрос — голосование действиями сообщения (варианты
             // внутри бабла под VoiceOver недостижимы: сообщение — один элемент).
             customActions.append(contentsOf: voPollAccessibilityActions(item: item))
+            // VoiceOver: кто поставил реакции (в группах и личке) — в меню
+            // это вкладка списка реакций, под VO её не найти (отзыв 2026-11).
+            customActions.append(contentsOf: voReactionListAccessibilityActions(item: item))
 
             // VoiceOver: инлайн-кнопки бота — первыми в цепочке свайпа вниз
             // (ради них сообщение обычно и открывают). Фильтр — как у бабла.
@@ -926,6 +929,69 @@ public final class ChatMessageAccessibilityData {
 // ответами. Отметки бабла (радио-ноды) из действий сообщения недоступны,
 // поэтому выбор копим здесь и отправляем действием «Голосовать».
 private var voPollPendingSelections: [MessageId: [Data]] = [:]
+
+private var voReactionListContexts: [MessageId: (EngineMessageReactionListContext, Disposable)] = [:]
+
+private func voReactionListAccessibilityActions(item: ChatMessageItem) -> [ChatMessageAccessibilityCustomAction] {
+    guard let reactionsAttribute = item.message.reactionsAttribute, !reactionsAttribute.reactions.isEmpty, canViewMessageReactionList(message: item.message) else {
+        return []
+    }
+    let isRu = isRussianBaseLanguage(item: item)
+    let context = item.context
+    let message = item.message
+    let strings = item.presentationData.strings
+    let nameDisplayOrder = item.presentationData.nameDisplayOrder
+    let noop = #selector(ChatMessageAccessibilityData.voNoopSelector)
+    return [ChatMessageAccessibilityCustomAction(name: isRu ? "Кто отреагировал" : "Who reacted", target: nil, selector: noop, action: .perform({
+        let messageId = message.id
+        if let (_, disposable) = voReactionListContexts[messageId] {
+            disposable.dispose()
+        }
+        UIAccessibility.post(notification: .announcement, argument: isRu ? "Загрузка…" : "Loading…")
+        let listContext = context.engine.messages.messageReactionList(message: EngineMessage(message), readStats: nil, reaction: nil)
+        let disposable = MetaDisposable()
+        voReactionListContexts[messageId] = (listContext, disposable)
+        disposable.set((listContext.state
+        |> filter { state in
+            return !state.items.isEmpty || !state.canLoadMore
+        }
+        |> take(1)
+        |> deliverOnMainQueue).startStrict(next: { state in
+            voReactionListContexts.removeValue(forKey: messageId)
+            var parts: [String] = []
+            for listItem in state.items.prefix(30) {
+                let name = listItem.peer.displayTitle(strings: strings, displayOrder: nameDisplayOrder)
+                var reactionTitle: String?
+                switch listItem.reaction {
+                case let .builtin(emoji):
+                    reactionTitle = emoji
+                case .custom:
+                    reactionTitle = isRu ? "реакция" : "reaction"
+                case .stars:
+                    reactionTitle = isRu ? "звёзды" : "stars"
+                case .none:
+                    reactionTitle = nil
+                }
+                if let reactionTitle {
+                    parts.append("\(name) — \(reactionTitle)")
+                } else {
+                    parts.append(name)
+                }
+            }
+            let text: String
+            if parts.isEmpty {
+                text = isRu ? "Список реакций недоступен" : "Reaction list is unavailable"
+            } else {
+                var result = parts.joined(separator: ", ")
+                if state.totalCount > parts.count {
+                    result += isRu ? ". И ещё \(state.totalCount - parts.count)" : ". And \(state.totalCount - parts.count) more"
+                }
+                text = result
+            }
+            UIAccessibility.post(notification: .announcement, argument: NSAttributedString(string: text, attributes: [.accessibilitySpeechQueueAnnouncement: true]))
+        }))
+    }))]
+}
 
 private func voPollAccessibilityActions(item: ChatMessageItem) -> [ChatMessageAccessibilityCustomAction] {
     guard let poll = item.message.media.first(where: { $0 is TelegramMediaPoll }) as? TelegramMediaPoll else {

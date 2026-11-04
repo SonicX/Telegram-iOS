@@ -1450,6 +1450,14 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     if let strongSelf = strongSelf {
                         if dismissSearch {
                             strongSelf.deactivateSearch(animated: true)
+                        } else if UIAccessibility.isVoiceOverRunning {
+                            // VoiceOver: после выхода из найденного чата
+                            // ожидают вернуться в обычный список чатов, а не в
+                            // поиск (отзыв 2026-11). Закрываем поиск, когда
+                            // экран чата уже перекрыл список.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak strongSelf] in
+                                strongSelf?.deactivateSearch(animated: false)
+                            }
                         }
                         var scrollToEndIfExists = false
                         if let layout = strongSelf.validLayout, case .regular = layout.metrics.widthClass {

@@ -699,6 +699,34 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
         self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.scrollNode.view.showsVerticalScrollIndicator = false
         
+        // VoiceOver: перемотка прямо с кнопки «Воспроизвести» (свайп вверх/
+        // вниз) — ползунок «Позиция» тестировщики не находили (отзыв 2026-11).
+        let locale = self.strings.baseLanguageCode
+        let seekAction: (Bool) -> Bool = { [weak self] forward in
+            guard let self, let scrubberView = self.scrubberView, scrubberView.isAccessibilityElement else {
+                return false
+            }
+            if forward {
+                scrubberView.accessibilityIncrement()
+            } else {
+                scrubberView.accessibilityDecrement()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak scrubberView] in
+                if let value = scrubberView?.accessibilityValue {
+                    UIAccessibility.post(notification: .announcement, argument: value)
+                }
+            }
+            return true
+        }
+        self.playbackControlButton.view.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: i18n("VoiceOver.Player.Forward15", locale), actionHandler: { _ in
+                return seekAction(true)
+            }),
+            UIAccessibilityCustomAction(name: i18n("VoiceOver.Player.Backward15", locale), actionHandler: { _ in
+                return seekAction(false)
+            })
+        ]
+        
         let backwardLongPressGestureRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(self.seekBackwardLongPress(_:)))
         backwardLongPressGestureRecognizer.minimumPressDuration = 0.3
         self.backwardButton.view.addGestureRecognizer(backwardLongPressGestureRecognizer)

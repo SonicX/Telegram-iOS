@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import SGSimpleSettings
 import Display
 import AsyncDisplayKit
@@ -336,7 +337,10 @@ func openChatMessageImpl(_ params: OpenChatMessageParams) -> Bool {
                 params.blockInteraction.set(.single(true))
             
                 var presentInCurrent = false
-                if let channel = params.message.peers[params.message.id.peerId] as? TelegramChannel, case .broadcast = channel.info {
+                // VoiceOver: галерея внутри контроллера канала не прячет ленту
+                // от VO — курсор оставался в чате, плеер «не появлялся» (лог
+                // 261032). Поверх окна корневой контроллер скрывается.
+                if !UIAccessibility.isVoiceOverRunning, let channel = params.message.peers[params.message.id.peerId] as? TelegramChannel, case .broadcast = channel.info {
                     if let layout = params.navigationController?.validLayout, case .regular = layout.metrics.widthClass {   
                     } else {
                         presentInCurrent = true

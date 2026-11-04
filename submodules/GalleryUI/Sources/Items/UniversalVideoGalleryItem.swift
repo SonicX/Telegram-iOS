@@ -1167,6 +1167,7 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
     
     private var playerStatusValue: MediaPlayerStatus?
     private let statusDisposable = MetaDisposable()
+    private var nowPlaying: GalleryVideoNowPlaying?
     
     private let moreButtonStateDisposable = MetaDisposable()
     private let settingsButtonStateDisposable = MetaDisposable()
@@ -1708,6 +1709,10 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                 }
             }
             self.videoNode = videoNode
+            self.nowPlaying = self.makeNowPlaying(item: item, videoNode: videoNode)
+            if self.isCentral == true {
+                self.nowPlaying?.activate()
+            }
             self.videoNodeUserInteractionEnabled = disablePlayerControls || forceEnableUserInteraction
             videoNode.isUserInteractionEnabled = disablePlayerControls || forceEnableUserInteraction
             videoNode.backgroundColor = UIColor.black
@@ -2189,6 +2194,12 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
         if self.isCentral != isCentral {
             self.isCentral = isCentral
             
+            if isCentral {
+                self.nowPlaying?.activate()
+            } else {
+                self.nowPlaying?.deactivate()
+            }
+            
             if let videoNode = self.videoNode {
                 if isCentral {
                     var isAnimated = false
@@ -2235,6 +2246,32 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                 }
             }
         }
+    }
+    
+    private func makeNowPlaying(item: UniversalVideoGalleryItem, videoNode: UniversalVideoNode) -> GalleryVideoNowPlaying? {
+        if let content = item.content as? NativeVideoContent, content.fileReference.media.isAnimated {
+            return nil
+        }
+        let isRu = item.presentationData.strings.baseLanguageCode.hasPrefix("ru")
+        var title = item.caption.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let newline = title.firstIndex(of: "\n") {
+            title = String(title[..<newline])
+        }
+        if title.count > 80 {
+            title = String(title.prefix(80)) + "…"
+        }
+        if title.isEmpty {
+            title = isRu ? "Видео" : "Video"
+        }
+        var artist: String?
+        if let contentInfo = item.contentInfo, case let .message(message, _) = contentInfo {
+            if let author = message.author {
+                artist = EnginePeer(author).displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
+            } else if let peer = message.peers[message.id.peerId] {
+                artist = EnginePeer(peer).displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
+            }
+        }
+        return GalleryVideoNowPlaying(videoNode: videoNode, title: title, artist: artist)
     }
     
     override func visibilityUpdated(isVisible: Bool) {

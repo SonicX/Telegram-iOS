@@ -137,6 +137,33 @@ final class AttachmentContainer: ASDisplayNode, ASGestureRecognizerDelegate {
         }
     }
     
+    // VoiceOver: панель вкладок (Галерея, Файлы, Опрос, Геопозиция…) —
+    // последний сабвью, после сетки из сотен фото: свайпами до неё не
+    // дойти (отзыв 2026-11: «озвучиваются только фотографии»). Ставим
+    // панель первой, остальное — в исходном порядке.
+    override var accessibilityElements: [Any]? {
+        get {
+            guard self.isNodeLoaded else {
+                return nil
+            }
+            var panelViews: [UIView] = []
+            var otherViews: [UIView] = []
+            for subview in self.view.subviews {
+                if subview.isHidden || subview.alpha <= 0.01 {
+                    continue
+                }
+                if subview.asyncdisplaykit_node is AttachmentPanel {
+                    panelViews.append(subview)
+                } else {
+                    otherViews.append(subview)
+                }
+            }
+            return panelViews + otherViews
+        }
+        set {
+        }
+    }
+    
     override func didLoad() {
         super.didLoad()
         
