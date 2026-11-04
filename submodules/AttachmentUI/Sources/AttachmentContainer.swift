@@ -143,25 +143,35 @@ final class AttachmentContainer: ASDisplayNode, ASGestureRecognizerDelegate {
     // панель первой, остальное — в исходном порядке.
     override var accessibilityElements: [Any]? {
         get {
-            guard self.isNodeLoaded else {
-                return nil
-            }
-            var panelViews: [UIView] = []
-            var otherViews: [UIView] = []
-            for subview in self.view.subviews {
-                if subview.isHidden || subview.alpha <= 0.01 {
-                    continue
-                }
-                if subview.asyncdisplaykit_node is AttachmentPanel {
-                    panelViews.append(subview)
-                } else {
-                    otherViews.append(subview)
-                }
-            }
-            return panelViews + otherViews
+            return self.voAccessibilityElements()
         }
         set {
         }
+    }
+    
+    // _ASDisplayView берёт элементы из customAccessibilityElements, если он
+    // есть (ObjC-категория ASDisplayNode может перекрывать Swift-override).
+    @objc func customAccessibilityElements() -> [Any]? {
+        return self.voAccessibilityElements()
+    }
+    
+    private func voAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded else {
+            return nil
+        }
+        var panelViews: [UIView] = []
+        var otherViews: [UIView] = []
+        for subview in self.view.subviews {
+            if subview.isHidden || subview.alpha <= 0.01 {
+                continue
+            }
+            if subview.asyncdisplaykit_node is AttachmentPanel {
+                panelViews.append(subview)
+            } else {
+                otherViews.append(subview)
+            }
+        }
+        return panelViews + otherViews
     }
     
     override func didLoad() {

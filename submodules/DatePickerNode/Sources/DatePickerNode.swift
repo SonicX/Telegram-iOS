@@ -947,25 +947,35 @@ public final class DatePickerNode: ASDisplayNode {
     
     override public var accessibilityElements: [Any]? {
         get {
-            guard self.isNodeLoaded else {
-                return nil
-            }
-            var result: [Any] = []
-            if self.hasValueRow {
-                result.append(self.dateButtonNode.view)
-                result.append(self.timeButtonNode.view)
-            }
-            if self.state.displayingTimeSelection {
-                result.append(self.timePickerNode.view)
-            } else if self.state.displayingMonthSelection {
-                result.append(self.monthPickerNode.view)
-            } else if !self.hasValueRow || self.state.displayingDateSelection {
-                result.append(self.voDayElement())
-            }
-            return result
+            return self.voAccessibilityElements()
         }
         set {
         }
+    }
+    
+    // _ASDisplayView берёт элементы из customAccessibilityElements, если он
+    // есть (ObjC-категория ASDisplayNode может перекрывать Swift-override).
+    @objc public func customAccessibilityElements() -> [Any]? {
+        return self.voAccessibilityElements()
+    }
+    
+    private func voAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded else {
+            return nil
+        }
+        var result: [Any] = []
+        if self.hasValueRow {
+            result.append(self.dateButtonNode.view)
+            result.append(self.timeButtonNode.view)
+        }
+        if self.state.displayingTimeSelection {
+            result.append(self.timePickerNode.view)
+        } else if self.state.displayingMonthSelection {
+            result.append(self.monthPickerNode.view)
+        } else if !self.hasValueRow || self.state.displayingDateSelection {
+            result.append(self.voDayElement())
+        }
+        return result
     }
     
     private func voDateString() -> String {

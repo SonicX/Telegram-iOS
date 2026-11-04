@@ -1421,6 +1421,61 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
         self.scrollNode.view.accessibilityTraits = .tabBar
     }
     
+    // VoiceOver: в стиле «стекло» ряд вкладок (scrollNode) вставлен в
+    // containerNode через addSubview, а не addSubnode. AsyncDisplayKit
+    // собирает элементы доступности только по subnodes — вкладки «Галерея,
+    // Файл, Опрос…» не существовали для VoiceOver (касание попадало в фото
+    // под панелью), их видело лишь «Распознавание экрана» (отзыв 2026-11).
+    // Собираем элементы явно: вкладки слева направо, затем остальные узлы.
+    override var accessibilityElements: [Any]? {
+        get {
+            return self.voAccessibilityElements()
+        }
+        set {
+        }
+    }
+    
+    // _ASDisplayView берёт элементы из customAccessibilityElements, если он
+    // есть (ObjC-категория ASDisplayNode может перекрывать Swift-override).
+    @objc func customAccessibilityElements() -> [Any]? {
+        return self.voAccessibilityElements()
+    }
+    
+    private func voAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded else {
+            return nil
+        }
+        func isVisible(_ view: UIView) -> Bool {
+            var current: UIView? = view
+            while let v = current, v !== self.view {
+                if v.isHidden || v.alpha < 0.01 {
+                    return false
+                }
+                current = v.superview
+            }
+            return current != nil
+        }
+        var result: [Any] = []
+        if isVisible(self.scrollNode.view) {
+            let buttons = self.buttonViews.values
+                .filter { $0.superview === self.scrollNode.view && !$0.isHidden && $0.alpha > 0.01 }
+                .sorted { $0.frame.minX < $1.frame.minX }
+            result.append(contentsOf: buttons)
+        }
+        for subnode in self.subnodes ?? [] {
+            if subnode === self.containerNode || !subnode.isNodeLoaded {
+                continue
+            }
+            if subnode.isHidden || subnode.alpha < 0.01 || subnode.accessibilityElementsHidden {
+                continue
+            }
+            if subnode.isAccessibilityElement || subnode.view.accessibilityElementCount() > 0 {
+                result.append(subnode.view)
+            }
+        }
+        return result
+    }
+    
     @objc private func mainButtonPressed() {
         self.onMainButtonPressed()
     }
