@@ -329,6 +329,7 @@ public final class DatePickerNode: ASDisplayNode {
     private var transitionFraction: CGFloat = 0.0
     
     private var validLayout: CGSize?
+    private var voDayAccessibilityElement: DatePickerDayAccessibilityElement?
     
     public var valueUpdated: ((Date) -> Void)?
     
@@ -931,6 +932,146 @@ public final class DatePickerNode: ASDisplayNode {
         self.updateState(updatedState, animated: false)
         
         self.contentNode.layer.animatePosition(from: CGPoint(x: size.width, y: 0.0), to: CGPoint(), duration: 0.3, additive: true)
+    }
+    
+    // MARK: VoiceOver
+    //
+    // Сетка дней — текстовые узлы без доступности: незрячий не мог выбрать
+    // дату отложенной отправки (отзыв 2026-11). Вместо 42 ячеек — один
+    // регулируемый элемент «Дата»: свайп вверх/вниз — день вперёд/назад,
+    // действия — неделя и месяц.
+    
+    private var voIsRussian: Bool {
+        return self.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+    }
+    
+    override public var accessibilityElements: [Any]? {
+        get {
+            guard self.isNodeLoaded else {
+                return nil
+            }
+            var result: [Any] = []
+            if self.hasValueRow {
+                result.append(self.dateButtonNode.view)
+                result.append(self.timeButtonNode.view)
+            }
+            if self.state.displayingTimeSelection {
+                result.append(self.timePickerNode.view)
+            } else if self.state.displayingMonthSelection {
+                result.append(self.monthPickerNode.view)
+            } else if !self.hasValueRow || self.state.displayingDateSelection {
+                result.append(self.voDayElement())
+            }
+            return result
+        }
+        set {
+        }
+    }
+    
+    private func voDateString() -> String {
+        guard let date = self.state.date else {
+            return self.voIsRussian ? "не выбрана" : "not selected"
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: self.strings.baseLanguageCode)
+        formatter.setLocalizedDateFormatFromTemplate("EEEEdMMMMyyyy")
+        let text = formatter.string(from: date)
+        if calendar.isDateInToday(date) {
+            return (self.voIsRussian ? "сегодня, " : "today, ") + text
+        } else if calendar.isDateInTomorrow(date) {
+            return (self.voIsRussian ? "завтра, " : "tomorrow, ") + text
+        }
+        return text
+    }
+    
+    private func voDayElement() -> DatePickerDayAccessibilityElement {
+        let element: DatePickerDayAccessibilityElement
+        if let current = self.voDayAccessibilityElement {
+            element = current
+        } else {
+            element = DatePickerDayAccessibilityElement(accessibilityContainer: self.view)
+            element.increment = { [weak self] in
+                self?.voShiftDate(component: .day, value: 1, announce: false)
+            }
+            element.decrement = { [weak self] in
+                self?.voShiftDate(component: .day, value: -1, announce: false)
+            }
+            self.voDayAccessibilityElement = element
+        }
+        let isRu = self.voIsRussian
+        element.accessibilityLabel = isRu ? "Дата" : "Date"
+        element.accessibilityValue = self.voDateString()
+        element.accessibilityHint = isRu ? "Свайп вверх или вниз — на день вперёд или назад" : "Swipe up or down to change the day"
+        element.accessibilityTraits = .adjustable
+        element.accessibilityFrameInContainerSpace = self.bounds
+        element.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: isRu ? "Неделя вперёд" : "Next week", actionHandler: { [weak self] _ in
+                self?.voShiftDate(component: .day, value: 7, announce: true)
+                return true
+            }),
+            UIAccessibilityCustomAction(name: isRu ? "Неделя назад" : "Previous week", actionHandler: { [weak self] _ in
+                self?.voShiftDate(component: .day, value: -7, announce: true)
+                return true
+            }),
+            UIAccessibilityCustomAction(name: isRu ? "Месяц вперёд" : "Next month", actionHandler: { [weak self] _ in
+                self?.voShiftDate(component: .month, value: 1, announce: true)
+                return true
+            }),
+            UIAccessibilityCustomAction(name: isRu ? "Месяц назад" : "Previous month", actionHandler: { [weak self] _ in
+                self?.voShiftDate(component: .month, value: -1, announce: true)
+                return true
+            })
+        ]
+        return element
+    }
+    
+    private func voShiftDate(component: Calendar.Component, value: Int, announce: Bool) {
+        let isRu = self.voIsRussian
+        let base = self.state.date ?? max(self.minimumDate, Date())
+        guard var target = calendar.date(byAdding: component, value: value, to: base) else {
+            return
+        }
+        if target < self.minimumDate {
+            if calendar.isDate(target, inSameDayAs: self.minimumDate) {
+                // Тот же день, что и минимум, но время уже прошло — ближайшее
+                // допустимое время (как при тапе по сегодняшнему дню).
+                target = self.minimumDate.addingTimeInterval(5.0 * 60.0)
+            } else {
+                UIAccessibility.post(notification: .announcement, argument: isRu ? "Раньше нельзя" : "Earliest date")
+                return
+            }
+        }
+        if target >= self.maximumDate {
+            if calendar.isDate(target, inSameDayAs: self.maximumDate) {
+                target = self.maximumDate.addingTimeInterval(-60.0 * 60.0)
+            } else {
+                UIAccessibility.post(notification: .announcement, argument: isRu ? "Позже нельзя" : "Latest date")
+                return
+            }
+        }
+        guard target >= self.minimumDate && target < self.maximumDate else {
+            return
+        }
+        self.date = target
+        self.valueUpdated?(target)
+        let valueString = self.voDateString()
+        self.voDayAccessibilityElement?.accessibilityValue = valueString
+        if announce {
+            UIAccessibility.post(notification: .announcement, argument: valueString)
+        }
+    }
+}
+
+private final class DatePickerDayAccessibilityElement: UIAccessibilityElement {
+    var increment: (() -> Void)?
+    var decrement: (() -> Void)?
+    
+    override func accessibilityIncrement() {
+        self.increment?()
+    }
+    
+    override func accessibilityDecrement() {
+        self.decrement?()
     }
 }
 

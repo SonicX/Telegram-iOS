@@ -354,6 +354,16 @@ private final class ChatScheduleTimeSheetContentComponent: Component {
                     self.addSubview(timeValueView)
                 }
                 transition.setFrame(view: timeValueView, frame: timeValueFrame)
+                // VoiceOver: «Время, 14:30, кнопка» вместо голого «14:30»;
+                // подпись слева — не отдельный элемент.
+                timeValueView.isAccessibilityElement = true
+                timeValueView.accessibilityLabel = strings.ScheduleMessage_Time
+                timeValueView.accessibilityValue = timeString
+                timeValueView.accessibilityTraits = self.isPickingTime ? [.button, .selected] : [.button]
+            }
+            if let timeTitleView = self.timeTitle.view {
+                timeTitleView.isAccessibilityElement = false
+                timeTitleView.accessibilityElementsHidden = true
             }
             
             contentHeight += 56.0
@@ -439,6 +449,15 @@ private final class ChatScheduleTimeSheetContentComponent: Component {
                     self.addSubview(repeatValueView)
                 }
                 transition.setFrame(view: repeatValueView, frame: repeatValueFrame)
+                repeatValueView.isAccessibilityElement = true
+                repeatValueView.accessibilityLabel = strings.ScheduleMessage_Repeat
+                let isRu = strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                repeatValueView.accessibilityValue = component.context.isPremium ? repeatString : repeatString + (isRu ? ", нужен Premium" : ", requires Premium")
+                repeatValueView.accessibilityTraits = self.isPickingRepeatPeriod ? [.button, .selected] : [.button]
+            }
+            if let repeatTitleView = self.repeatTitle.view {
+                repeatTitleView.isAccessibilityElement = false
+                repeatTitleView.accessibilityElementsHidden = true
             }
             contentHeight += 70.0
             
@@ -593,6 +612,9 @@ private final class ChatScheduleTimeSheetContentComponent: Component {
                 }
             } else if let timePicker = self.timePicker.view as? MenuComponent.View, timePicker.superview != nil {
                 self.timePicker = ComponentView()
+                if UIAccessibility.isVoiceOverRunning, let buttonView = self.timeValue.view {
+                    UIAccessibility.post(notification: .layoutChanged, argument: buttonView)
+                }
                 timePicker.animateOut(completion: {
                     timePicker.removeFromSuperview()
                 })
@@ -664,6 +686,9 @@ private final class ChatScheduleTimeSheetContentComponent: Component {
                 }
             } else if let repeatPicker = self.repeatPicker.view as? MenuComponent.View, repeatPicker.superview != nil {
                 self.repeatPicker = ComponentView()
+                if UIAccessibility.isVoiceOverRunning, let buttonView = self.repeatValue.view {
+                    UIAccessibility.post(notification: .layoutChanged, argument: buttonView)
+                }
                 repeatPicker.animateOut(completion: {
                     repeatPicker.removeFromSuperview()
                 })
@@ -1070,6 +1095,12 @@ private final class MenuComponent: Component {
             self.containerView.contentView.addSubview(self.backgroundView)
             
             self.buttonView.addTarget(self, action: #selector(self.tapped), for: .touchUpInside)
+            
+            // VoiceOver: меню выбора времени/повтора — модальное, закрывается
+            // жестом «назад»; затемнение-кнопка за ним — не элемент.
+            self.accessibilityViewIsModal = true
+            self.buttonView.isAccessibilityElement = false
+            self.buttonView.accessibilityElementsHidden = true
         }
         
         public required init?(coder: NSCoder) {
@@ -1082,9 +1113,22 @@ private final class MenuComponent: Component {
             }
         }
         
+        override public func accessibilityPerformEscape() -> Bool {
+            self.tapped()
+            return true
+        }
+        
         func animateIn() {
             guard let component = self.component else {
                 return
+            }
+            if UIAccessibility.isVoiceOverRunning {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self, self.superview != nil else {
+                        return
+                    }
+                    UIAccessibility.post(notification: .screenChanged, argument: self.componentView?.view)
+                }
             }
             let transition = ComponentTransition.spring(duration: 0.3)
             transition.animatePosition(view: self.backgroundView, from: component.sourceFrame.center, to: self.backgroundView.center)
@@ -1292,6 +1336,12 @@ private final class MenuButtonComponent: Component {
                 self.addSubview(self.button)
             }
             self.button.frame = CGRect(origin: .zero, size: size)
+            // VoiceOver: пункт меню «Повтор» — с названием и отметкой выбора
+            // (раньше — безымянная «кнопка»).
+            self.button.accessibilityLabel = component.text
+            self.button.accessibilityTraits = component.isSelected ? [.button, .selected] : [.button]
+            self.title.view?.isAccessibilityElement = false
+            self.title.view?.accessibilityElementsHidden = true
             
             return size
         }

@@ -718,6 +718,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
             }
             return true
         }
+        self.playbackControlButton.accessibilityHint = locale.lowercased().hasPrefix("ru") ? "Перемотка на 15 секунд — свайп вверх или вниз" : "Swipe up or down to skip 15 seconds"
         self.playbackControlButton.view.accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: i18n("VoiceOver.Player.Forward15", locale), actionHandler: { _ in
                 return seekAction(true)
@@ -2114,7 +2115,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
     
     /// VoiceOver: при открытии видео — курсор на «Воспроизвести/Пауза» и
     /// озвучка «Видеоплеер» (отзыв 2026-10: «непонятно, открылся ли плеер»).
-    func accessibilityFocusPlayer() {
+    func accessibilityFocusPlayer(attempt: Int = 0) {
         guard UIAccessibility.isVoiceOverRunning else {
             return
         }
@@ -2123,6 +2124,14 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
             target = self.playbackControlButton
         } else if !self.statusButtonNode.isHidden && self.statusButtonNode.isAccessibilityElement {
             target = self.statusButtonNode
+        } else if attempt < 15 && self.supernode != nil {
+            // Видео ещё загружается/буферизуется — кнопки нет. Раньше курсор
+            // так и оставался на навбаре («второй раз пауза не появилась»,
+            // отзыв 2026-11). Ждём появления кнопки до ~4.5 с.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.accessibilityFocusPlayer(attempt: attempt + 1)
+            }
+            return
         } else {
             UIAccessibility.post(notification: .announcement, argument: i18n("VoiceOver.Player.Opened", self.strings.baseLanguageCode))
             return
