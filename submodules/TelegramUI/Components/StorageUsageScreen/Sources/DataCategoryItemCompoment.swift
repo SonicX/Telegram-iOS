@@ -639,6 +639,9 @@ final class DataCategoryItemComponent: Component {
                 element.accessibilityValue = nil
                 element.accessibilityTraits = .staticText
             }
+            // UIButton по умолчанию сам VO-элемент — тогда accessibilityElements
+            // игнорируются и звучит безымянная «кнопка» (отзыв 2026-11).
+            self.isAccessibilityElement = false
             self.accessibilityElements = [element, self.subcategoryClippingContainer]
             
             return CGSize(width: availableSize.width, height: height)

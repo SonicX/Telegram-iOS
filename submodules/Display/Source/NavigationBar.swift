@@ -935,12 +935,19 @@ open class NavigationBar: ASDisplayNode {
         }
     }
     
+    /// VoiceOver: счётчик непрочитанных на «Назад» — значением кнопки.
+    private func updateBackButtonAccessibilityValue() {
+        let text = self.badgeNode.isHidden ? "" : self.badgeNode.text
+        self.backButtonNode.accessibilityValue = text.isEmpty ? nil : text
+    }
+    
     private func updateBadgeText(text: String?) {
         let actualText = text ?? ""
         if self.badgeNode.text != actualText {
             self.badgeNode.text = actualText
             self.badgeNode.isHidden = actualText.isEmpty
             self.backButtonNode.manualAlpha = self.badgeNode.isHidden ? 1.0 : 0.0
+            self.updateBackButtonAccessibilityValue()
             
             self.invalidateCalculatedLayout()
             self.requestLayout()
@@ -1041,9 +1048,13 @@ open class NavigationBar: ASDisplayNode {
                 if let backTitle = backTitle {
                     self.backButtonNode.updateManualText(backTitle, isBack: true)
                     
-                    // Улучшаем accessibility для VoiceOver
-                    self.backButtonNode.accessibilityLabel = backTitle
-                    self.backButtonNode.accessibilityHint = self.presentationData.strings.back
+                    // Улучшаем accessibility для VoiceOver. У списка чатов заголовок —
+                    // кастомная view, title пустой: кнопка «Назад» из чата звучала
+                    // безымянной «кнопкой» (отзыв 2026-11). Пустой — «Назад».
+                    let trimmedBackTitle = backTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.backButtonNode.accessibilityLabel = trimmedBackTitle.isEmpty ? self.presentationData.strings.back : trimmedBackTitle
+                    self.backButtonNode.accessibilityHint = trimmedBackTitle.isEmpty ? nil : self.presentationData.strings.back
+                    self.updateBackButtonAccessibilityValue()
                     
                     if self.backButtonNode.supernode == nil {
                         self.buttonsContainerNode.addSubnode(self.backButtonNode)
