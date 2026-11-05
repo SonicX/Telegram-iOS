@@ -26,6 +26,12 @@ final class TextView: UIView {
         
         self.isOpaque = false
         self.backgroundColor = nil
+        
+        // VoiceOver: текст рисуется в draw(_:), поэтому сам по себе не читается.
+        // Делаем вьюшку статическим текстом; внутри кнопок (UIButton — сам элемент)
+        // она всё равно не попадёт в дерево отдельно.
+        self.isAccessibilityElement = false
+        self.accessibilityTraits = .staticText
     }
     
     required init?(coder: NSCoder) {
@@ -45,6 +51,15 @@ final class TextView: UIView {
     
     func update(string: String, fontSize: CGFloat, fontWeight: CGFloat, monospacedDigits: Bool = false, alignment: NSTextAlignment = .natural, color: UIColor, constrainedWidth: CGFloat, transition: ComponentTransition) -> CGSize {
         let params = Params(string: string, fontSize: fontSize, fontWeight: fontWeight, monospacedDigits: monospacedDigits, alignment: alignment, constrainedWidth: constrainedWidth)
+        
+        if self.accessibilityLabel != string {
+            self.accessibilityLabel = string
+        }
+        let hasAccessibilityText = !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if self.isAccessibilityElement != hasAccessibilityText {
+            self.isAccessibilityElement = hasAccessibilityText
+        }
+        
         if let layoutState = self.layoutState, layoutState.params == params {
             return layoutState.size
         }

@@ -133,6 +133,9 @@ final class ChatPinnedMessageTitlePanelNode: ChatTitleAccessoryPanelNode {
         self.listButton = HighlightableButtonNode()
         self.listButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         self.listButton.displaysAsynchronously = false
+        // VoiceOver: кнопка списка закреплённых справа на плашке.
+        self.listButton.accessibilityLabel = "Все закреплённые сообщения"
+        self.listButton.accessibilityTraits = .button
         
         self.activityIndicatorContainer = ASDisplayNode()
         self.activityIndicatorContainer.isUserInteractionEnabled = false
@@ -204,6 +207,17 @@ final class ChatPinnedMessageTitlePanelNode: ChatTitleAccessoryPanelNode {
         
         self.closeButton.addTarget(self, action: #selector(self.closePressed), forControlEvents: [.touchUpInside])
         self.listButton.addTarget(self, action: #selector(self.listPressed), forControlEvents: [.touchUpInside])
+        // VoiceOver: список закреплённых — и действием на самой плашке
+        // (просьба 2026-11: «перейти к закреплённым, там правила»).
+        self.tapButton.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: "Все закреплённые сообщения", actionHandler: { [weak self] _ in
+                guard let self, self.currentMessage != nil else {
+                    return false
+                }
+                self.listPressed()
+                return true
+            })
+        ]
         self.actionButton.addTarget(self, action: #selector(self.actionButtonPressed), forControlEvents: [.touchUpInside])
         
         self.addSubnode(self.contextContainer)

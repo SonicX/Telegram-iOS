@@ -322,6 +322,27 @@ final class VideoContainerView: HighlightTrackingButton {
         self.pressAction?()
     }
     
+    // VoiceOver: вьюшка растянута на весь экран, а видимое видео — только в
+    // videoContainerLayer; рамку фокуса и активацию берём по нему (hitTest в
+    // центре вьюшки вернул бы nil).
+    override var accessibilityFrame: CGRect {
+        get {
+            let localFrame = self.layer.convert(self.videoContainerLayer.bounds, from: self.videoContainerLayer)
+            return UIAccessibility.convertToScreenCoordinates(localFrame, in: self)
+        }
+        set {
+            super.accessibilityFrame = newValue
+        }
+    }
+    
+    override func accessibilityActivate() -> Bool {
+        guard let pressAction = self.pressAction else {
+            return false
+        }
+        pressAction()
+        return true
+    }
+    
     @objc private func panGesture(_ recognizer: UIPanGestureRecognizer) {
         if self.videoContainerLayerTaken {
             return
@@ -488,6 +509,10 @@ final class VideoContainerView: HighlightTrackingButton {
         
         let previousParams = self.params
         self.params = params
+        
+        // VoiceOver: кнопкой является только свёрнутое (маленькое) видео — по нажатию
+        // видео меняются местами. Полноэкранное видео — фон, его не озвучиваем.
+        self.isAccessibilityElement = params.isMinimized && !params.isAnimatedOut
         
         if let previousParams, previousParams.controlsHidden != params.controlsHidden {
             self.dragPosition = nil

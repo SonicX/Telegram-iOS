@@ -222,6 +222,11 @@ private final class SubItemComponent: Component {
             
             self.highlightBackgroundFrame = CGRect(origin: CGPoint(), size: CGSize(width: availableSize.width, height: height + ((component.hasNext) ? UIScreenPixel : 0.0)))
             
+            // VoiceOver: «Входящие, 12 МБ».
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = (component.isIncoming ? component.strings.DataUsage_MediaDirectionIncoming : component.strings.DataUsage_MediaDirectionOutgoing) + ", " + dataSizeString(Int(component.value), formatting: DataSizeStringFormatting(strings: component.strings, decimalSeparator: "."))
+            self.accessibilityTraits = .staticText
+            
             return CGSize(width: availableSize.width, height: height)
         }
     }
@@ -288,6 +293,7 @@ final class DataCategoryItemComponent: Component {
         
         private let subcategoryClippingContainer: UIView
         private var itemViews: [AnyHashable: ComponentView<Empty>] = [:]
+        private var rowAccessibilityElement: StorageUsageAccessibilityElement?
         
         private var component: DataCategoryItemComponent?
         
@@ -596,6 +602,44 @@ final class DataCategoryItemComponent: Component {
             transition.setFrame(view: self.subcategoryClippingContainer, frame: CGRect(origin: CGPoint(), size: CGSize(width: availableSize.width, height: height)))
             
             self.isEnabled = component.action != nil
+            
+            // VoiceOver: строка «Фото, 12%, 34 МБ» (раньше — безымянная
+            // «кнопка», отзыв 2026-11). Раскрываемые — со «свёрнуто/развёрнуто»,
+            // под ними «Входящие/Исходящие».
+            let element: StorageUsageAccessibilityElement
+            if let current = self.rowAccessibilityElement {
+                element = current
+            } else {
+                element = StorageUsageAccessibilityElement(accessibilityContainer: self)
+                element.frameProvider = { [weak self] in
+                    guard let self else {
+                        return CGRect()
+                    }
+                    return CGRect(origin: CGPoint(), size: CGSize(width: self.bounds.width, height: 52.0))
+                }
+                element.activate = { [weak self] in
+                    guard let self, let component = self.component, let action = component.action else {
+                        return false
+                    }
+                    action(component.category.key)
+                    return true
+                }
+                self.rowAccessibilityElement = element
+            }
+            var labelParts: [String] = [component.category.title]
+            if !fractionString.isEmpty {
+                labelParts.append(fractionString)
+            }
+            labelParts.append(dataSizeString(Int(component.category.size), formatting: DataSizeStringFormatting(strings: component.strings, decimalSeparator: ".")))
+            element.accessibilityLabel = labelParts.joined(separator: ", ")
+            if component.category.isSeparable && component.action != nil {
+                element.accessibilityValue = component.isExpanded ? StorageUsageAccessibilityStrings.expanded : StorageUsageAccessibilityStrings.collapsed
+                element.accessibilityTraits = .button
+            } else {
+                element.accessibilityValue = nil
+                element.accessibilityTraits = .staticText
+            }
+            self.accessibilityElements = [element, self.subcategoryClippingContainer]
             
             return CGSize(width: availableSize.width, height: height)
         }

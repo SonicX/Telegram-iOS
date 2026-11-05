@@ -154,6 +154,9 @@ final class CloseButtonView: HighlightTrackingButton, OverlayMaskContainerViewPr
         if self.params == params {
             return
         }
+        // VoiceOver: текст нарисован в TextView внутри кнопки — подписываем саму кнопку.
+        self.accessibilityLabel = text
+        self.accessibilityTraits = .button
         self.params = params
         self.update(params: params, transition: transition)
     }

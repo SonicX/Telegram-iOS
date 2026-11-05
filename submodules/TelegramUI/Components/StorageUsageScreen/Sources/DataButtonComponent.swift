@@ -124,6 +124,10 @@ final class DataButtonComponent: Component {
             }
             
             self.highlightBackgroundFrame = CGRect(origin: CGPoint(), size: CGSize(width: availableSize.width, height: height))
+            // VoiceOver: кнопка «Сбросить статистику» звучала как «кнопка».
+            self.isAccessibilityElement = true
+            self.accessibilityLabel = component.title
+            self.accessibilityTraits = .button
             
             return CGSize(width: availableSize.width, height: height)
         }

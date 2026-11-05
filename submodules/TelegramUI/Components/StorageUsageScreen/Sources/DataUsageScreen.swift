@@ -710,6 +710,8 @@ final class DataUsageScreenComponent: Component {
             if let pieChartComponentView = self.pieChartView.view {
                 if pieChartComponentView.superview == nil {
                     self.scrollView.addSubview(pieChartComponentView)
+                    // Сама диаграмма — графика; доли озвучены в строках категорий.
+                    pieChartComponentView.accessibilityElementsHidden = true
                 }
                 
                 pieChartTransition.setFrame(view: pieChartComponentView, frame: pieChartFrame)
@@ -894,6 +896,11 @@ final class DataUsageScreenComponent: Component {
                     if chartTotalLabelView.superview == nil {
                         self.scrollContainerView.addSubview(chartTotalLabelView)
                     }
+                    // VoiceOver: итог в центре диаграммы — одной фразой (анимированный
+                    // текст разбит на куски «12», «.», «5 ГБ»).
+                    chartTotalLabelView.isAccessibilityElement = true
+                    chartTotalLabelView.accessibilityLabel = (environment.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Всего: " : "Total: ") + sizeText
+                    chartTotalLabelView.accessibilityTraits = .staticText
                     
                     let chartAreaHeight: CGFloat
                     if totalSize == 0 {

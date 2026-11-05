@@ -5260,13 +5260,28 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         self.messageAccessibilityArea.accessibilityValue = accessibilityData.value
         self.messageAccessibilityArea.accessibilityHint = accessibilityData.hint
         self.messageAccessibilityArea.accessibilityTraits = accessibilityData.traits
-        if let customActions = accessibilityData.customActions {
-            self.messageAccessibilityArea.accessibilityCustomActions = customActions.map({ action -> UIAccessibilityCustomAction in
-                return ChatMessageAccessibilityCustomAction(name: action.name, target: self, selector: #selector(self.performLocalAccessibilityCustomAction(_:)), action: action.action)
-            })
-        } else {
-            self.messageAccessibilityArea.accessibilityCustomActions = nil
+        var actions: [UIAccessibilityCustomAction] = (accessibilityData.customActions ?? []).map({ action -> UIAccessibilityCustomAction in
+            return ChatMessageAccessibilityCustomAction(name: action.name, target: self, selector: #selector(self.performLocalAccessibilityCustomAction(_:)), action: action.action)
+        })
+        // VoiceOver: «Расшифровать» голосовое (просьба 2026-11 — для
+        // слепоглухих). Кнопка «→А» скрыта от VO, поэтому — действием.
+        for contentNode in self.contentNodes {
+            // Голосовое определяем по сообщению: accessibility-данные могут
+            // прийти раньше, чем узел создаст кнопку «→А».
+            let isVoice = contentNode.item?.message.media.contains(where: { ($0 as? TelegramMediaFile)?.isVoice == true }) ?? false
+            if let fileContentNode = contentNode as? ChatMessageFileBubbleContentNode, isVoice || fileContentNode.interactiveFileNode.voCanTranscribe {
+                let isRu = self.item?.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ?? false
+                actions.append(UIAccessibilityCustomAction(name: isRu ? "Расшифровать" : "Transcribe", actionHandler: { [weak fileContentNode] _ in
+                    guard let fileContentNode else {
+                        return false
+                    }
+                    fileContentNode.interactiveFileNode.voTranscribe(isRu: isRu)
+                    return true
+                }))
+                break
+            }
         }
+        self.messageAccessibilityArea.accessibilityCustomActions = actions.isEmpty ? nil : actions
         self.updateAccessibilityRotors(accessibilityData)
     }
 
@@ -5274,10 +5289,68 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
     /// фрейм сообщения, двойной тап — открыть ссылку / вложение.
     private final class RotorTargetElement: UIAccessibilityElement {
         var activate: (() -> Bool)?
+        var valueProvider: (() -> String?)?
+        var customActionsProvider: (() -> [UIAccessibilityCustomAction])?
 
         override func accessibilityActivate() -> Bool {
             return self.activate?() ?? false
         }
+        
+        override var accessibilityValue: String? {
+            get {
+                if let valueProvider = self.valueProvider {
+                    return valueProvider()
+                }
+                return super.accessibilityValue
+            }
+            set {
+                super.accessibilityValue = newValue
+            }
+        }
+        
+        override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+            get {
+                if let customActionsProvider = self.customActionsProvider {
+                    return customActionsProvider()
+                }
+                return super.accessibilityCustomActions
+            }
+            set {
+                super.accessibilityCustomActions = newValue
+            }
+        }
+    }
+    
+    /// VoiceOver: выборочная пересылка из альбома (просьба 2026-11: «из первого
+    /// альбома пятую, шестую и восьмую…»). На каждом фото ротора «Вложения» —
+    /// «Выбрать / Снять выбор»; выбранные копятся по всем альбомам чата, а
+    /// «Переслать» — на панели выделения внизу.
+    private func voAttachmentSelectionActions(messageId: MessageId, isRu: Bool) -> [UIAccessibilityCustomAction] {
+        guard let item = self.item else {
+            return []
+        }
+        let isSelected = item.controllerInteraction.selectionState?.selectedIds.contains(messageId) ?? false
+        let name = isSelected ? (isRu ? "Снять выбор" : "Deselect") : (isRu ? "Выбрать" : "Select")
+        return [UIAccessibilityCustomAction(name: name, actionHandler: { [weak self] _ in
+            guard let self, let item = self.item else {
+                return false
+            }
+            item.controllerInteraction.toggleMessagesSelection([messageId], !isSelected)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, let item = self.item else {
+                    return
+                }
+                let count = item.controllerInteraction.selectionState?.selectedIds.count ?? 0
+                let text: String
+                if isRu {
+                    text = (isSelected ? "Выбор снят" : "Выбрано") + ". Всего выбрано: \(count). Переслать — внизу экрана"
+                } else {
+                    text = (isSelected ? "Deselected" : "Selected") + ". Total selected: \(count). Forward is at the bottom of the screen"
+                }
+                UIAccessibility.post(notification: .announcement, argument: text)
+            }
+            return true
+        })]
     }
 
     /// Цели ротора, которыми VoiceOver пользуется прямо сейчас: ListView
@@ -5323,6 +5396,19 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 element.accessibilityLabel = attachment.title
                 element.accessibilityTraits = .button
                 let messageId = attachment.messageId
+                element.valueProvider = { [weak self] in
+                    guard let self, let item = self.item, let selectionState = item.controllerInteraction.selectionState else {
+                        return nil
+                    }
+                    let isRu = item.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                    return selectionState.selectedIds.contains(messageId) ? (isRu ? "выбрано" : "selected") : nil
+                }
+                element.customActionsProvider = { [weak self] in
+                    guard let self, let item = self.item else {
+                        return []
+                    }
+                    return self.voAttachmentSelectionActions(messageId: messageId, isRu: item.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru"))
+                }
                 element.activate = { [weak self] in
                     guard let self, let item = self.item else {
                         return false

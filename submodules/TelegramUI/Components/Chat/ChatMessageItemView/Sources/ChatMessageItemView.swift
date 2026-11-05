@@ -662,6 +662,15 @@ public final class ChatMessageAccessibilityData {
                         rotorLinks.append((title: substring, value: URL(string: url)?.host ?? url, url: url))
                     case .Email:
                         rotorLinks.append((title: substring, value: nil, url: "mailto:\(substring)"))
+                    case .Mention:
+                        // VoiceOver: @username — тоже ссылка в роторе «Ссылки»
+                        // (отзыв 2026-11: «на упоминание нельзя кликнуть»).
+                        let username = substring.hasPrefix("@") ? String(substring.dropFirst()) : substring
+                        if !username.isEmpty {
+                            rotorLinks.append((title: substring, value: nil, url: "https://t.me/\(username)"))
+                        }
+                    case let .TextMention(peerId):
+                        rotorLinks.append((title: substring, value: nil, url: "tg://user?id=\(peerId.id._internalGetInt64Value())"))
                     default:
                         break
                     }

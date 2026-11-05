@@ -354,6 +354,67 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
             blurFilter.setValue(10.0 as NSNumber, forKey: "inputRadius")
             self.overlayContentsView.layer.filters = [blurFilter]
         }
+        
+        // VoiceOver: при включении/выключении VoiceOver пересчитываем раскладку —
+        // при видео кнопки не должны прятаться, пока VoiceOver работает.
+        NotificationCenter.default.addObserver(self, selector: #selector(self.voiceOverStatusChanged), name: UIAccessibility.voiceOverStatusDidChangeNotification, object: nil)
+    }
+    
+    @objc private func voiceOverStatusChanged() {
+        if !self.isUpdating {
+            self.update(transition: .immediate)
+        }
+    }
+    
+    // VoiceOver: явный порядок чтения — имя и статус, предупреждения, ключ
+    // шифрования, затем «Свернуть»/«Добавить участника», маленькое видео и
+    // нижние кнопки (слева направо, «Завершить» последней). Фон, аватар и
+    // «пузыри» — слои (CALayer), в дерево доступности не попадают.
+    override public var accessibilityElements: [Any]? {
+        get {
+            func isVisible(_ view: UIView?) -> Bool {
+                guard let view, view.superview === self else {
+                    return false
+                }
+                return !view.isHidden && view.alpha > 0.01
+            }
+            var result: [Any] = []
+            if isVisible(self.titleView) {
+                result.append(self.titleView)
+            }
+            if isVisible(self.statusView) {
+                result.append(self.statusView)
+            }
+            if let weakSignalView = self.weakSignalView, isVisible(weakSignalView) {
+                result.append(weakSignalView)
+            }
+            if let emojiView = self.emojiView, isVisible(emojiView) {
+                result.append(emojiView)
+            }
+            if let emojiExpandedInfoView = self.emojiExpandedInfoView, isVisible(emojiExpandedInfoView) {
+                result.append(emojiExpandedInfoView)
+            }
+            if let emojiTooltipView = self.emojiTooltipView, isVisible(emojiTooltipView) {
+                result.append(emojiTooltipView)
+            }
+            if isVisible(self.backButtonView) {
+                result.append(self.backButtonView)
+            }
+            if let conferenceButtonView = self.conferenceButtonView, isVisible(conferenceButtonView) {
+                result.append(conferenceButtonView)
+            }
+            for videoContainerView in self.videoContainerViews {
+                if videoContainerView.isAccessibilityElement && isVisible(videoContainerView) {
+                    result.append(videoContainerView)
+                }
+            }
+            if isVisible(self.buttonGroupView) {
+                result.append(self.buttonGroupView)
+            }
+            return result
+        }
+        set {
+        }
     }
     
     public required init?(coder: NSCoder) {
@@ -737,7 +798,9 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
             }
         }
         
-        let currentAreControlsHidden = havePrimaryVideo && self.areControlsHidden
+        // VoiceOver: при видео кнопки и заголовок автоматически прячутся (уезжают
+        // за экран) — незрячему их не найти. Пока VoiceOver включён, не прячем.
+        let currentAreControlsHidden = havePrimaryVideo && self.areControlsHidden && !UIAccessibility.isVoiceOverRunning
         
         let backgroundAspect: CGFloat = params.size.width / params.size.height
         let backgroundSizeNorm: CGFloat = 64.0
@@ -918,6 +981,9 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
         }
         
         let backButtonSize = self.backButtonView.update(text: params.state.strings.Common_Back)
+        // VoiceOver: «Назад» сворачивает звонок (он продолжается в фоне).
+        self.backButtonView.accessibilityLabel = params.state.strings.Call_VoiceOver_Minimize
+        self.backButtonView.accessibilityTraits = .button
         
         let backButtonY: CGFloat
         if currentAreControlsHidden {
@@ -956,6 +1022,9 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
             
             let conferenceButtonSize = CGSize(width: 40.0, height: 40.0)
             conferenceButtonView.update(size: conferenceButtonSize, transition: conferenceButtonTransition)
+            // VoiceOver: кнопка-иконка без текста.
+            conferenceButtonView.accessibilityLabel = params.state.strings.Call_AddMemberTitle
+            conferenceButtonView.accessibilityTraits = .button
             
             let conferenceButtonY: CGFloat
             if currentAreControlsHidden {
@@ -1028,6 +1097,10 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                     self.swapLocalAndRemoteVideo = !self.swapLocalAndRemoteVideo
                     self.update(transition: .easeInOut(duration: 0.25))
                 }
+                // VoiceOver: озвучивается только свёрнутое видео (см. VideoContainerView).
+                let isRu = params.state.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                videoContainerView.accessibilityLabel = isRu ? "Поменять видео местами" : "Swap videos"
+                videoContainerView.accessibilityTraits = .button
             }
             
             if videoContainerView.video !== videoSource {
@@ -1362,6 +1435,12 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                 }
             }
             emojiView.isUserInteractionEnabled = !self.isEmojiKeyExpanded
+            // VoiceOver: ключ шифрования — эмодзи читаются значением; в свёрнутом
+            // виде это кнопка, раскрывающая пояснение.
+            emojiView.accessibilityLabel = params.state.strings.Call_EncryptionKey_Title
+            emojiView.accessibilityValue = activeState.emojiKey.joined(separator: " ")
+            emojiView.accessibilityTraits = self.isEmojiKeyExpanded ? .staticText : .button
+            emojiView.accessibilityHint = self.isEmojiKeyExpanded ? nil : params.state.strings.Call_EncryptionKeyTooltip
             
             let emojiViewSize = emojiView.update(isExpanded: self.isEmojiKeyExpanded, transition: emojiTransition)
             emojiViewSizeValue = emojiViewSize

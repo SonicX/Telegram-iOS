@@ -250,6 +250,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     public let sendActionButtons: ChatTextInputActionButtonsNode
     private let slowModeButton: BoostSlowModeButton
     public var mediaRecordingAccessibilityArea: AccessibilityAreaNode?
+    /// VoiceOver: отдельная кнопка «Пауза» во время записи (отзыв 2026-11:
+    /// «кнопки паузы до сих пор нет» — действие на «Отправить» не находили).
+    private var pauseRecordingAccessibilityArea: AccessibilityAreaNode?
     private let textInputAccessibilityArea: AccessibilityAreaNode
     private let hideKeyboardAccessibilityArea: AccessibilityAreaNode
     // VoiceOver: две кнопки-зоны в тулбаре (невидимы зрячим). «Написать
@@ -411,6 +414,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 if let audioRecordingCancelIndicator = self.audioRecordingCancelIndicator, audioRecordingCancelIndicator.isDisplayingCancel, !audioRecordingCancelIndicator.isHidden, audioRecordingCancelIndicator.alpha > 0.01 {
                     elements.append(audioRecordingCancelIndicator)
                 }
+                appendNode(self.pauseRecordingAccessibilityArea)
                 appendNode(self.viewOnceButton)
                 appendNode(self.recordMoreButton)
                 appendNode(self.mediaRecordingAccessibilityArea)
@@ -426,6 +430,18 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 appendNode(self.viewOnceButton)
                 appendNode(self.recordMoreButton)
                 appendSendButtonIfNeeded()
+                return elements
+            }
+
+            // VoiceOver: кнопка «Начать» в новом чате с ботом. Её не было в
+            // списке — вместо неё звучало «Написать сообщение», хотя поле
+            // ввода скрыто (отзыв 2026-11: «кнопка начать / start пропала»).
+            if !self.startButton.isHidden, self.startButton.alpha > 0.01 {
+                self.startButton.view.isAccessibilityElement = true
+                self.startButton.view.accessibilityLabel = self.presentationInterfaceState?.strings.Bot_Start ?? "Start"
+                self.startButton.view.accessibilityTraits = [.button]
+                elements.append(self.startButton.view)
+                appendNode(self.menuButton)
                 return elements
             }
 
@@ -3642,33 +3658,11 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                         return []
                     }
                     var actions: [UIAccessibilityCustomAction] = []
-                    if state.isLocked {
-                        actions.append(UIAccessibilityCustomAction(name: "Пауза", actionHandler: { [weak self] _ in
-                            guard let self else {
-                                return false
-                            }
-                            self.announcePauseForAccessibility()
-                            self.interfaceInteraction?.stopMediaRecording()
-                            return true
-                        }))
-                    } else {
-                        // Пауза доступна и без закрепления (отзыв 2026-11:
-                        // «кнопка пауза так и не появилась»): закрепляем и
-                        // сразу ставим на паузу.
-                        actions.append(UIAccessibilityCustomAction(name: "Пауза", actionHandler: { [weak self] _ in
-                            guard let self else {
-                                return false
-                            }
-                            self.interfaceInteraction?.lockMediaRecording()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                                guard let self, self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState != nil else {
-                                    return
-                                }
-                                self.announcePauseForAccessibility()
-                                self.interfaceInteraction?.stopMediaRecording()
-                            }
-                            return true
-                        }))
+                    actions.append(UIAccessibilityCustomAction(name: "Пауза", actionHandler: { [weak self] _ in
+                        self?.voPauseRecording()
+                        return true
+                    }))
+                    if !state.isLocked {
                         actions.append(UIAccessibilityCustomAction(name: "Закрепить запись", actionHandler: { [weak self] _ in
                             guard let self else {
                                 return false
@@ -3708,8 +3702,30 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                     UIAccessibility.post(notification: UIAccessibility.Notification.layoutChanged, argument: mediaRecordingAccessibilityArea?.view)
                 })
             }
+            
+            let pauseArea: AccessibilityAreaNode
+            if let current = self.pauseRecordingAccessibilityArea {
+                pauseArea = current
+            } else {
+                pauseArea = AccessibilityAreaNode()
+                pauseArea.accessibilityLabel = "Пауза"
+                pauseArea.accessibilityHint = "Остановить запись и прослушать перед отправкой"
+                pauseArea.accessibilityTraits = [.button]
+                pauseArea.activate = { [weak self] in
+                    self?.voPauseRecording()
+                    return true
+                }
+                self.pauseRecordingAccessibilityArea = pauseArea
+                self.glassBackgroundContainer.contentView.insertSubview(pauseArea.view, aboveSubview: self.mediaActionButtons.view)
+            }
+            // Над микрофоном — там, где зрячие видят замок/«Стоп».
+            pauseArea.frame = CGRect(origin: CGPoint(x: mediaActionButtonsFrame.midX - 25.0, y: mediaActionButtonsFrame.minY - 110.0), size: CGSize(width: 50.0, height: 50.0))
         } else {
             self.mediaActionButtons.isAccessibilityElement = true
+            if let pauseArea = self.pauseRecordingAccessibilityArea {
+                self.pauseRecordingAccessibilityArea = nil
+                pauseArea.view.removeFromSuperview()
+            }
             if let mediaRecordingAccessibilityArea = self.mediaRecordingAccessibilityArea {
                 self.mediaRecordingAccessibilityArea = nil
                 mediaRecordingAccessibilityArea.removeFromSupernode()
@@ -3994,6 +4010,27 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     }
     
     /// VoiceOver: при паузе озвучиваем, сколько уже записано.
+    /// VoiceOver: пауза записи. Без закрепления — сначала закрепляем
+    /// (иначе «Стоп» недоступен), затем останавливаем в предпрослушивание.
+    private func voPauseRecording() {
+        guard let state = self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState else {
+            return
+        }
+        if state.isLocked {
+            self.announcePauseForAccessibility()
+            self.interfaceInteraction?.stopMediaRecording()
+        } else {
+            self.interfaceInteraction?.lockMediaRecording()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, self.presentationInterfaceState?.inputTextPanelState.mediaRecordingState != nil else {
+                    return
+                }
+                self.announcePauseForAccessibility()
+                self.interfaceInteraction?.stopMediaRecording()
+            }
+        }
+    }
+    
     private func announcePauseForAccessibility() {
         guard UIAccessibility.isVoiceOverRunning else {
             return

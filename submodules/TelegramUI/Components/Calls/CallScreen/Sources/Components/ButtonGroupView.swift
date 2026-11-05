@@ -300,6 +300,20 @@ final class ButtonGroupView: OverlayMaskContainerView {
             
             buttonTransition.setFrame(view: buttonView, frame: CGRect(origin: CGPoint(x: buttonX, y: buttonY), size: CGSize(width: buttonSize, height: buttonSize)))
             buttonView.update(size: CGSize(width: buttonSize, height: buttonSize), image: image, isSelected: isActive, isDestructive: isDestructive, isEnabled: button.isEnabled, title: title, transition: buttonTransition)
+            
+            // VoiceOver: подпись, состояние «выбрано» и значение (текущий аудиовыход).
+            let accessibility = ButtonGroupView.accessibilityInfo(content: button.content, strings: strings)
+            buttonView.isAccessibilityElement = true
+            buttonView.accessibilityLabel = accessibility.label
+            buttonView.accessibilityValue = accessibility.value
+            var traits: UIAccessibilityTraits = .button
+            if accessibility.isToggle && isActive {
+                traits.insert(.selected)
+            }
+            if !button.isEnabled {
+                traits.insert(.notEnabled)
+            }
+            buttonView.accessibilityTraits = traits
             buttonX += buttonSize + buttonSpacing
         }
         
@@ -318,5 +332,72 @@ final class ButtonGroupView: OverlayMaskContainerView {
         }
         
         return resultHeight
+    }
+    
+    private static func accessibilityInfo(content: Button.Content, strings: PresentationStrings) -> (label: String, value: String?, isToggle: Bool) {
+        let isRu = strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        switch content {
+        case let .speaker(audioOutput):
+            let value: String
+            switch audioOutput {
+            case .internalSpeaker:
+                value = isRu ? "Динамик телефона" : "Phone"
+            case .speaker:
+                value = strings.Call_AudioRouteSpeaker
+            case .headphones:
+                value = strings.Call_AudioRouteHeadphones
+            case .airpods:
+                value = "AirPods"
+            case .airpodsPro:
+                value = "AirPods Pro"
+            case .airpodsMax:
+                value = "AirPods Max"
+            case .bluetooth:
+                value = "Bluetooth"
+            }
+            switch audioOutput {
+            case .internalSpeaker, .speaker:
+                // Переключатель громкой связи: «выбрано» = громкая связь включена.
+                return (isRu ? "Громкая связь" : "Speaker", value, true)
+            default:
+                return (isRu ? "Аудиовыход" : "Audio output", value, false)
+            }
+        case .flipCamera:
+            return (isRu ? "Сменить камеру" : "Flip camera", nil, false)
+        case .video:
+            return (isRu ? "Камера" : "Camera", nil, true)
+        case .microphone:
+            return (isRu ? "Выключить микрофон" : "Mute microphone", nil, true)
+        case .end:
+            return (isRu ? "Завершить звонок" : "End call", nil, false)
+        }
+    }
+    
+    // VoiceOver: явный порядок — сначала уведомления (сверху вниз), затем кнопки
+    // слева направо (завершение звонка — последняя). Спрятанные/улетевшие за экран
+    // элементы не перечисляем.
+    override var accessibilityElements: [Any]? {
+        get {
+            var result: [Any] = []
+            let notices = self.noticeViews.values.filter { $0.superview === self && !$0.isHidden && $0.alpha > 0.01 }.sorted(by: { $0.frame.minY < $1.frame.minY })
+            result.append(contentsOf: notices)
+            if let closeButtonView = self.closeButtonView, closeButtonView.superview === self, !closeButtonView.isHidden, closeButtonView.alpha > 0.01 {
+                result.append(closeButtonView)
+            }
+            if let buttons = self.buttons {
+                for button in buttons {
+                    guard let buttonView = self.buttonViews[button.content.key] else {
+                        continue
+                    }
+                    if buttonView.isHidden || buttonView.alpha <= 0.01 || buttonView.frame.minY >= self.bounds.height {
+                        continue
+                    }
+                    result.append(buttonView)
+                }
+            }
+            return result
+        }
+        set {
+        }
     }
 }

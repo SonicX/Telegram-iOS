@@ -401,6 +401,66 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
         }
     }
     
+    // MARK: VoiceOver — «Расшифровать» как действие сообщения
+    // (просьба 2026-11: нужно слепоглухим; кнопка расшифровки скрыта от VO,
+    // чтобы двойной тап по сообщению играл голосовое).
+    
+    /// Есть ли у голосового расшифровка (видна кнопка «→А»).
+    public var voCanTranscribe: Bool {
+        return self.audioTranscriptionButton != nil
+    }
+    
+    private var voTranscriptionPollToken: Int = 0
+    
+    private func voCurrentTranscription() -> TranscribedText? {
+        guard let message = self.message else {
+            return nil
+        }
+        return self.forcedAudioTranscriptionText ?? transcribedText(message: message)
+    }
+    
+    /// Расшифровывает (или зачитывает готовую расшифровку) и озвучивает текст.
+    public func voTranscribe(isRu: Bool) {
+        if case let .success(text, isPending)? = self.voCurrentTranscription(), !isPending, !text.isEmpty {
+            if case .expanded = self.audioTranscriptionState {
+            } else {
+                self.transcribe()
+            }
+            UIAccessibility.post(notification: .announcement, argument: text)
+            return
+        }
+        UIAccessibility.post(notification: .announcement, argument: isRu ? "Расшифровка…" : "Transcribing…")
+        if case .inProgress = self.audioTranscriptionState {
+        } else {
+            self.transcribe()
+        }
+        self.voTranscriptionPollToken += 1
+        self.voPollTranscription(token: self.voTranscriptionPollToken, attempt: 0, isRu: isRu)
+    }
+    
+    private func voPollTranscription(token: Int, attempt: Int, isRu: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.voTranscriptionPollToken == token else {
+                return
+            }
+            switch self.voCurrentTranscription() {
+            case let .success(text, isPending)?:
+                if !isPending && !text.isEmpty {
+                    UIAccessibility.post(notification: .announcement, argument: text)
+                    return
+                }
+            case .error?:
+                UIAccessibility.post(notification: .announcement, argument: isRu ? "Не удалось расшифровать" : "Transcription failed")
+                return
+            case nil:
+                break
+            }
+            if attempt < 45 {
+                self.voPollTranscription(token: token, attempt: attempt + 1, isRu: isRu)
+            }
+        }
+    }
+    
     private func transcribe() {
         guard let arguments = self.arguments, let context = self.context, let message = self.message else {
             return

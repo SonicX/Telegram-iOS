@@ -261,6 +261,16 @@ final class CallControllerNodeV2: ViewControllerTracingNode, CallControllerNodeP
         })
     }
     
+    // VoiceOver: _ASDisplayView собирает элементы только из сабнод, а экран
+    // звонка (PrivateCallScreen) — обычная UIView, добавленная через addSubview,
+    // поэтому без этого VoiceOver не видел на экране ни одной кнопки.
+    @objc func customAccessibilityElements() -> [Any]? {
+        if self.callScreen.superview == nil {
+            return nil
+        }
+        return [self.callScreen]
+    }
+    
     deinit {
         self.peerAvatarDisposable?.dispose()
         self.isMicrophoneMutedDisposable?.dispose()

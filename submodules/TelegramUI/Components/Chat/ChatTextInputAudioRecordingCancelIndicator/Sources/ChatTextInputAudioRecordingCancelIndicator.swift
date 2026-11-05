@@ -40,7 +40,7 @@ public final class ChatTextInputAudioRecordingCancelIndicator: UIView, GlassBack
         self.cancelButton = HighlightableButtonNode()
         self.cancelButton.setTitle(strings.Common_Cancel, with: cancelFont, with: theme.chat.inputPanel.panelControlAccentColor, for: [])
         self.cancelButton.alpha = 0.0
-        self.cancelButton.accessibilityLabel = "Отменить запись"
+        self.cancelButton.accessibilityLabel = "Отменить"
         self.cancelButton.accessibilityHint = "Запись не будет отправлена"
         self.cancelButton.accessibilityTraits = [.button]
         

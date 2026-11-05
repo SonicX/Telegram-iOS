@@ -104,6 +104,9 @@ final class EmojiExpandedInfoView: OverlayMaskContainerView {
             }
         }
         self.actionButton.addTarget(self, action: #selector(self.actionButtonPressed), for: .touchUpInside)
+        // VoiceOver: заголовок кнопки нарисован в TextView — подписываем саму кнопку.
+        self.actionButton.accessibilityLabel = "OK"
+        self.actionButton.accessibilityTraits = .button
         
         self.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.tapGesture(_:))))
     }
