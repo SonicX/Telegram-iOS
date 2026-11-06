@@ -272,6 +272,7 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
             let textString: NSAttributedString
             var avatarPeer: EnginePeer?
             var avatarPeers: [EnginePeer] = []
+            var voTitleOverride: String?
             
             var okButtonLayout: (TextNodeLayout, () -> TextNode)?
             var cancelButtonLayout: (TextNodeLayout, () -> TextNode)?
@@ -351,6 +352,14 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
                     title = item.strings.ChatList_BirthdayMultipleTitle(Int32(peers.count))
                     text = item.strings.ChatList_BirthdayMultipleText
                 }
+                // VoiceOver: без эмодзи торта; при нескольких именинниках — их имена.
+                let isRu = item.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                let names = peers.map { $0.compactDisplayTitle }
+                if names.count == 1 {
+                    voTitleOverride = isRu ? "Сегодня день рождения у \(names[0])" : "It's \(names[0])'s birthday today"
+                } else {
+                    voTitleOverride = (isRu ? "Сегодня дни рождения: " : "Birthdays today: ") + names.joined(separator: ", ")
+                }
                 titleString = parseMarkdownIntoAttributedString(title, attributes: MarkdownAttributes(body: MarkdownAttributeSet(font: titleFont, textColor: item.theme.rootController.navigationBar.primaryTextColor), bold: MarkdownAttributeSet(font: titleFont, textColor: item.theme.rootController.navigationBar.accentTextColor), link: MarkdownAttributeSet(font: titleFont, textColor: item.theme.rootController.navigationBar.primaryTextColor), linkAttribute: { _ in return nil }))
                 textString = NSAttributedString(string: text, font: textFont, textColor: item.theme.rootController.navigationBar.secondaryTextColor)
                 avatarPeers = Array(peers.prefix(3))
@@ -422,7 +431,7 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
             return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
-                    strongSelf.voTitle = titleString.string
+                    strongSelf.voTitle = voTitleOverride ?? titleString.string
                     strongSelf.voText = textString.string
                     strongSelf.voHasChoiceButtons = okButtonLayout != nil && cancelButtonLayout != nil
                     
