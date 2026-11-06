@@ -127,6 +127,42 @@ import ChatSendStarsScreen
 import ChatSendAsContextMenu
 
 extension ChatControllerImpl {
+    /// VoiceOver: после кнопок «К упоминанию» / «К реакции» лента
+    /// прокручивалась, а курсор оставался на кнопке (отзыв 2026-11).
+    /// Ставим курсор на целевое сообщение тем же способом, что и после
+    /// контекстного меню: удержание цели + layoutChanged.
+    func voFocusMessageAfterNavigation(_ messageId: MessageId, attempt: Int = 0) {
+        guard UIAccessibility.isVoiceOverRunning, self.isNodeLoaded else {
+            return
+        }
+        let historyNode = self.chatDisplayNode.historyNode
+        var targetNode: ChatMessageItemView?
+        historyNode.forEachItemNode { itemNode in
+            if targetNode == nil, let itemNode = itemNode as? ChatMessageItemView, let item = itemNode.item {
+                if item.message.id == messageId || item.content.contains(where: { $0.0.id == messageId }) {
+                    targetNode = itemNode
+                }
+            }
+        }
+        guard let targetNode else {
+            // Узел ещё не появился (догрузка истории) — пробуем ещё раз.
+            if attempt < 6 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.voFocusMessageAfterNavigation(messageId, attempt: attempt + 1)
+                }
+            }
+            return
+        }
+        let target = historyNode.accessibilityFocusTarget(for: targetNode)
+        historyNode.accessibilityHoldInitialFocus(on: target, duration: 2.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak historyNode] in
+            guard let historyNode, historyNode.view.window != nil else {
+                return
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: target)
+        }
+    }
+
     func reloadChatLocation(chatLocation: ChatLocation, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>, historyNode: ChatHistoryListNodeImpl, apply: @escaping ((ContainedViewLayoutTransition?) -> Void) -> Void) {
         self.contentDataReady.set(false)
         
@@ -1346,7 +1382,9 @@ extension ChatControllerImpl {
                         switch result {
                             case let .result(messageId):
                                 if let messageId = messageId {
-                                    strongSelf.navigateToMessage(from: nil, to: .id(messageId, NavigateToMessageParams(timestamp: nil, quote: nil)))
+                                    strongSelf.navigateToMessage(from: nil, to: .id(messageId, NavigateToMessageParams(timestamp: nil, quote: nil)), completion: {
+                                        self?.voFocusMessageAfterNavigation(messageId)
+                                    })
                                 }
                             case .loading:
                                 break
@@ -1408,6 +1446,7 @@ extension ChatControllerImpl {
                                         guard let strongSelf = self else {
                                             return
                                         }
+                                        strongSelf.voFocusMessageAfterNavigation(messageId)
                                         strongSelf.chatDisplayNode.historyNode.forEachItemNode { itemNode in
                                             guard let itemNode = itemNode as? ChatMessageItemView, let item = itemNode.item else {
                                                 return

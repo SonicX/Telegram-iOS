@@ -8471,6 +8471,35 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             self.accessibilityExpectedTrailingFocusElement = expected
             self.accessibilityExpectedTrailingFocusTimestamp = CACurrentMediaTime()
         }
+        
+        // Профилактика «туда-сюда» в истории чата (лог 2026-11-06, 261038):
+        // свайп на сообщение → наш подскролл → iOS после сдвига контента
+        // ре-анкорит курсор на элемент, который МЫ последним ставили через
+        // layoutChanged (перепост рамки, начальный фокус) — это предыдущее
+        // сообщение; redirectScrollReboundIfNeeded возвращал курсор обратно,
+        // и человек слышал: цель → предыдущее → снова цель. Сразу после
+        // подскролла делаем запомненным саму цель: ре-анкору некуда откатывать.
+        // Только для истории чата (rotated): в корневых списках пост
+        // layoutChanged сам давал откаты (лог 2026-10-14).
+        else if self.rotated {
+            self.accessibilityRingRepostGeneration &+= 1
+            DispatchQueue.main.async { [weak self] in
+                guard let self, UIAccessibility.isVoiceOverRunning else {
+                    return
+                }
+                let _ = self.customAccessibilityElements()
+                guard let target = (self.accessibilityDirectionalElementPool[localIndex] ?? []).first(where: { $0.pinnedLocalIndex == localIndex && $0.sourceView?.window != nil }) else {
+                    return
+                }
+                // Курсор уже ушёл дальше (быстрые свайпы) — не возвращаем.
+                if let focused = UIAccessibility.focusedElement(using: nil) as? FocusTrackingAccessibilityElement, !self.accessibilityIsSameRow(focused, target) {
+                    return
+                }
+                voDiagLog("[VO-DIAG][SCROLL] pin-scrolled-target index=\(localIndex)")
+                self.accessibilityNotePostedFocus(target)
+                UIAccessibility.post(notification: .layoutChanged, argument: target)
+            }
+        }
 
         DispatchQueue.main.async { [weak self] in
             DispatchQueue.main.async { [weak self] in
