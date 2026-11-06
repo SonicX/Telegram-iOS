@@ -145,6 +145,95 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         self.zPosition = 1.0
     }
     
+    // MARK: VoiceOver
+    // Плашка над списком (день рождения, «Новый вход в аккаунт», Premium…):
+    // VoiceOver находил в ней лишь аватарку и крестик — два безымянных
+    // элемента (отзыв 2026-11). Делаем плашку одним элементом: заголовок +
+    // текст, двойной тап — открыть; «Скрыть» и «Да, это я / Нет» — действия.
+    private var voTitle: String = ""
+    private var voText: String = ""
+    private var voHasChoiceButtons: Bool = false
+    
+    override var isAccessibilityElement: Bool {
+        get {
+            return true
+        }
+        set {
+        }
+    }
+    
+    override var accessibilityLabel: String? {
+        get {
+            return self.voTitle.isEmpty ? nil : self.voTitle
+        }
+        set {
+        }
+    }
+    
+    override var accessibilityValue: String? {
+        get {
+            return self.voText.isEmpty ? nil : self.voText
+        }
+        set {
+        }
+    }
+    
+    override var accessibilityTraits: UIAccessibilityTraits {
+        get {
+            return self.voHasChoiceButtons ? .staticText : .button
+        }
+        set {
+        }
+    }
+    
+    /// Действия кладём на view: пул ListView копирует их оттуда.
+    private func voUpdateCustomActions() {
+        guard self.isNodeLoaded else {
+            return
+        }
+        self.view.accessibilityCustomActions = self.voMakeCustomActions()
+    }
+    
+    private func voMakeCustomActions() -> [UIAccessibilityCustomAction]? {
+        do {
+            guard let item = self.item else {
+                return nil
+            }
+            var actions: [UIAccessibilityCustomAction] = []
+            if self.voHasChoiceButtons {
+                actions.append(UIAccessibilityCustomAction(name: item.strings.ChatList_SessionReview_PanelConfirm, actionHandler: { [weak self] _ in
+                    self?.item?.action(.buttonChoice(isPositive: true))
+                    return true
+                }))
+                actions.append(UIAccessibilityCustomAction(name: item.strings.ChatList_SessionReview_PanelReject, actionHandler: { [weak self] _ in
+                    self?.item?.action(.buttonChoice(isPositive: false))
+                    return true
+                }))
+            }
+            if let closeButton = self.closeButton, !closeButton.isHidden {
+                let isRu = item.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                actions.append(UIAccessibilityCustomAction(name: isRu ? "Скрыть" : "Hide", actionHandler: { [weak self] _ in
+                    self?.item?.action(.hide)
+                    return true
+                }))
+            }
+            return actions.isEmpty ? nil : actions
+        }
+    }
+    
+    override func accessibilityActivate() -> Bool {
+        guard let item = self.item else {
+            return false
+        }
+        if self.voHasChoiceButtons {
+            // Без явного выбора ничего не делаем — выбор только действиями.
+            UIAccessibility.post(notification: .announcement, argument: item.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Выберите ответ в действиях: свайп вверх или вниз" : "Choose an answer in actions: swipe up or down")
+            return true
+        }
+        item.action(.activate)
+        return true
+    }
+    
     @objc private func closePressed() {
         guard let item = self.item else {
             return
@@ -333,6 +422,9 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
             return (layout, { [weak self = self] in
                 if let strongSelf = self {
                     strongSelf.item = item
+                    strongSelf.voTitle = titleString.string
+                    strongSelf.voText = textString.string
+                    strongSelf.voHasChoiceButtons = okButtonLayout != nil && cancelButtonLayout != nil
                     
                     if themeUpdated {
                         strongSelf.contentContainer.backgroundColor = item.theme.chatList.pinnedItemBackgroundColor
@@ -505,6 +597,13 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
                     
                     strongSelf.contentSize = layout.contentSize
                     strongSelf.insets = layout.insets
+                    
+                    // VoiceOver: аватарки и крестик — не отдельные элементы.
+                    strongSelf.avatarNode?.isAccessibilityElement = false
+                    strongSelf.avatarNode?.accessibilityElementsHidden = true
+                    strongSelf.avatarsNode?.accessibilityElementsHidden = true
+                    strongSelf.closeButton?.accessibilityElementsHidden = true
+                    strongSelf.voUpdateCustomActions()
                     
                     strongSelf.updateLayout(size: layout.contentSize, leftInset: params.leftInset, rightInset: params.rightInset)
                     
