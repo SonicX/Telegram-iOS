@@ -1526,14 +1526,24 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                             result += "\n\(item.presentationData.strings.VoiceOver_ChatList_MessageRead)"
                         }
                         result += "\n\(messageText)"
-                        // VoiceOver: значки «реакция» и «@» в строке чата —
-                        // в конце озвучки (просьба тестировщика 2026-10-17).
+                        // VoiceOver: «@» и реакции — СРАЗУ после названия чата, до
+                        // текста, и с количеством (отзыв 2026-11: в конце длинного
+                        // сообщения до них не добраться).
                         let locale = item.presentationData.strings.baseLanguageCode
-                        if peerData.hasUnseenReactions {
-                            result += "\n\(i18n("VoiceOver.ChatList.NewReactions", locale))"
+                        var badges: [String] = []
+                        if peerData.hasUnseenMentions || peerData.hasUnseenReactions {
+                            self.voEnsureUnseenCounts(item: item, peerId: peerData.peer.peerId, threadId: peerData.threadInfo?.id)
                         }
                         if peerData.hasUnseenMentions {
-                            result += "\n\(i18n("VoiceOver.ChatList.NewMentions", locale))"
+                            let title = i18n("VoiceOver.ChatList.NewMentions", locale)
+                            badges.append(self.voUnseenMentionCount > 0 ? "\(title): \(self.voUnseenMentionCount)" : title)
+                        }
+                        if peerData.hasUnseenReactions {
+                            let title = i18n("VoiceOver.ChatList.NewReactions", locale)
+                            badges.append(self.voUnseenReactionCount > 0 ? "\(title): \(self.voUnseenReactionCount)" : title)
+                        }
+                        if !badges.isEmpty {
+                            result = badges.joined(separator: "\n") + "\n" + result
                         }
                         return result
                     } else {
@@ -1756,6 +1766,30 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     
     deinit {
         self.cachedDataDisposable.dispose()
+        self.voUnseenCountsDisposable?.dispose()
+    }
+    
+    // VoiceOver: количество непросмотренных упоминаний и реакций — для
+    // озвучки «Вас упомянули: 2» (просьба 2026-11: раньше было лишь «есть»).
+    // Подписка заводится лениво, только у строк с «@»/реакцией.
+    private var voUnseenCountsDisposable: Disposable?
+    private var voUnseenCountsPeerId: EnginePeer.Id?
+    private var voUnseenMentionCount: Int32 = 0
+    private var voUnseenReactionCount: Int32 = 0
+    
+    private func voEnsureUnseenCounts(item: ChatListItem, peerId: EnginePeer.Id, threadId: Int64?) {
+        if self.voUnseenCountsPeerId == peerId {
+            return
+        }
+        self.voUnseenCountsPeerId = peerId
+        self.voUnseenMentionCount = 0
+        self.voUnseenReactionCount = 0
+        self.voUnseenCountsDisposable?.dispose()
+        self.voUnseenCountsDisposable = (item.context.account.viewTracker.unseenPersonalMessagesAndReactionCount(peerId: peerId, threadId: threadId)
+        |> deliverOnMainQueue).startStrict(next: { [weak self] mentionCount, reactionCount in
+            self?.voUnseenMentionCount = mentionCount
+            self?.voUnseenReactionCount = reactionCount
+        })
     }
     
     override public func secondaryAction(at point: CGPoint) {

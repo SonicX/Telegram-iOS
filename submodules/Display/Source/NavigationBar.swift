@@ -938,7 +938,10 @@ open class NavigationBar: ASDisplayNode {
     /// VoiceOver: счётчик непрочитанных на «Назад» — значением кнопки.
     private func updateBackButtonAccessibilityValue() {
         let text = self.badgeNode.isHidden ? "" : self.badgeNode.text
-        self.backButtonNode.accessibilityValue = text.isEmpty ? nil : text
+        // Голое «38» на «Назад» сбивало с толку (отзыв 2026-11) — поясняем.
+        // Счётчик — общий бейдж Telegram (с учётом настроек «Значок на иконке»).
+        let isRu = self.presentationData.strings.back.hasPrefix("Наз")
+        self.backButtonNode.accessibilityValue = text.isEmpty ? nil : ((isRu ? "непрочитанных: " : "unread: ") + text)
     }
     
     private func updateBadgeText(text: String?) {
