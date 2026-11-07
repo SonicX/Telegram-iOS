@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Open Gram — Review Login Code</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f5f5f7; --card:#fff; --fg:#1d1d1f; --muted:#6e6e73; --accent:#0a84ff; --err:#d70015; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#000; --card:#1c1c1e; --fg:#f5f5f7; --muted:#98989d; --err:#ff453a; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:32px 16px; }
+  .card { background:var(--card); border-radius:16px; padding:24px; }
+  h1 { font-size:24px; margin:0 0 8px; }
+  p { margin:0 0 16px; color:var(--muted); }
+  ol { margin:0 0 20px; padding-left:22px; color:var(--muted); }
+  label { display:block; font-weight:600; margin-bottom:6px; }
+  input { width:100%; box-sizing:border-box; font:inherit; padding:12px; border-radius:10px; border:1px solid var(--muted); background:transparent; color:var(--fg); }
+  button { margin-top:12px; width:100%; font:inherit; font-weight:600; padding:12px; border:0; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
+  #code { font:700 44px/1.2 ui-monospace, Menlo, monospace; letter-spacing:6px; text-align:center; margin:24px 0 4px; }
+  #status { text-align:center; min-height:1.5em; }
+  .err { color:var(--err) !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>Open Gram — login code for App Review</h1>
+    <p>Код входа для проверки App Store. Login codes are sent by Telegram and appear here automatically.</p>
+    <ol>
+      <li>In Open Gram, enter the demo phone number from the Review Notes.</li>
+      <li>Wait about 1 minute — the code is published here.</li>
+      <li>Enter the page password from the Review Notes and tap “Show code”.</li>
+    </ol>
+    <form id="form">
+      <label for="pass">Page password</label>
+      <input id="pass" type="password" autocomplete="current-password" required>
+      <button type="submit">Show code</button>
+    </form>
+    <div id="code" aria-live="polite"></div>
+    <div id="status" role="status"></div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+async function decrypt(data, pass) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", hash: "SHA-256", salt: b64(data.salt), iterations: data.iter },
+    base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(data.iv) }, key, b64(data.ct));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+function setStatus(text, isError) {
+  $("status").textContent = text;
+  $("status").className = isError ? "err" : "";
+}
+
+async function show() {
+  const pass = $("pass").value;
+  $("code").textContent = "";
+  setStatus("Loading…");
+  let payload;
+  try {
+    const resp = await fetch("code.json?t=" + Date.now(), { cache: "no-store" });
+    payload = await resp.json();
+  } catch (e) {
+    setStatus("No code yet. Request a code in the app, wait a minute and try again.", true);
+    return;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (!payload.data || payload.expires < now) {
+    setStatus("No fresh code. Request a new code in the app, wait about a minute and tap “Show code” again.", true);
+    return;
+  }
+  try {
+    const secret = await decrypt(payload.data, pass);
+    const ago = Math.max(0, Math.round((now - secret.received) / 60));
+    $("code").textContent = secret.code;
+    setStatus(ago === 0 ? "Received less than a minute ago." : `Received ${ago} min ago.`);
+  } catch (e) {
+    setStatus("Wrong page password.", true);
+  }
+}
+
+$("form").addEventListener("submit", (e) => { e.preventDefault(); show(); });
+</script>
+</body>
+</html>
