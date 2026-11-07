@@ -128,6 +128,11 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
     public final var isOpaqueWhenInOverlay: Bool = false
     public final var blocksBackgroundWhenInOverlay: Bool = false
     public final var acceptsFocusWhenInOverlay: Bool = false
+    /// VoiceOver: всплывающая подсказка не должна уводить курсор. Вместо
+    /// `.screenChanged(nil)` (iOS кидает курсор на первый элемент экрана —
+    /// кнопку «Назад») при показе произносится `voPresentationAnnouncement`.
+    public var voPresentationKeepsFocus: Bool = false
+    public var voPresentationAnnouncement: String?
     public final var automaticallyControlPresentationContextLayout: Bool = true
     public var updateTransitionWhenPresentedAsModal: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     

@@ -232,12 +232,12 @@ public final class PresentationContext {
                         strongSelf.updateViews()
                         controller.viewWillAppear(false)
                         if let controller = controller as? PresentableController {
-                            controller.viewDidAppear(completion: { [weak self] in
-                                self?.notifyAccessibilityScreenChanged()
+                            controller.viewDidAppear(completion: { [weak self, weak controller] in
+                                self?.notifyAccessibilityScreenChanged(for: controller)
                             })
                         } else {
                             controller.viewDidAppear(false)
-                            strongSelf.notifyAccessibilityScreenChanged()
+                            strongSelf.notifyAccessibilityScreenChanged(for: controller)
                         }
                     }
                 }
@@ -298,12 +298,12 @@ public final class PresentationContext {
                 controller.view.frame = controllerFrame
                 controller.containerLayoutUpdated(controllerLayout, transition: .immediate)
                 if let controller = controller as? PresentableController {
-                    controller.viewDidAppear(completion: { [weak self] in
-                        self?.notifyAccessibilityScreenChanged()
+                    controller.viewDidAppear(completion: { [weak self, weak controller] in
+                        self?.notifyAccessibilityScreenChanged(for: controller)
                     })
                 } else {
                     controller.viewDidAppear(false)
-                    self.notifyAccessibilityScreenChanged()
+                    self.notifyAccessibilityScreenChanged(for: controller)
                 }
             }
             self.updateViews()
@@ -335,7 +335,13 @@ public final class PresentationContext {
         self.updateStatusBar?(.animated(duration: 0.2, curve: .easeInOut))
     }
     
-    private func notifyAccessibilityScreenChanged() {
+    private func notifyAccessibilityScreenChanged(for controller: AnyObject?) {
+        if let controller = controller as? ViewController, controller.voPresentationKeepsFocus {
+            if let text = controller.voPresentationAnnouncement, !text.isEmpty, UIAccessibility.isVoiceOverRunning {
+                UIAccessibility.post(notification: .announcement, argument: text)
+            }
+            return
+        }
         UIAccessibility.post(notification: UIAccessibility.Notification.screenChanged, argument: nil)
     }
     

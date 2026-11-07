@@ -166,6 +166,9 @@ open class TooltipController: ViewController, StandalonePresentableController {
         super.init(navigationBarPresentationData: nil)
         
         self.statusBar.statusBarStyle = .Ignore
+        
+        self.voPresentationKeepsFocus = true
+        self.voPresentationAnnouncement = content.text
     }
     
     required public init(coder aDecoder: NSCoder) {

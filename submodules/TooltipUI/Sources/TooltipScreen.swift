@@ -1317,6 +1317,16 @@ public final class TooltipScreen: ViewController {
         super.init(navigationBarPresentationData: nil)
         
         self.statusBar.statusBarStyle = .Ignore
+        
+        self.voPresentationKeepsFocus = true
+        switch text {
+        case let .plain(text), let .entities(text, _):
+            self.voPresentationAnnouncement = text
+        case let .markdown(text):
+            self.voPresentationAnnouncement = text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "")
+        case let .attributedString(text):
+            self.voPresentationAnnouncement = text.string
+        }
     }
     
     required init(coder aDecoder: NSCoder) {

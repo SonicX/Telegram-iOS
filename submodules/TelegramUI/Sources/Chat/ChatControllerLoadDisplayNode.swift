@@ -131,7 +131,33 @@ extension ChatControllerImpl {
     /// прокручивалась, а курсор оставался на кнопке (отзыв 2026-11).
     /// Ставим курсор на целевое сообщение тем же способом, что и после
     /// контекстного меню: удержание цели + layoutChanged.
-    func voFocusMessageAfterNavigation(_ messageId: MessageId, attempt: Int = 0) {
+    /// «Ответить лично»: открыть личку с автором; при `attachReply` —
+    /// с ответом на сообщение группы (межчатовый reply, как «Ответить в
+    /// другом чате») и активным полем ввода.
+    func voReplyPrivately(message: Message, authorId: PeerId, attachReply: Bool) {
+        let replySubject = ChatInterfaceState.ReplyMessageSubject(messageId: message.id, quote: nil, todoItemId: nil)
+        let open: () -> Void = { [weak self] in
+            guard let self, let navigationController = self.effectiveNavigationController else {
+                return
+            }
+            let chatController = ChatControllerImpl(context: self.context, chatLocation: .peer(id: authorId))
+            chatController.activateInput(type: .text)
+            navigationController.pushViewController(chatController)
+        }
+        self.chatDisplayNode.dismissInput()
+        if attachReply {
+            let _ = (ChatInterfaceState.update(engine: self.context.engine, peerId: authorId, threadId: nil, { currentState in
+                return currentState.withUpdatedReplyMessageSubject(replySubject)
+            })
+            |> deliverOnMainQueue).startStandalone(completed: {
+                open()
+            })
+        } else {
+            open()
+        }
+    }
+
+    func voFocusMessageAfterNavigation(_ messageId: MessageId, attempt: Int = 0, maxAttempts: Int = 6) {
         guard UIAccessibility.isVoiceOverRunning, self.isNodeLoaded else {
             return
         }
@@ -146,9 +172,9 @@ extension ChatControllerImpl {
         }
         guard let targetNode else {
             // Узел ещё не появился (догрузка истории) — пробуем ещё раз.
-            if attempt < 6 {
+            if attempt < maxAttempts {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    self?.voFocusMessageAfterNavigation(messageId, attempt: attempt + 1)
+                    self?.voFocusMessageAfterNavigation(messageId, attempt: attempt + 1, maxAttempts: maxAttempts)
                 }
             }
             return
@@ -4556,6 +4582,38 @@ extension ChatControllerImpl {
             if strongSelf.controllerInteraction?.canSetupReply(message) == .reply {
                 result.append((strings.Conversation_ContextMenuReply, { [weak self] in
                     self?.controllerInteraction?.setupReply(message.id)
+                }))
+            }
+
+            let voIsRu = strings.baseLanguageCode.lowercased().hasPrefix("ru")
+
+            // «Ответить лично» (просьба тестировщиков 2026-11-07): из группы —
+            // в личку автору, с цитатой этого сообщения, если её можно
+            // переносить в другой чат (как «Ответить в другом чате»).
+            if !isAction, !isSendFailedOrUnsent, message.id.namespace == Namespaces.Message.Cloud,
+               let author = message.author as? TelegramUser, author.id != strongSelf.context.account.peerId, !author.isDeleted,
+               let chatPeer = message.peers[message.id.peerId], chatPeer is TelegramGroup || (chatPeer as? TelegramChannel).flatMap({ channel -> Bool in
+                   if case .group = channel.info { return true } else { return false }
+               }) == true {
+                let canQuoteElsewhere = !copyProtected && message.minAutoremoveOrClearTimeout != viewOnceTimeout
+                result.append((voIsRu ? "Ответить лично" : "Reply Privately", { [weak self] in
+                    self?.voReplyPrivately(message: message, authorId: author.id, attachReply: canQuoteElsewhere)
+                }))
+            }
+
+            // «Перейти к исходному сообщению» — к тому, на которое это ответ
+            // (просьба 2026-11-07). Курсор VoiceOver ставится на него.
+            if let replyAttribute = message.attributes.first(where: { $0 is ReplyMessageAttribute }) as? ReplyMessageAttribute {
+                let targetId = replyAttribute.messageId
+                result.append((voIsRu ? "Перейти к исходному сообщению" : "Go to Original Message", { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    let quote = replyAttribute.isQuote ? replyAttribute.quote.flatMap { NavigateToMessageParams.Quote(string: $0.text, offset: $0.offset) } : nil
+                    self.controllerInteraction?.navigateToMessage(message.id, targetId, NavigateToMessageParams(timestamp: nil, quote: quote, todoTaskId: replyAttribute.todoItemId))
+                    if targetId.peerId == message.id.peerId {
+                        self.voFocusMessageAfterNavigation(targetId, maxAttempts: 12)
+                    }
                 }))
             }
 

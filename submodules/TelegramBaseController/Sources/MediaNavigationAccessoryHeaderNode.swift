@@ -199,6 +199,29 @@ public final class MediaNavigationAccessoryHeaderNode: ASDisplayNode, ASScrollVi
             self.rateButton.accessibilityValue = playbackBaseRate.stringValue
             
              self.rateButton.setContent(.image(optionsRateImage(rate: playbackBaseRate.stringValue.uppercased(), color: self.theme.rootController.navigationBar.controlColor)))
+            self.voRefocusRateButtonIfNeeded()
+        }
+    }
+    
+    /// VoiceOver: после смены скорости кнопка перерисовывается, iOS теряет
+    /// курсор и цепляет элемент ленты далеко в истории — лента улетала к
+    /// ранним сообщениям (отзыв 2026-11-07). Возвращаем курсор на кнопку.
+    private var voRateRefocusDeadline: Double = 0.0
+    
+    private func voRefocusRateButtonIfNeeded() {
+        guard UIAccessibility.isVoiceOverRunning, CACurrentMediaTime() < self.voRateRefocusDeadline else {
+            return
+        }
+        for delay in [0.05, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.rateButton.view.window != nil, !self.rateButton.isHidden else {
+                    return
+                }
+                if let focused = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView, focused === self.rateButton.view {
+                    return
+                }
+                UIAccessibility.post(notification: .layoutChanged, argument: self.rateButton.view)
+            }
         }
     }
     
@@ -522,7 +545,9 @@ public final class MediaNavigationAccessoryHeaderNode: ASDisplayNode, ASScrollVi
         } else {
             nextRate = .x1_5
         }
+        self.voRateRefocusDeadline = CACurrentMediaTime() + 1.5
         self.setRate?(nextRate, changeType)
+        self.voRefocusRateButtonIfNeeded()
         
         let frame = self.rateButton.view.convert(self.rateButton.bounds, to: nil)
         
