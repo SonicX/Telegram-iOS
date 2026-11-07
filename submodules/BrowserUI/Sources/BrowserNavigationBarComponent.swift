@@ -304,7 +304,7 @@ final class BrowserNavigationBarComponent: CombinedComponent {
                         action: {
                             activateAction()
                         }
-                    ),
+                    ).withAccessibilityLabel((Locale.preferredLanguages.first ?? "").lowercased().hasPrefix("ru") ? "Показать панель" : "Show Panel"),
                     availableSize: size,
                     transition: .immediate
                 )
@@ -418,15 +418,18 @@ private final class LoadingProgressComponent: Component {
 final class ReferenceButtonComponent: Component {
     let content: AnyComponent<Empty>
     let tag: AnyObject?
+    let accessibilityLabel: String?
     let action: () -> Void
     
     init(
         content: AnyComponent<Empty>,
         tag: AnyObject? = nil,
+        accessibilityLabel: String? = nil,
         action: @escaping () -> Void
     ) {
         self.content = content
         self.tag = tag
+        self.accessibilityLabel = accessibilityLabel
         self.action = action
     }
     
@@ -493,6 +496,7 @@ final class ReferenceButtonComponent: Component {
 
         func update(component: ReferenceButtonComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             self.component = component
+            self.accessibilityLabel = component.accessibilityLabel
             
             let componentSize = self.componentView.update(
                 transition: transition,

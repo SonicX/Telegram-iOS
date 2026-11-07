@@ -1484,6 +1484,9 @@ public class GalleryController: ViewController, StandalonePresentableController,
         self.galleryNode.galleryController = { [weak self] in
             return self
         }
+        self.galleryNode.dismissFromAccessibility = { [weak self] in
+            self?.dismiss(forceAway: false)
+        }
         
         var displayInfoOnTop = false
         if case .custom = source {

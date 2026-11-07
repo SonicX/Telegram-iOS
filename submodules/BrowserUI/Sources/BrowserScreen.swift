@@ -239,6 +239,7 @@ private final class BrowserScreenComponent: CombinedComponent {
                                         )
                                     ),
                                     tag: settingsTag,
+                                    accessibilityLabel: environment.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Ещё" : "More",
                                     action: {
                                         performAction.invoke(.openSettings)
                                     }

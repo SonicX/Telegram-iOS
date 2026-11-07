@@ -106,6 +106,15 @@ public final class ContextReferenceButtonComponent: Component {
                 transition.setFrame(view: componentView, frame: CGRect(origin: CGPoint(x: floor((size.width - componentSize.width) / 2.0), y: floor((size.height - componentSize.height) / 2.0)), size: componentSize))
             }
             
+            // VoiceOver: подпись из иконки, если снаружи не задана.
+            if let componentView = self.componentView.view {
+                if let label = componentView.accessibilityLabel ?? componentView.voDescendantAccessibilityLabel(), !label.isEmpty {
+                    self.buttonView.isAccessibilityElement = true
+                    self.buttonView.accessibilityLabel = label
+                    self.buttonView.accessibilityTraits = .button
+                }
+            }
+            
             transition.setFrame(view: self.buttonView.view, frame: CGRect(origin: .zero, size: size))
             transition.setFrame(view: self.sourceView.view, frame: CGRect(origin: .zero, size: size))
             transition.setFrame(view: self.contextContentView.view, frame: CGRect(origin: .zero, size: size))

@@ -343,6 +343,10 @@ final class AddressBarContentComponent: Component {
             
             transition.setFrame(view: self.cancelButton, frame: CGRect(origin: CGPoint(x: backgroundFrame.maxX, y: 0.0), size: CGSize(width: cancelButtonSpacing + cancelTextSize.width, height: size.height)))
             self.cancelButton.isUserInteractionEnabled = isActiveWithText && !isTablet
+            // VoiceOver: невидимые кнопки не должны попадать под курсор пустыми областями.
+            self.cancelButton.isAccessibilityElement = isActiveWithText && !isTablet
+            self.cancelButton.accessibilityLabel = strings.Common_Cancel
+            self.cancelButton.accessibilityElementsHidden = !(isActiveWithText && !isTablet)
             
             let textX: CGFloat = backgroundFrame.minX + sideInset
             let textFrame = CGRect(origin: CGPoint(x: textX, y: backgroundFrame.minY), size: CGSize(width: backgroundFrame.maxX - textX, height: backgroundFrame.height))
@@ -412,6 +416,9 @@ final class AddressBarContentComponent: Component {
                 transition.setFrame(view: self.clearIconButton, frame: iconFrame.insetBy(dx: -8.0, dy: -10.0))
                 transition.setAlpha(view: self.clearIconView, alpha: isActiveWithText ? 1.0 : 0.0)
                 self.clearIconButton.isUserInteractionEnabled = isActiveWithText
+                self.clearIconButton.isAccessibilityElement = isActiveWithText
+                self.clearIconButton.accessibilityElementsHidden = !isActiveWithText
+                self.clearIconButton.accessibilityLabel = strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Очистить" : "Clear"
             }
             
             if let cancelButtonTitleComponentView = self.cancelButtonTitle.view {

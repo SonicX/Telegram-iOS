@@ -20,6 +20,8 @@ class ChatListNoticeItem: ListViewItem {
         case activate
         case hide
         case buttonChoice(isPositive: Bool)
+        /// VoiceOver: открыть чат (плашка дня рождения).
+        case openPeer(EnginePeer)
     }
     
     let context: AccountContext
@@ -200,6 +202,21 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
                 return nil
             }
             var actions: [UIAccessibilityCustomAction] = []
+            let isRuLang = item.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            if case let .birthdayPremiumGift(peers, _) = item.notice {
+                // Двойной тап открывает чат с первым именинником; остальные — здесь.
+                for peer in peers.dropFirst().prefix(10) {
+                    let name = peer.displayTitle(strings: item.strings, displayOrder: .firstLast)
+                    actions.append(UIAccessibilityCustomAction(name: (isRuLang ? "Написать: " : "Message: ") + name, actionHandler: { [weak self] _ in
+                        self?.item?.action(.openPeer(peer))
+                        return true
+                    }))
+                }
+                actions.append(UIAccessibilityCustomAction(name: isRuLang ? "Подарить подарок" : "Send a Gift", actionHandler: { [weak self] _ in
+                    self?.item?.action(.activate)
+                    return true
+                }))
+            }
             if self.voHasChoiceButtons {
                 actions.append(UIAccessibilityCustomAction(name: item.strings.ChatList_SessionReview_PanelConfirm, actionHandler: { [weak self] _ in
                     self?.item?.action(.buttonChoice(isPositive: true))
@@ -228,6 +245,11 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         if self.voHasChoiceButtons {
             // Без явного выбора ничего не делаем — выбор только действиями.
             UIAccessibility.post(notification: .announcement, argument: item.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Выберите ответ в действиях: свайп вверх или вниз" : "Choose an answer in actions: swipe up or down")
+            return true
+        }
+        if case let .birthdayPremiumGift(peers, _) = item.notice, let peer = peers.first {
+            // Экран подарков незрячим почти не нужен (и не подписан) — открываем чат.
+            item.action(.openPeer(peer))
             return true
         }
         item.action(.activate)
@@ -273,6 +295,7 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
             var avatarPeer: EnginePeer?
             var avatarPeers: [EnginePeer] = []
             var voTitleOverride: String?
+            var voTextOverride: String?
             
             var okButtonLayout: (TextNodeLayout, () -> TextNode)?
             var cancelButtonLayout: (TextNodeLayout, () -> TextNode)?
@@ -354,11 +377,13 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
                 }
                 // VoiceOver: без эмодзи торта; при нескольких именинниках — их имена.
                 let isRu = item.strings.baseLanguageCode.lowercased().hasPrefix("ru")
-                let names = peers.map { $0.compactDisplayTitle }
+                let names = peers.map { $0.displayTitle(strings: item.strings, displayOrder: .firstLast) }
                 if names.count == 1 {
                     voTitleOverride = isRu ? "Сегодня день рождения у \(names[0])" : "It's \(names[0])'s birthday today"
+                    voTextOverride = isRu ? "Двойной тап — открыть чат. Подарок — в действиях" : "Double tap to open chat. Gift is in actions"
                 } else {
                     voTitleOverride = (isRu ? "Сегодня дни рождения: " : "Birthdays today: ") + names.joined(separator: ", ")
+                    voTextOverride = isRu ? "Двойной тап — чат с \(names[0]). Остальные и подарок — в действиях" : "Double tap to open chat with \(names[0]). Others and gift are in actions"
                 }
                 titleString = parseMarkdownIntoAttributedString(title, attributes: MarkdownAttributes(body: MarkdownAttributeSet(font: titleFont, textColor: item.theme.rootController.navigationBar.primaryTextColor), bold: MarkdownAttributeSet(font: titleFont, textColor: item.theme.rootController.navigationBar.accentTextColor), link: MarkdownAttributeSet(font: titleFont, textColor: item.theme.rootController.navigationBar.primaryTextColor), linkAttribute: { _ in return nil }))
                 textString = NSAttributedString(string: text, font: textFont, textColor: item.theme.rootController.navigationBar.secondaryTextColor)
@@ -432,7 +457,7 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
                 if let strongSelf = self {
                     strongSelf.item = item
                     strongSelf.voTitle = voTitleOverride ?? titleString.string
-                    strongSelf.voText = textString.string
+                    strongSelf.voText = voTextOverride ?? textString.string
                     strongSelf.voHasChoiceButtons = okButtonLayout != nil && cancelButtonLayout != nil
                     
                     if themeUpdated {

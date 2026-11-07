@@ -295,6 +295,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     let chatWallpaperPromise = Promise<TelegramWallpaper?>()
     
     var chatTitleView: ChatTitleView?
+    var voDidFocusTitleOnFirstAppear = false
     var leftNavigationButton: ChatNavigationButton?
     var rightNavigationButton: ChatNavigationButton?
     var secondaryRightNavigationButton: ChatNavigationButton?
@@ -6907,7 +6908,16 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         super.viewDidAppear(animated)
         
         if shouldPostVoiceOverScreenChangedOnAppear(isVoiceOverRunning: UIAccessibility.isVoiceOverRunning) {
-            self.chatDisplayNode.historyNode.postAccessibilityFocusOnAppear(preferredIdentifier: "chat.unreadMessages")
+            if SGSimpleSettings.shared.voChatOpenFocusUnread {
+                self.chatDisplayNode.historyNode.postAccessibilityFocusOnAppear(preferredIdentifier: "chat.unreadMessages")
+            } else if !self.voDidFocusTitleOnFirstAppear {
+                // Как в официальном клиенте: курсор на название чата, ленту не трогаем.
+                // Только при первом показе — при возврате iOS сама вернёт курсор.
+                self.voDidFocusTitleOnFirstAppear = true
+                if let chatTitleView = self.chatTitleView, chatTitleView.window != nil {
+                    UIAccessibility.post(notification: .layoutChanged, argument: chatTitleView)
+                }
+            }
         }
 
         // VoiceOver: при переходе в чат с подготовленной пересылкой (forward-

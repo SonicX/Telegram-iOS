@@ -792,6 +792,8 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                         }
                     case .hide:
                         nodeInteraction?.dismissNotice(notice)
+                    case let .openPeer(peer):
+                        nodeInteraction?.peerSelected(peer, nil, nil, nil, false)
                     case let .buttonChoice(isPositive):
                         switch notice {
                         case let .reviewLogin(newSessionReview, _):
@@ -1144,6 +1146,8 @@ private func mappedUpdateEntries(context: AccountContext, nodeInteraction: ChatL
                         }
                     case .hide:
                         nodeInteraction?.dismissNotice(notice)
+                    case let .openPeer(peer):
+                        nodeInteraction?.peerSelected(peer, nil, nil, nil, false)
                     case let .buttonChoice(isPositive):
                         switch notice {
                         case let .reviewLogin(newSessionReview, _):

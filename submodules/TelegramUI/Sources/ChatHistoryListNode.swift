@@ -6815,6 +6815,10 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                     if let location = strongSelf.chatHistoryLocationValue?.content, case .Initial = location {
                         isPlainInitialOpen = true
                     }
+                    // Настройка «Курсор на непрочитанное при открытии чата» (выкл. по умолчанию).
+                    if !SGSimpleSettings.shared.voChatOpenFocusUnread {
+                        isPlainInitialOpen = false
+                    }
                     if isPlainInitialOpen {
                         // Цель выбираем СРАЗУ после первой транзакции (строки
                         // уже на месте — Telegram сам ставит плашку на экран) и

@@ -379,6 +379,9 @@ public class InstantPageGalleryController: ViewController, StandalonePresentable
         })
         self.displayNode = GalleryControllerNode(context: self.context,controllerInteraction: controllerInteraction)
         self.displayNodeDidLoad()
+        self.galleryNode.dismissFromAccessibility = { [weak self] in
+            self?.dismiss(forceAway: false)
+        }
         
         self.galleryNode.statusBar = self.statusBar
         self.galleryNode.navigationBar = self.navigationBar

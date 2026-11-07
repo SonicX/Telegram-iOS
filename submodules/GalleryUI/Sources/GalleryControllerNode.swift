@@ -37,6 +37,9 @@ open class GalleryControllerNode: ASDisplayNode, ASScrollViewDelegate, ASGesture
     public var completeCustomDismiss: (Bool) -> Void = { _ in }
     public var baseNavigationController: () -> NavigationController? = { return nil }
     public var galleryController: () -> ViewController? = { return nil }
+    /// VoiceOver: закрытие жестом «назад» (Z двумя пальцами). Галерея показана поверх окна,
+    /// без навигации, поэтому общий dismiss(animated:) её не закрывает.
+    public var dismissFromAccessibility: (() -> Void)?
     
     private var presentationState = GalleryControllerPresentationState()
     
@@ -587,6 +590,10 @@ open class GalleryControllerNode: ASDisplayNode, ASScrollViewDelegate, ASGesture
     }
     
     open override func accessibilityPerformEscape() -> Bool {
+        if let dismissFromAccessibility = self.dismissFromAccessibility {
+            dismissFromAccessibility()
+            return true
+        }
         if let controller = self.galleryController() {
             controller.dismiss(animated: true)
             return true

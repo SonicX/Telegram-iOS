@@ -96,6 +96,7 @@ public class SGSimpleSettings {
         case quickTranslateButton
         case outgoingLanguageTranslation
         case hideReactions
+        case voChatOpenFocusUnread
         case showRepostToStory
         case showRepostToStoryV2
         case contextShowSelectFromUser
@@ -241,6 +242,7 @@ public class SGSimpleSettings {
         Keys.quickTranslateButton.rawValue: false,
         Keys.outgoingLanguageTranslation.rawValue: [:],
         Keys.hideReactions.rawValue: false,
+        Keys.voChatOpenFocusUnread.rawValue: false,
         Keys.showRepostToStory.rawValue: true,
         Keys.contextShowSelectFromUser.rawValue: true,
         Keys.contextShowSaveToCloud.rawValue: true,
@@ -361,6 +363,11 @@ public class SGSimpleSettings {
     
     @UserDefault(key: Keys.hideReactions.rawValue)
     public var hideReactions: Bool
+    
+    /// VoiceOver: при открытии чата ставить курсор на первое непрочитанное.
+    /// По умолчанию выключено — как в официальном клиенте курсор не трогаем.
+    @UserDefault(key: Keys.voChatOpenFocusUnread.rawValue)
+    public var voChatOpenFocusUnread: Bool
 
     // @available(*, deprecated, message: "Use showRepostToStoryV2 instead")
     @UserDefault(key: Keys.showRepostToStory.rawValue)

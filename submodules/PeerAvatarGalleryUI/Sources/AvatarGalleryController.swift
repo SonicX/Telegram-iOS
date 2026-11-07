@@ -633,6 +633,9 @@ public class AvatarGalleryController: ViewController, StandalonePresentableContr
         })
         self.displayNode = GalleryControllerNode(context: self.context, controllerInteraction: controllerInteraction)
         self.displayNodeDidLoad()
+        self.galleryNode.dismissFromAccessibility = { [weak self] in
+            self?.dismiss(forceAway: false)
+        }
         
         self.galleryNode.pager.updateOnReplacement = true
         self.galleryNode.statusBar = self.statusBar

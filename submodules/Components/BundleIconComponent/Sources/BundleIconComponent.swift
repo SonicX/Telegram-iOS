@@ -48,6 +48,27 @@ public final class BundleIconComponent: Component {
         return true
     }
     
+    /// VoiceOver: подписи для иконок, которые используются в кнопках без текста.
+    public static func voLabel(forIconName name: String) -> String? {
+        let isRu = (Locale.preferredLanguages.first ?? "").lowercased().hasPrefix("ru")
+        let labels: [String: (String, String)] = [
+            "Instant View/Back": ("Назад", "Back"),
+            "Instant View/Forward": ("Вперёд", "Forward"),
+            "Instant View/Bookmark": ("Закладки", "Bookmarks"),
+            "Instant View/Browser": ("Открыть в браузере", "Open in Browser"),
+            "Instant View/OpenDocument": ("Открыть документ", "Open Document"),
+            "Chat List/NavigationShare": ("Поделиться", "Share"),
+            "Chat List/SearchIcon": ("Поиск", "Search"),
+            "Chat/Input/Search/DownButton": ("Следующий результат", "Next Result"),
+            "Chat/Input/Search/UpButton": ("Предыдущий результат", "Previous Result"),
+            "Media Gallery/PictureInPictureButton": ("Картинка в картинке", "Picture in Picture"),
+        ]
+        guard let pair = labels[name] else {
+            return nil
+        }
+        return isRu ? pair.0 : pair.1
+    }
+    
     public final class View: UIImageView {
         private var component: BundleIconComponent?
         
@@ -84,6 +105,8 @@ public final class BundleIconComponent: Component {
                 }
             }
             self.component = component
+            // VoiceOver: сама иконка не элемент, но кнопка без подписи берёт подпись отсюда.
+            self.accessibilityLabel = BundleIconComponent.voLabel(forIconName: component.name)
             
             var imageSize = self.image?.size ?? CGSize()
             if let maxSize = component.maxSize {

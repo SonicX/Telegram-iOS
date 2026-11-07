@@ -27,6 +27,7 @@ import UndoUI
 
 private enum SGControllerSection: Int32, SGItemListSection {
     case search
+    case voiceOver
     case trending
     case content
     case tabs
@@ -65,6 +66,7 @@ private enum SGBoolSetting: String {
     case disableDeleteChatSwipeOption
     case quickTranslateButton
     case hideReactions
+    case voChatOpenFocusUnread
     case showRepostToStory
     case contextShowSelectFromUser
     case contextShowSaveToCloud
@@ -149,6 +151,11 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     
     entries.append(.searchInput(id: id.count, section: .search, title: NSAttributedString(string: "🔍"), text: state.searchQuery ?? "", placeholder: strings.Common_Search))
     
+    
+    let voIsRu = lang.lowercased().hasPrefix("ru")
+    entries.append(.header(id: id.count, section: .voiceOver, text: "VoiceOver", badge: nil))
+    entries.append(.toggle(id: id.count, section: .voiceOver, settingName: .voChatOpenFocusUnread, value: SGSimpleSettings.shared.voChatOpenFocusUnread, text: voIsRu ? "Курсор на непрочитанное при открытии чата" : "Focus first unread when opening a chat", enabled: true))
+    entries.append(.notice(id: id.count, section: .voiceOver, text: voIsRu ? "Выключено — как в официальном Telegram: курсор встаёт на название чата, лента прокручена к непрочитанному, коснитесь середины экрана. Включено — курсор сам переходит на первое непрочитанное сообщение." : "Off — like official Telegram: focus stays on the chat title, the list is scrolled to unread messages. On — focus moves to the first unread message."))
     
     if SGSimpleSettings.shared.canUseNY {
         entries.append(.header(id: id.count, section: .trending, text: i18n("Settings.NY.Header", lang), badge: newStr))
@@ -440,6 +447,8 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
             SGSimpleSettings.shared.uploadSpeedBoost = value
         case .hideReactions:
             SGSimpleSettings.shared.hideReactions = value
+        case .voChatOpenFocusUnread:
+            SGSimpleSettings.shared.voChatOpenFocusUnread = value
         case .showRepostToStory:
             SGSimpleSettings.shared.showRepostToStoryV2 = value
         case .contextShowSelectFromUser:

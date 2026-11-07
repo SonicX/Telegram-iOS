@@ -358,6 +358,12 @@ public final class Button: Component {
                     self.accessibilityLabel = text
                     self.autoAccessibilityLabel = text
                 }
+            } else if let text = self.contentView.voDescendantAccessibilityLabel(), !text.isEmpty {
+                // Иконка с известной подписью (BundleIconComponent).
+                if self.accessibilityLabel == nil || self.accessibilityLabel == self.autoAccessibilityLabel {
+                    self.accessibilityLabel = text
+                    self.autoAccessibilityLabel = text
+                }
             }
             
             transition.setFrame(view: self.contentView, frame: CGRect(origin: CGPoint(x: floor((size.width - contentSize.width) / 2.0), y: floor((size.height - contentSize.height) / 2.0)), size: contentSize), completion: nil)
@@ -372,5 +378,27 @@ public final class Button: Component {
     
     public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
+    }
+}
+
+public extension UIView {
+    /// VoiceOver: первая подпись среди вложенных view, которые сами не элементы
+    /// (например, иконка внутри кнопки). Глубина ограничена, чтобы не зацепить чужое.
+    func voDescendantAccessibilityLabel(depth: Int = 3) -> String? {
+        if depth < 0 {
+            return nil
+        }
+        for subview in self.subviews {
+            if subview.isHidden || subview.isAccessibilityElement {
+                continue
+            }
+            if let label = subview.accessibilityLabel, !label.isEmpty {
+                return label
+            }
+            if let label = subview.voDescendantAccessibilityLabel(depth: depth - 1) {
+                return label
+            }
+        }
+        return nil
     }
 }
