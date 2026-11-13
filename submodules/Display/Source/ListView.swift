@@ -7116,6 +7116,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         if let fromIndex, self.redirectSpontaneousJumpIfNeeded(focusedFrame: focusedData.frame, toIndex: toIndex, fromIndex: fromIndex, elementData: elementData.map { ($0.index, $0.element) }) {
             return
         }
+        if self.redirectFocusAfterItemRemovalIfNeeded(focusedAny: focusedAny, elementData: elementData.map { ($0.index, $0.element) }) {
+            return
+        }
         if let fromIndex, toIndex < fromIndex - 1,
            focusedAny is FocusTrackingAccessibilityElement,
            let previousSourceView = (elementData.first(where: { $0.index == fromIndex })?.element as? FocusTrackingAccessibilityElement)?.sourceView,
@@ -8872,6 +8875,44 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             let _ = self.customAccessibilityElements()
             self.accessibilityNotePostedFocus(previous)
             UIAccessibility.post(notification: .layoutChanged, argument: previous)
+        }
+        return true
+    }
+
+    /// Курсор после удаления элемента, на котором он стоял (удаление через
+    /// меню сообщения в «Избранном», отзыв 2026-11-13). Пока открыт лист
+    /// действий, элемент удалённого сообщения уходит из пула, и при закрытии
+    /// листа iOS сажает курсор на случайный элемент далеко за экраном, а
+    /// список скроллится к нему. Владелец списка по локальному индексу нового
+    /// фокуса возвращает индекс соседа удалённого элемента (или nil — фокус
+    /// естественный), и курсор ставится туда.
+    public var accessibilityFocusRedirectAfterRemoval: ((Int) -> Int?)?
+
+    private func redirectFocusAfterItemRemovalIfNeeded(focusedAny: Any, elementData: [(Int, UIAccessibilityElement)]) -> Bool {
+        guard let provider = self.accessibilityFocusRedirectAfterRemoval,
+              let focused = focusedAny as? FocusTrackingAccessibilityElement,
+              let localIndex = focused.pinnedLocalIndex else {
+            return false
+        }
+        guard CACurrentMediaTime() - voAccessibilityLastTouchExplorationTimestamp > 0.7 else {
+            return false
+        }
+        guard let targetIndex = provider(localIndex), targetIndex != localIndex else {
+            return false
+        }
+        guard let target = elementData.first(where: { ($0.1 as? FocusTrackingAccessibilityElement)?.pinnedLocalIndex == targetIndex })?.1 as? FocusTrackingAccessibilityElement else {
+            voDiagLog("[VO-DIAG][JUMP] removal-redirect-miss from=\(localIndex) to=\(targetIndex)")
+            return false
+        }
+        voDiagLog("[VO-DIAG][JUMP] removal-redirect from=\(localIndex) to=\(targetIndex) «\(String((target.accessibilityLabel ?? "-").prefix(24)))»")
+        self.accessibilityRingRepostGeneration &+= 1
+        DispatchQueue.main.async { [weak self, weak target] in
+            guard let self, let target, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            let _ = self.customAccessibilityElements()
+            self.accessibilityNotePostedFocus(target)
+            UIAccessibility.post(notification: .layoutChanged, argument: target)
         }
         return true
     }

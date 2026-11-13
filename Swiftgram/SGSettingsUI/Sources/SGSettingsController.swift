@@ -371,6 +371,10 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
               return updatedState
           }
         },*/ setBoolValue: { setting, value in
+        // Перестраиваем список после любого переключения: без этого под
+        // VoiceOver переключатель визуально и для VO оставался в старом
+        // положении до повторного входа в раздел (отзыв 2026-11-13).
+        defer { simplePromise.set(true) }
         switch setting {
         case .hidePhoneInSettings:
             SGSimpleSettings.shared.hidePhoneInSettings = value

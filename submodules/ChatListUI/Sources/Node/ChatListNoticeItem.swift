@@ -188,6 +188,14 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         }
     }
     
+    /// Раскладка могла пройти ДО загрузки view (асинхронный layout) — тогда
+    /// действия не ставились, и плашка дня рождения случайно оказывалась
+    /// «просто кнопкой» без действий (отзыв 2026-11-13). Ставим их и здесь.
+    override func didLoad() {
+        super.didLoad()
+        self.voUpdateCustomActions()
+    }
+    
     /// Действия кладём на view: пул ListView копирует их оттуда.
     private func voUpdateCustomActions() {
         guard self.isNodeLoaded else {

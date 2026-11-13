@@ -1010,6 +1010,38 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             } else {
                 result.insert(bar, at: barIndex)
             }
+            // Панель тем форума («Все», «Гостиная»…) — сразу после навбара:
+            // по координатам она шла ПЕРЕД лентой, и свайпами до неё было не
+            // дойти — выше вся загруженная история (отзыв 2026-11-13, группа
+            // с темами вкладками: «тем нигде не видно»).
+            if self.floatingTopicsPanel != nil, self.floatingTopicsPanelContainer.isNodeLoaded {
+                let topicsView = self.floatingTopicsPanelContainer.view
+                let isTopicsElement: (Any) -> Bool = { element in
+                    let view: UIView?
+                    if let element = element as? UIView {
+                        view = element
+                    } else if let node = element as? ASDisplayNode, node.isNodeLoaded {
+                        view = node.view
+                    } else if let element = element as? UIAccessibilityElement {
+                        view = element.accessibilityContainer as? UIView
+                    } else {
+                        view = nil
+                    }
+                    if let view {
+                        return view === topicsView || view.isDescendant(of: topicsView)
+                    }
+                    return false
+                }
+                let topicsElements = result.filter(isTopicsElement)
+                if !topicsElements.isEmpty {
+                    result.removeAll(where: isTopicsElement)
+                    if let newBarIndex = result.firstIndex(where: { ($0 as AnyObject) === barView }) {
+                        result.insert(contentsOf: topicsElements, at: newBarIndex + 1)
+                    } else {
+                        result.append(contentsOf: topicsElements)
+                    }
+                }
+            }
             if self.voLastOrderLogged != true {
                 self.voLastOrderLogged = true
                 voDiagLog("[VO-DIAG][ORDER] chat history→navbar count=\(result.count)")
@@ -1131,6 +1163,10 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             // легитимен: без этого recovery утаскивал бы курсор с кнопки
             // обратно на сообщение в первые 1.5 с после ухода из ленты.
             if self.navigateButtons.isNodeLoaded, focusedView.isDescendant(of: self.navigateButtons.view) {
+                return true
+            }
+            // Панель тем форума (вкладки «Все», «Гостиная»…) — осознанная цель.
+            if self.floatingTopicsPanelContainer.isNodeLoaded, focusedView.isDescendant(of: self.floatingTopicsPanelContainer.view) {
                 return true
             }
             // Фокус на поле ввода или любом элементе тулбара (потомке панели)

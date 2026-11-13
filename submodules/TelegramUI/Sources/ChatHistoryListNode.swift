@@ -517,6 +517,9 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         let timestamp: Double
         let entriesCount: Int
         let description: String
+        /// Соседние сообщения в момент фокуса: сначала более новое, потом
+        /// более старое — куда ставить курсор, если это сообщение удалят.
+        var neighborStableIds: [UInt64] = []
     }
     private var voFocusJumpLastState: VoFocusJumpState?
     public var originalHistoryView: MessageHistoryView? {
@@ -1122,6 +1125,9 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         // (тестировщик отправляет «Отправить логи»).
         self.accessibilityDidFocusItemAtLocalIndex = { [weak self] localIndex in
             self?.voDetectFocusJump(localIndex: localIndex)
+        }
+        self.accessibilityFocusRedirectAfterRemoval = { [weak self] localIndex in
+            return self?.voFocusRedirectAfterRemoval(localIndex: localIndex)
         }
         
         self.accessibilityScrollPositionAnnouncement = { [weak self] in
@@ -7162,7 +7168,14 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
         let now = CACurrentMediaTime()
         let description = voFocusJumpDescription(entry)
         let previous = self.voFocusJumpLastState
-        self.voFocusJumpLastState = VoFocusJumpState(stableId: entry.stableId, timestamp: now, entriesCount: entries.count, description: description)
+        var neighborStableIds: [UInt64] = []
+        if let newer = entries[(position + 1)...].first(where: { Self.voIsMessageEntry($0) }) {
+            neighborStableIds.append(newer.stableId)
+        }
+        if let older = entries[..<position].last(where: { Self.voIsMessageEntry($0) }) {
+            neighborStableIds.append(older.stableId)
+        }
+        self.voFocusJumpLastState = VoFocusJumpState(stableId: entry.stableId, timestamp: now, entriesCount: entries.count, description: description, neighborStableIds: neighborStableIds)
         
         guard let previous, previous.stableId != entry.stableId else {
             return
@@ -7187,6 +7200,44 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
             }
         }
         voDiagLog("[VO-DIAG][JUMP] dir=\(distance > 0 ? "forward" : "back") skipped=\(abs(distance) - 1) msgs=\(skippedMessages) dt=\(dt)s entries \(previous.entriesCount)→\(entries.count) from=\(previous.description) to=\(description)")
+    }
+    
+    private static func voIsMessageEntry(_ entry: ChatHistoryEntry) -> Bool {
+        switch entry {
+        case .MessageEntry, .MessageGroupEntry:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// Сообщение под курсором удалили (меню «Удалить» в «Избранном» и т. п.),
+    /// и iOS посадила курсор не рядом — возвращаем индекс соседа удалённого
+    /// сообщения (более нового, иначе более старого). См.
+    /// ListView.accessibilityFocusRedirectAfterRemoval.
+    private func voFocusRedirectAfterRemoval(localIndex: Int) -> Int? {
+        guard let previous = self.voFocusJumpLastState, CACurrentMediaTime() - previous.timestamp < 120.0 else {
+            return nil
+        }
+        guard let historyView = (self.opaqueTransactionState as? ChatHistoryTransactionOpaqueState)?.historyView else {
+            return nil
+        }
+        let entries = historyView.filteredEntries
+        if entries.contains(where: { $0.stableId == previous.stableId }) {
+            return nil
+        }
+        let position = entries.count - 1 - localIndex
+        for neighborId in previous.neighborStableIds {
+            guard let neighborPosition = entries.firstIndex(where: { $0.stableId == neighborId }) else {
+                continue
+            }
+            if abs(neighborPosition - position) <= 1 {
+                // Курсор и так рядом с местом удалённого сообщения.
+                return nil
+            }
+            return entries.count - 1 - neighborPosition
+        }
+        return nil
     }
     
     func topVisibleMessageForAccessibility() -> Message? {
