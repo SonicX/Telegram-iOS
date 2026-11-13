@@ -1022,7 +1022,7 @@ private func voPollAccessibilityActions(item: ChatMessageItem) -> [ChatMessageAc
             // обновления не меняются — состояние отметки только озвучиваем.
             for option in poll.options {
                 let opaque = option.opaqueIdentifier
-                result.append(ChatMessageAccessibilityCustomAction(name: "\(isRu ? "Отметить" : "Toggle"): \(option.text)", target: nil, selector: noop, action: .perform({
+                result.append(ChatMessageAccessibilityCustomAction(name: option.text, target: nil, selector: noop, action: .perform({
                     var selection = voPollPendingSelections[messageId] ?? []
                     let nowChecked: Bool
                     if let index = selection.firstIndex(of: opaque) {
@@ -1049,7 +1049,7 @@ private func voPollAccessibilityActions(item: ChatMessageItem) -> [ChatMessageAc
         } else {
             for option in poll.options {
                 let opaque = option.opaqueIdentifier
-                result.append(ChatMessageAccessibilityCustomAction(name: "\(isRu ? "Голосовать" : "Vote"): \(option.text)", target: nil, selector: noop, action: .perform({
+                result.append(ChatMessageAccessibilityCustomAction(name: option.text, target: nil, selector: noop, action: .perform({
                     controllerInteraction.requestSelectMessagePollOptions(messageId, [opaque])
                 })))
             }

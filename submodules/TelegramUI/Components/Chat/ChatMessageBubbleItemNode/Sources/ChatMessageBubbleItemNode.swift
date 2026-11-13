@@ -883,7 +883,14 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
             guard let strongSelf = self, let accessibilityData = strongSelf.accessibilityData else {
                 return false
             }
-            
+
+            // VoiceOver: в режиме выбора двойной тап отмечает сообщение (как
+            // кружок выбора), а не открывает его содержимое — иначе отметить
+            // несколько сообщений подряд было невозможно.
+            if strongSelf.voToggleSelectionIfNeeded() {
+                return true
+            }
+
             for node in strongSelf.contentNodes {
                 if node.accessibilityActivate() {
                     return true
@@ -961,6 +968,38 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
     // рамки — при протухшем фрейме (полоска над баблом) тап уходил мимо и
     // голосовое не воспроизводилось. Явный вызов той же логики, что у
     // messageAccessibilityArea, делает активацию независимой от фрейма.
+    private func voToggleSelectionIfNeeded() -> Bool {
+        guard let item = self.item, let selectionState = item.controllerInteraction.selectionState, let selectionNode = self.selectionNode else {
+            return false
+        }
+        let ids: [MessageId]
+        switch item.content {
+        case let .message(message, _, _, _, _):
+            ids = [message.id]
+        case let .group(messages):
+            ids = messages.map { $0.0.id }
+        }
+        if ids.isEmpty {
+            return false
+        }
+        let wasSelected = selectionNode.selected
+        let previousCount = selectionState.selectedIds.count
+        item.controllerInteraction.toggleMessagesSelection(ids, !wasSelected)
+        let isRu = item.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let alreadySelectedCount = ids.filter { selectionState.selectedIds.contains($0) }.count
+        let count = wasSelected ? max(0, previousCount - alreadySelectedCount) : previousCount + (ids.count - alreadySelectedCount)
+        let text: String
+        if isRu {
+            text = (wasSelected ? "Выбор снят" : "Выбрано") + ". Всего выбрано: \(count)"
+        } else {
+            text = (wasSelected ? "Deselected" : "Selected") + ". Total selected: \(count)"
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            UIAccessibility.post(notification: .announcement, argument: text)
+        }
+        return true
+    }
+
     override public func accessibilityActivate() -> Bool {
         if let activate = self.messageAccessibilityArea.activate, activate() {
             return true

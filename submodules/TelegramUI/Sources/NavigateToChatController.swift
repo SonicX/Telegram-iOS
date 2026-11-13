@@ -21,6 +21,7 @@ import SavedMessagesScreen
 import WallpaperGalleryScreen
 import ChatMessageNotificationItem
 import FaceScanScreen
+import SGSimpleSettings
 
 public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParams) {
     if case let .peer(peer) = params.chatLocation {
@@ -48,7 +49,7 @@ public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParam
             viewForumAsMessages = .single(false)
         }
     } else if case let .peer(peer) = params.chatLocation, case let .channel(channel) = peer, channel.flags.contains(.isForum) {
-        if channel.flags.contains(.displayForumAsTabs) {
+        if channel.flags.contains(.displayForumAsTabs) || SGSimpleSettings.shared.voOpenForumAsTabs {
             viewForumAsMessages = .single(true)
         } else {
             viewForumAsMessages = params.context.account.postbox.combinedView(keys: [.cachedPeerData(peerId: peer.id)])

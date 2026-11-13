@@ -97,6 +97,7 @@ public class SGSimpleSettings {
         case outgoingLanguageTranslation
         case hideReactions
         case voChatOpenFocusUnread
+        case voOpenForumAsTabs
         case showRepostToStory
         case showRepostToStoryV2
         case contextShowSelectFromUser
@@ -243,6 +244,7 @@ public class SGSimpleSettings {
         Keys.outgoingLanguageTranslation.rawValue: [:],
         Keys.hideReactions.rawValue: false,
         Keys.voChatOpenFocusUnread.rawValue: false,
+        Keys.voOpenForumAsTabs.rawValue: false,
         Keys.showRepostToStory.rawValue: true,
         Keys.contextShowSelectFromUser.rawValue: true,
         Keys.contextShowSaveToCloud.rawValue: true,
@@ -368,6 +370,11 @@ public class SGSimpleSettings {
     /// По умолчанию выключено — как в официальном клиенте курсор не трогаем.
     @UserDefault(key: Keys.voChatOpenFocusUnread.rawValue)
     public var voChatOpenFocusUnread: Bool
+
+    /// Группы с темами открывать из списка чатов сразу чатом с темами-вкладками
+    /// (как при переходе из уведомления), а не списком тем.
+    @UserDefault(key: Keys.voOpenForumAsTabs.rawValue)
+    public var voOpenForumAsTabs: Bool
 
     // @available(*, deprecated, message: "Use showRepostToStoryV2 instead")
     @UserDefault(key: Keys.showRepostToStory.rawValue)

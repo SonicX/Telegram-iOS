@@ -67,6 +67,7 @@ private enum SGBoolSetting: String {
     case quickTranslateButton
     case hideReactions
     case voChatOpenFocusUnread
+    case voOpenForumAsTabs
     case showRepostToStory
     case contextShowSelectFromUser
     case contextShowSaveToCloud
@@ -156,6 +157,8 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     entries.append(.header(id: id.count, section: .voiceOver, text: "VoiceOver", badge: nil))
     entries.append(.toggle(id: id.count, section: .voiceOver, settingName: .voChatOpenFocusUnread, value: SGSimpleSettings.shared.voChatOpenFocusUnread, text: voIsRu ? "Курсор на непрочитанное при открытии чата" : "Focus first unread when opening a chat", enabled: true))
     entries.append(.notice(id: id.count, section: .voiceOver, text: voIsRu ? "Выключено — как в официальном Telegram: курсор встаёт на название чата, лента прокручена к непрочитанному, коснитесь середины экрана. Включено — курсор сам переходит на первое непрочитанное сообщение." : "Off — like official Telegram: focus stays on the chat title, the list is scrolled to unread messages. On — focus moves to the first unread message."))
+    entries.append(.toggle(id: id.count, section: .voiceOver, settingName: .voOpenForumAsTabs, value: SGSimpleSettings.shared.voOpenForumAsTabs, text: voIsRu ? "Группы с темами — вкладками" : "Open topic groups as tabs", enabled: true))
+    entries.append(.notice(id: id.count, section: .voiceOver, text: voIsRu ? "Включено — группа с темами открывается сразу как чат: вверху поиск и кнопки тем, затем «Назад» и шапка группы, как при переходе из уведомления. Выключено — сначала открывается список тем." : "On — a group with topics opens directly as a chat with topic buttons at the top, like when opened from a notification. Off — the list of topics opens first."))
     
     if SGSimpleSettings.shared.canUseNY {
         entries.append(.header(id: id.count, section: .trending, text: i18n("Settings.NY.Header", lang), badge: newStr))
@@ -449,6 +452,8 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
             SGSimpleSettings.shared.hideReactions = value
         case .voChatOpenFocusUnread:
             SGSimpleSettings.shared.voChatOpenFocusUnread = value
+        case .voOpenForumAsTabs:
+            SGSimpleSettings.shared.voOpenForumAsTabs = value
         case .showRepostToStory:
             SGSimpleSettings.shared.showRepostToStoryV2 = value
         case .contextShowSelectFromUser:

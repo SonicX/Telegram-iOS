@@ -2179,6 +2179,11 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// Когда в последний раз сдвигался контент корневого списка (любой
     /// источник: наш подскролл к фокусу, нативный AX-скролл iOS, палец).
     private var accessibilityLastContentShiftTimestamp: CFTimeInterval = 0.0
+    /// Последнее изменение строк списка без участия пользователя: перестановка
+    /// пула (новое сообщение подняло чат), смена фреймов строк (печатает…,
+    /// новое превью). Сразу после него iOS иногда сама переставляет курсор
+    /// на далёкую невидимую строку (лог 2026-11-08, список чатов).
+    private var accessibilityLastListMutationTimestamp: CFTimeInterval = 0.0
     private var accessibilityCorrectiveScrollInProgress = false
 
     private func updateVisibleContentOffset() {
@@ -6345,6 +6350,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // курсор на соседнюю строку против хода свайпов (лог 2026-10-14:
         // свайпы вверх 8→7→6→5→4, подскролл, сам собой 5). Штампы фреймов
         // на вьюшках уже обновлены выше, касания их видят.
+        if anyFrameChanged {
+            self.accessibilityLastListMutationTimestamp = CACurrentMediaTime()
+        }
         if anyFrameChanged, !self.accessibilityFocusIsCurrentlyInList {
             // ДЕБАУНС вместо троттлинга: инвалидация VO-дерева — только после
             // успокоения скролла (250мс без изменений). Пост layoutChanged(nil)
@@ -6361,6 +6369,14 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 guard UIAccessibility.isVoiceOverRunning else {
                     return
                 }
+                // Список не на экране (другая папка, лента за открытым чатом)
+                // — его пост заставлял iOS пере-выбирать курсор в АКТИВНОМ
+                // списке, и курсор уезжал на далёкий чат (лог 2026-11-08).
+                if self.view.window == nil || self.isHidden || self.alpha < 0.01 {
+                    voDiagLog("[VO-DIAG][BAND] layout-post-skip reason=hidden")
+                    return
+                }
+                voDiagLog("[VO-DIAG][BAND] layout-post nil")
                 UIAccessibility.post(notification: .layoutChanged, argument: nil)
             }
         }
@@ -7095,6 +7111,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             return
         }
         if let fromIndex, self.redirectAnchorReboundIfNeeded(focusedAny: focusedAny, toIndex: toIndex, fromIndex: fromIndex, elementData: elementData.map { ($0.index, $0.element) }) {
+            return
+        }
+        if let fromIndex, self.redirectSpontaneousJumpIfNeeded(focusedFrame: focusedData.frame, toIndex: toIndex, fromIndex: fromIndex, elementData: elementData.map { ($0.index, $0.element) }) {
             return
         }
         if let fromIndex, toIndex < fromIndex - 1,
@@ -8270,6 +8289,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
         }
         self.accessibilityDirectionalElementPool = moved
+        self.accessibilityLastListMutationTimestamp = CACurrentMediaTime()
         voDiagLog("[VO-DIAG][POOL] remapped=\(movedCount) pool=\(moved.count)")
     }
     
@@ -8783,7 +8803,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         // Пользователь ушёл от якоря хотя бы на 2 строки свайпами, курсор
         // вернулся на якорь прыжком (не соседний элемент) сразу после сдвига
         // контента — это ре-анкор iOS, а не касание и не свайп.
-        let sinceShift = CACurrentMediaTime() - self.accessibilityLastContentShiftTimestamp
+        // Сдвиг контента или перестройка строк (новое сообщение переставило
+        // чаты) — после любого из них iOS может ре-анкорить курсор на якорь.
+        let sinceShift = CACurrentMediaTime() - max(self.accessibilityLastContentShiftTimestamp, self.accessibilityLastListMutationTimestamp)
         guard stepsAway >= 2, abs(toIndex - fromIndex) >= 2, sinceShift < 2.0 else {
             return false
         }
@@ -8793,6 +8815,55 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         }
         voDiagLog("[VO-DIAG][CC] anchor-rebound from=\(fromIndex) to=\(toIndex) steps=\(stepsAway) sinceShift=\(String(format: "%.2f", sinceShift)) back-to=«\(String((previous.accessibilityLabel ?? "-").prefix(24)))»")
         self.accessibilityProgrammaticFocusAnchor = previous
+        self.accessibilityRingRepostGeneration &+= 1
+        DispatchQueue.main.async { [weak self, weak previous] in
+            guard let self, let previous, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            let _ = self.customAccessibilityElements()
+            self.accessibilityNotePostedFocus(previous)
+            UIAccessibility.post(notification: .layoutChanged, argument: previous)
+        }
+        return true
+    }
+
+    /// Список чатов: курсор сам перескочил через несколько строк на НЕВИДИМУЮ
+    /// строку вскоре после перестройки списка (пришло сообщение, «печатает…»)
+    /// — без свайпа и касания. Свайп ведёт на соседний элемент, касание — на
+    /// видимый, тройной свайп сначала листает. Такой перескок возвращаем на
+    /// строку, где пользователь был (лог 2026-11-08: «Ириша» → «Влад» на 27
+    /// строк выше, затем подскролл туда).
+    public var accessibilityGuardsSpontaneousJumps: Bool = false
+    private var accessibilitySpontaneousJumpRedirects: [CFTimeInterval] = []
+
+    private func redirectSpontaneousJumpIfNeeded(focusedFrame: CGRect, toIndex: Int, fromIndex: Int, elementData: [(Int, UIAccessibilityElement)]) -> Bool {
+        guard self.accessibilityGuardsSpontaneousJumps, abs(toIndex - fromIndex) >= 2 else {
+            return false
+        }
+        let now = CACurrentMediaTime()
+        guard now - self.accessibilityLastListMutationTimestamp < 2.0,
+              now - voAccessibilityLastTouchExplorationTimestamp > 0.7,
+              !self.accessibilityInitialFocusPending else {
+            return false
+        }
+        guard let clip = self.accessibilityClippingFrameInScreenCoordinates(), !focusedFrame.isNull, !focusedFrame.intersects(clip) else {
+            return false
+        }
+        guard let previous = elementData.first(where: { $0.0 == fromIndex })?.1 as? FocusTrackingAccessibilityElement,
+              let previousView = previous.sourceView, previousView.window != nil else {
+            return false
+        }
+        let previousFrame = UIAccessibility.convertToScreenCoordinates(previousView.bounds, in: previousView)
+        guard !previousFrame.isNull, previousFrame.intersects(clip) else {
+            return false
+        }
+        // Защита от зацикливания: не больше 3 возвратов за 5 секунд.
+        self.accessibilitySpontaneousJumpRedirects = self.accessibilitySpontaneousJumpRedirects.filter { now - $0 < 5.0 }
+        guard self.accessibilitySpontaneousJumpRedirects.count < 3 else {
+            return false
+        }
+        self.accessibilitySpontaneousJumpRedirects.append(now)
+        voDiagLog("[VO-DIAG][CC] spontaneous-jump from=\(fromIndex) to=\(toIndex) sinceMutation=\(String(format: "%.2f", now - self.accessibilityLastListMutationTimestamp)) back-to=«\(String((previous.accessibilityLabel ?? "-").prefix(24)))»")
         self.accessibilityRingRepostGeneration &+= 1
         DispatchQueue.main.async { [weak self, weak previous] in
             guard let self, let previous, UIAccessibility.isVoiceOverRunning else {

@@ -1133,6 +1133,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         openAsInlineForum = false
                     } else if case let .channel(channel) = peer, channel.flags.contains(.displayForumAsTabs) {
                         openAsInlineForum = false
+                    } else if SGSimpleSettings.shared.voOpenForumAsTabs {
+                        // Настройка OpenGram: группа с темами сразу открывается
+                        // чатом с темами-вкладками, а не списком тем.
+                        openAsInlineForum = false
                     } else {
                         if let cachedData = cachedDataView.cachedPeerData as? CachedChannelData, case let .known(viewForumAsMessages) = cachedData.viewForumAsMessages, viewForumAsMessages {
                             openAsInlineForum = false
