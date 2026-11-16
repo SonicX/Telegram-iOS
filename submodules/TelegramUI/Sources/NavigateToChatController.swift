@@ -49,7 +49,11 @@ public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParam
             viewForumAsMessages = .single(false)
         }
     } else if case let .peer(peer) = params.chatLocation, case let .channel(channel) = peer, channel.flags.contains(.isForum) {
-        if channel.flags.contains(.displayForumAsTabs) || SGSimpleSettings.shared.voOpenForumAsTabs {
+        if SGSimpleSettings.shared.voOpenForumAsTabs {
+            // Настройка OpenGram «Группы с темами — отдельным списком тем»:
+            // всегда экран списка тем, без общей ленты (отзыв Тима 2026-11-15).
+            viewForumAsMessages = .single(false)
+        } else if channel.flags.contains(.displayForumAsTabs) {
             viewForumAsMessages = .single(true)
         } else {
             viewForumAsMessages = params.context.account.postbox.combinedView(keys: [.cachedPeerData(peerId: peer.id)])

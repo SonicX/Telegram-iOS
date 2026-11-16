@@ -188,6 +188,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
             }
             return result
         }
+        itemNode.listNode.accessibilityIsLegitimateFocusEscape = { [weak self] focused in
+            return self?.accessibilityIsLegitimateFocusEscape?(focused) ?? false
+        }
         itemNode.listNode.presentAlert = { [weak self] text in
             self?.presentAlert?(text)
         }
@@ -422,6 +425,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     /// VoiceOver: истории развёрнутой полосы в шапке — synthetic-элементы
     /// перед строкой поиска (ставит ChatListControllerNode).
     var accessibilityStoryElementsProvider: (() -> [ListViewAccessibilityTrailingElement])?
+    /// VoiceOver: уход курсора из списка, который не надо возвращать
+    /// (ставит ChatListControllerNode: навбар экрана тем после списка).
+    var accessibilityIsLegitimateFocusEscape: ((Any) -> Bool)?
     var presentAlert: ((String) -> Void)?
     var present: ((ViewController) -> Void)?
     var push: ((ViewController) -> Void)?
@@ -1231,6 +1237,27 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
             return result
         }
 
+        // VoiceOver, экран тем группы: навбар («Назад», шапка) идёт ПОСЛЕ
+        // списка тем (см. customAccessibilityElements) — свайп с последней
+        // темы на «Назад» осознанный, возвращать курсор в список не нужно.
+        self.mainContainerNode.accessibilityIsLegitimateFocusEscape = { [weak self] focused in
+            guard let self, case .forum = self.location, let navigationBarComponentView = self.navigationBarView.view else {
+                return false
+            }
+            let focusedView: UIView?
+            if let view = focused as? UIView {
+                focusedView = view
+            } else if let node = focused as? ASDisplayNode, node.isNodeLoaded {
+                focusedView = node.view
+            } else {
+                focusedView = nil
+            }
+            if let focusedView {
+                return focusedView === navigationBarComponentView || focusedView.isDescendant(of: navigationBarComponentView)
+            }
+            return false
+        }
+
         self.mainContainerNode.accessibilitySearchPlaceholderElementProvider = { [weak self] in
             guard let self else {
                 return nil
@@ -1378,6 +1405,24 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.view.addGestureRecognizer(inlineContentPanRecognizer)
     }
     
+    /// VoiceOver, экран тем группы: порядок «поиск → темы → «Назад» и шапка».
+    /// По координатам навбар шёл первым, и до тем приходилось пролистывать
+    /// шапку (пожелание Тима 2026-11-15). Поиск — synthetic-элемент в начале
+    /// списка (accessibilitySearchPlaceholderElementProvider), так что
+    /// достаточно перенести навбар в конец.
+    @objc func customAccessibilityElements() -> [Any]? {
+        guard case .forum = self.location, self.isNodeLoaded, self.searchDisplayController == nil, let navigationBarComponentView = self.navigationBarView.view else {
+            return nil
+        }
+        var elements = self.accessibilityElements ?? []
+        guard let barIndex = elements.firstIndex(where: { ($0 as AnyObject) === navigationBarComponentView }) else {
+            return nil
+        }
+        let bar = elements.remove(at: barIndex)
+        elements.append(bar)
+        return elements
+    }
+
     override func didLoad() {
         super.didLoad()
         

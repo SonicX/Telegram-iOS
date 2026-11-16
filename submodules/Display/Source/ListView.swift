@@ -1137,6 +1137,7 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     override public init() {
         // ВРЕМЕННО: установка глобального принтера VO-фокуса (one-shot).
         _ = ListView.voDiagInstallGlobalFocusPrinter
+        ListView.voTrackVoiceOverEnabling()
 
         class DisplayLinkProxy: NSObject {
             weak var target: ListView?
@@ -7119,6 +7120,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         if self.redirectFocusAfterItemRemovalIfNeeded(focusedAny: focusedAny, elementData: elementData.map { ($0.index, $0.element) }) {
             return
         }
+        if self.redirectFocusAfterVoiceOverEnabledIfNeeded(focusedFrame: focusedData.frame, toIndex: toIndex, elementData: elementData.map { ($0.index, $0.element) }) {
+            return
+        }
         if let fromIndex, toIndex < fromIndex - 1,
            focusedAny is FocusTrackingAccessibilityElement,
            let previousSourceView = (elementData.first(where: { $0.index == fromIndex })?.element as? FocusTrackingAccessibilityElement)?.sourceView,
@@ -8875,6 +8879,67 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             let _ = self.customAccessibilityElements()
             self.accessibilityNotePostedFocus(previous)
             UIAccessibility.post(notification: .layoutChanged, argument: previous)
+        }
+        return true
+    }
+
+    /// Включение VoiceOver: iOS возвращает курсор на элемент, где он стоял
+    /// ДО выключения, а лента с тех пор пролистана пальцем — подскролл к нему
+    /// уносил пользователя обратно к новым сообщениям (отзыв Тани 2026-11-15:
+    /// «выключаешь VoiceOver, листаешь к старым, включаешь — перекидывает к
+    /// новым»). В первые секунды после включения курсор, севший на элемент за
+    /// экраном, переставляем на ближайший ВИДИМЫЙ элемент — без скролла.
+    private static let voVoiceOverStatusObserver: NSObjectProtocol = NotificationCenter.default.addObserver(forName: UIAccessibility.voiceOverStatusDidChangeNotification, object: nil, queue: .main, using: { _ in
+        if UIAccessibility.isVoiceOverRunning {
+            voAccessibilityVoiceOverEnabledTimestamp = CACurrentMediaTime()
+            voDiagLog("[VO-DIAG][VO-ON] voiceover enabled")
+        }
+    })
+
+    static func voTrackVoiceOverEnabling() {
+        let _ = ListView.voVoiceOverStatusObserver
+    }
+
+    private func redirectFocusAfterVoiceOverEnabledIfNeeded(focusedFrame: CGRect, toIndex: Int, elementData: [(Int, UIAccessibilityElement)]) -> Bool {
+        let now = CACurrentMediaTime()
+        guard now - voAccessibilityVoiceOverEnabledTimestamp < 3.0,
+              now - voAccessibilityLastTouchExplorationTimestamp > 0.7 else {
+            return false
+        }
+        guard let clip = self.accessibilityClippingFrameInScreenCoordinates(), !focusedFrame.isNull, !focusedFrame.intersects(clip) else {
+            return false
+        }
+        var best: (element: UIAccessibilityElement, distance: CGFloat)?
+        for (_, element) in elementData {
+            let frame = element.accessibilityFrame
+            guard !frame.isNull, frame.height > 2.0 else {
+                continue
+            }
+            let visible = frame.intersection(clip)
+            guard !visible.isNull, visible.height > 8.0 else {
+                continue
+            }
+            let distance = abs(visible.midY - clip.midY)
+            if best == nil || distance < best!.distance {
+                best = (element, distance)
+            }
+        }
+        guard let target = best?.element else {
+            return false
+        }
+        // Окно одноразовое: дальше курсор ведёт себя как обычно.
+        voAccessibilityVoiceOverEnabledTimestamp = 0.0
+        voDiagLog("[VO-DIAG][VO-ON] offscreen-focus from=\(toIndex) → visible «\(String((target.accessibilityLabel ?? "-").prefix(24)))»")
+        self.accessibilityRingRepostGeneration &+= 1
+        DispatchQueue.main.async { [weak self, weak target] in
+            guard let self, let target, UIAccessibility.isVoiceOverRunning else {
+                return
+            }
+            let _ = self.customAccessibilityElements()
+            if let tracked = target as? FocusTrackingAccessibilityElement {
+                self.accessibilityNotePostedFocus(tracked)
+            }
+            UIAccessibility.post(notification: .layoutChanged, argument: target)
         }
         return true
     }

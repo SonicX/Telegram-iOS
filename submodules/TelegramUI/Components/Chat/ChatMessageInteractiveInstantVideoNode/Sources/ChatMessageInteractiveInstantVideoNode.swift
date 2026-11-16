@@ -1691,7 +1691,23 @@ public class ChatMessageInteractiveInstantVideoNode: ASDisplayNode {
     }
     
     override public func accessibilityActivate() -> Bool {
-        self.progressPressed()
+        // VoiceOver: двойной тап по кружку — воспроизвести со звуком (как тап
+        // зрячего по беззвучному автоплею). Раньше шёл progressPressed: для
+        // незагруженного кружка он лишь начинал загрузку, повторный тап её
+        // ОТМЕНЯЛ, а для загруженного переключал чужой плейлист — кружки «не
+        // воспроизводились по нажатию» (отзыв 2026-11-14).
+        guard let item = self.item else {
+            return true
+        }
+        if item.message.flags.isSending {
+            self.progressPressed()
+            return true
+        }
+        if let status = self.status, case .playbackStatus = status.mediaStatus {
+            item.context.sharedContext.mediaManager.playlistControl(.playback(.togglePlayPause), type: .voice)
+            return true
+        }
+        let _ = item.controllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
         return true
     }
     

@@ -40,6 +40,9 @@ public var voAccessibilityLastTouchExplorationTimestamp: Double = 0.0
 /// касанием считаем только hit-test, попавший в видимую часть элемента.
 public var voAccessibilityLastTouchExplorationPoint: CGPoint?
 
+/// Момент последнего ВКЛЮЧЕНИЯ VoiceOver (см. ListView.voTrackVoiceOverEnabling).
+public var voAccessibilityVoiceOverEnabledTimestamp: Double = 0.0
+
 public func voNoteAccessibilityHitTest(_ point: CGPoint, in view: UIView) {
     voAccessibilityLastTouchExplorationTimestamp = CACurrentMediaTime()
     voAccessibilityLastTouchExplorationPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: point, size: CGSize(width: 1.0, height: 1.0)), in: view).origin

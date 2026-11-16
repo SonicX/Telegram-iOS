@@ -333,6 +333,18 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
             self.progressPressed()
             return .performed
         }
+        // Голосовые и музыка играют потоково через openMessage, пока файл
+        // грузится. progressPressed для незагруженного файла лишь запускал
+        // загрузку — голосовое играло только со второго двойного тапа (отзыв
+        // 2026-11-14), а повторный тап во время загрузки её отменял.
+        if let file = self.file, file.isVoice || file.isMusic, case let .fetchStatus(fetchStatus) = resourceStatus.mediaStatus {
+            switch fetchStatus {
+            case .Remote, .Paused, .Fetching:
+                return .notHandled
+            case .Local:
+                break
+            }
+        }
         switch resourceStatus.mediaStatus {
         case let .fetchStatus(fetchStatus):
             switch fetchStatus {
@@ -411,6 +423,7 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
     }
     
     private var voTranscriptionPollToken: Int = 0
+    private let voTranscriptionFetchDisposable = MetaDisposable()
     
     private func voCurrentTranscription() -> TranscribedText? {
         guard let message = self.message else {
@@ -430,12 +443,35 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
             return
         }
         UIAccessibility.post(notification: .announcement, argument: isRu ? "Расшифровка…" : "Transcribing…")
+        self.voTranscriptionPollToken += 1
+        let token = self.voTranscriptionPollToken
+        // Расшифровка без Premium идёт на устройстве и требует ПОЛНОСТЬЮ
+        // загруженного файла — иначе она молча сворачивалась, и VO говорил
+        // лишь «Расшифровка…» (отзыв 2026-11-16: «есть, но не работает»).
+        // Сначала догружаем голосовое, потом расшифровываем.
+        if let context = self.context, let message = self.message, let file = self.file, context.account.postbox.mediaBox.completedResourcePath(file.resource) == nil {
+            self.voTranscriptionFetchDisposable.set(messageMediaFileInteractiveFetched(context: context, message: message, file: file, userInitiated: true).startStrict())
+            let _ = (context.account.postbox.mediaBox.resourceData(file.resource)
+            |> filter { $0.complete }
+            |> take(1)
+            |> timeout(30.0, queue: Queue.mainQueue(), alternate: .complete())
+            |> deliverOnMainQueue).startStandalone(next: { [weak self] _ in
+                guard let self, self.voTranscriptionPollToken == token else {
+                    return
+                }
+                self.voStartTranscription(token: token, isRu: isRu)
+            })
+            return
+        }
+        self.voStartTranscription(token: token, isRu: isRu)
+    }
+    
+    private func voStartTranscription(token: Int, isRu: Bool) {
         if case .inProgress = self.audioTranscriptionState {
         } else {
             self.transcribe()
         }
-        self.voTranscriptionPollToken += 1
-        self.voPollTranscription(token: self.voTranscriptionPollToken, attempt: 0, isRu: isRu)
+        self.voPollTranscription(token: token, attempt: 0, isRu: isRu)
     }
     
     private func voPollTranscription(token: Int, attempt: Int, isRu: Bool) {
@@ -453,7 +489,12 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                 UIAccessibility.post(notification: .announcement, argument: isRu ? "Не удалось расшифровать" : "Transcription failed")
                 return
             case nil:
-                break
+                // Локальная расшифровка не удалась (нет текста, состояние
+                // вернулось в «свёрнуто») — говорим об этом, а не молчим.
+                if attempt >= 1, case .collapsed = self.audioTranscriptionState {
+                    UIAccessibility.post(notification: .announcement, argument: isRu ? "Не удалось расшифровать. Проверьте доступ к распознаванию речи в настройках iPhone." : "Transcription failed. Check Speech Recognition access in iPhone Settings.")
+                    return
+                }
             }
             if attempt < 45 {
                 self.voPollTranscription(token: token, attempt: attempt + 1, isRu: isRu)
