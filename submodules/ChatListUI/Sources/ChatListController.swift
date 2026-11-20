@@ -2150,6 +2150,39 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             tabContextGesture(id, sourceNode, gesture, false, isDisabled)
         }
         self.chatListDisplayNode.inlineTabContainerNode.contextGesture = self.tabContainerNode.contextGesture
+        // VoiceOver: основные пункты контекстного меню папки — действиями
+        // ротора на вкладке (свайп вверх/вниз), без тройного тапа (отзыв
+        // тестировщиков 2026-11-19).
+        let accessibilityTabActions: (ChatListFilterTabEntryId, Int, Bool) -> [(title: String, action: () -> Void)] = { [weak self] id, unreadCount, isDisabled in
+            guard let self else {
+                return []
+            }
+            let strings = self.presentationData.strings
+            switch id {
+            case .all:
+                return [(strings.ChatList_EditFolders, { [weak self] in
+                    self?.openFilterSettings()
+                })]
+            case let .filter(filterId):
+                var result: [(title: String, action: () -> Void)] = []
+                if unreadCount > 0 {
+                    result.append((strings.ChatList_ReadAll, { [weak self] in
+                        self?.readAllInFilter(id: filterId)
+                    }))
+                }
+                if !isDisabled {
+                    result.append((strings.ChatList_EditFolder, { [weak self] in
+                        self?.voEditFilter(id: filterId)
+                    }))
+                }
+                result.append((strings.ChatList_RemoveFolder, { [weak self] in
+                    self?.askForFilterRemoval(id: filterId)
+                }))
+                return result
+            }
+        }
+        self.tabContainerNode.accessibilityTabActions = accessibilityTabActions
+        self.chatListDisplayNode.inlineTabContainerNode.accessibilityTabActions = accessibilityTabActions
         self.chatListDisplayNode.appleStyleTabContainerNode.contextGesture = self.tabContainerNode.contextGesture
         
         if case .chatList(.root) = self.location {
@@ -4488,6 +4521,20 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         })
     }
     
+    /// VoiceOver-действие «Изменить папку» — то же, что пункт контекстного меню.
+    private func voEditFilter(id: Int32) {
+        let _ = (self.context.engine.peers.currentChatListFilters()
+        |> take(1)
+        |> deliverOnMainQueue).startStandalone(next: { [weak self] presetList in
+            guard let self else {
+                return
+            }
+            if let filter = presetList.first(where: { $0.id == id }) {
+                self.push(chatListFilterPresetController(context: self.context, currentPreset: filter, updated: { _ in }))
+            }
+        })
+    }
+
     private func readAllInFilter(id: Int32) {
         for filter in self.chatListDisplayNode.mainContainerNode.availableFilters {
             if case let .filter(filter) = filter, case let .filter(filterId, _, _, data) = filter, filterId == id {

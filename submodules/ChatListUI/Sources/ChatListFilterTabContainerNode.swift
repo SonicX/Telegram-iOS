@@ -202,7 +202,41 @@ private final class ItemNode: ASDisplayNode {
     @objc private func buttonPressed() {
         self.pressed(self.isDisabled)
     }
-    
+
+    // VoiceOver: действия папки в роторе (свайп вверх/вниз), как у строк чатов.
+    // Объекты действий переиспользуются по названию — пересоздание на каждом
+    // обновлении сбивало ротор (см. «Прочитано» в списке чатов).
+    private var voActionHandlers: [String: () -> Void] = [:]
+    private var voActionCache: [String: UIAccessibilityCustomAction] = [:]
+
+    func updateAccessibilityActions(_ actions: [(title: String, action: () -> Void)]) {
+        var handlers: [String: () -> Void] = [:]
+        var list: [UIAccessibilityCustomAction] = []
+        for (title, action) in actions {
+            handlers[title] = action
+            let customAction: UIAccessibilityCustomAction
+            if let current = self.voActionCache[title] {
+                customAction = current
+            } else {
+                customAction = UIAccessibilityCustomAction(name: title, actionHandler: { [weak self] _ in
+                    guard let self, let handler = self.voActionHandlers[title] else {
+                        return false
+                    }
+                    handler()
+                    return true
+                })
+                self.voActionCache[title] = customAction
+            }
+            list.append(customAction)
+        }
+        self.voActionHandlers = handlers
+        let view = self.buttonNode.view
+        let currentNames = (view.accessibilityCustomActions ?? []).map { $0.name }
+        if currentNames != list.map({ $0.name }) {
+            view.accessibilityCustomActions = list.isEmpty ? nil : list
+        }
+    }
+
     func updateText(strings: PresentationStrings, title: ChatFolderTitle, shortTitle: ChatFolderTitle, unreadCount: Int, unreadHasUnmuted: Bool, isNoFilter: Bool, selectionFraction: CGFloat, isEditing: Bool, isReordering: Bool, canReorderAllChats: Bool, isDisabled: Bool, presentationData: PresentationData, transition: ContainedViewLayoutTransition) {
         self.isEditing = isEditing
         self.isDisabled = isDisabled
@@ -501,7 +535,9 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
     var addFilter: (() -> Void)?
     var contextGesture: ((Int32?, ContextExtractedContentContainingNode, ContextGesture, Bool) -> Void)?
     var presentPremiumTip: (() -> Void)?
-    
+    /// VoiceOver: действия ротора для вкладки (id, непрочитанные, недоступна по лимиту).
+    var accessibilityTabActions: ((ChatListFilterTabEntryId, Int, Bool) -> [(title: String, action: () -> Void)])?
+
     private var reorderingGesture: ReorderingGestureRecognizer?
     private var reorderingItem: ChatListFilterTabEntryId?
     private var reorderingItemPosition: (initial: CGFloat, offset: CGFloat)?
@@ -857,6 +893,11 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
             }
             
             itemNode.updateText(strings: presentationData.strings, title: filter.title(strings: presentationData.strings), shortTitle: filter.shortTitle(strings: presentationData.strings), unreadCount: unreadCount, unreadHasUnmuted: unreadHasUnmuted, isNoFilter: isNoFilter, selectionFraction: selectionFraction, isEditing: isEditing, isReordering: isReordering, canReorderAllChats: canReorderAllChats, isDisabled: isDisabled, presentationData: presentationData, transition: itemNodeTransition)
+            if !isEditing, !isReordering {
+                itemNode.updateAccessibilityActions(self.accessibilityTabActions?(filter.id, unreadCount, isDisabled) ?? [])
+            } else {
+                itemNode.updateAccessibilityActions([])
+            }
         }
         var removeKeys: [ChatListFilterTabEntryId] = []
         for (id, _) in self.itemNodes {

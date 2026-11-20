@@ -121,7 +121,14 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
         }
     }
 
+    /// Активация строки списка тем же путём, что и тап по строке (без
+    /// хит-теста по центру фрейма). Ставит ListView, если список это просит.
+    public var activateRow: (() -> Bool)?
+
     override public func accessibilityActivate() -> Bool {
+        if let activateRow = self.activateRow, activateRow() {
+            return true
+        }
         return sourceView?.accessibilityActivate() ?? false
     }
 

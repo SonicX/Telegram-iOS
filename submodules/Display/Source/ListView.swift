@@ -892,6 +892,21 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 activeLocalIndices.insert(itemIndex)
                 if itemNode.isAccessibilityElement {
                     let element = self.reuseOrCreateDirectionalElement(localIndex: itemIndex, childOrder: 0, sourceView: itemNode.view)
+                    if self.accessibilityActivatesRowsDirectly {
+                        if element.activateRow == nil {
+                            element.activateRow = { [weak self, weak element] in
+                                guard let self, let element, let localIndex = element.pinnedLocalIndex else {
+                                    return false
+                                }
+                                guard let rowNode = self.itemNodes.first(where: { $0.index == localIndex }) else {
+                                    return false
+                                }
+                                return self.accessibilityActivateItemNode(rowNode)
+                            }
+                        }
+                    } else {
+                        element.activateRow = nil
+                    }
                     var frame = UIAccessibility.convertToScreenCoordinates(itemNode.bounds, in: itemNode.view)
                     guard !frame.isNull, frame.height > 1.0, frame.width > 1.0 else {
                         return
@@ -6617,9 +6632,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
                 toDirectionalIndex: directionalIndex
             )
         }
-        guard let announcement = accessibilityDirectionalAnnouncement(previousState.directionalIndex, directionalIndex),
-              !announcement.isEmpty else { return }
-        UIAccessibility.post(notification: .announcement, argument: announcement)
+        // Объявление «следующее/предыдущее сообщение (чат)» больше НЕ
+        // произносим: с iOS 27.3 оно обрывает чтение только что сфокусированного
+        // элемента — тестировщик слышал «next message» вместо текста сообщения
+        // (отзыв 2026-11-17). Сам колбэк остаётся флагом включения
+        // направленного трекинга фокуса.
+        _ = accessibilityDirectionalAnnouncement
     }
 
     private func handleAccessibilityElementFocusLost(snapshotId: Int, directionalIndex: Int) {
@@ -8303,6 +8321,12 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// Стабильный ключ строки для VO-пула (id чата и т. п.), см.
     /// FocusTrackingAccessibilityElement.stableItemKey.
     public var accessibilityStableItemKey: ((ListViewItem) -> AnyHashable?)?
+
+    /// VoiceOver: двойной тап по строке выбирает строку целиком (как тап),
+    /// а не «тапает» в центр её фрейма. В списке чатов центр строки форума
+    /// попадал в кнопку последней темы, и вместо списка тем открывалась сама
+    /// тема (отзыв 2026-11-19: «настройка тем срабатывает не во всех группах»).
+    public var accessibilityActivatesRowsDirectly: Bool = false
 
     public func reuseOrCreateDirectionalElement(localIndex: Int, childOrder: Int, sourceView: UIView) -> FocusTrackingAccessibilityElement {
         var elements = self.accessibilityDirectionalElementPool[localIndex] ?? []

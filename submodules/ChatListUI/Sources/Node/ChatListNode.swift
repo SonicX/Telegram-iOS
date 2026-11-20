@@ -1500,6 +1500,7 @@ public final class ChatListNode: ListView {
         // поведение для нелинейных перескоков (только для списка, не история).
         self.accessibilityUsesNativeScrollForNonSequentialFocus = true
         self.accessibilityGuardsSpontaneousJumps = true
+        self.accessibilityActivatesRowsDirectly = true
         // VoiceOver: элемент строки привязан к чату (id пира / темы), а не к
         // позиции — при перестановке чатов курсор и двойной тап остаются на
         // том же чате.
