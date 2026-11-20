@@ -68,7 +68,12 @@ public final class ListViewBackingView: UIView {
     @available(iOS 18.0, *)
     override public func accessibilityHitTest(_ point: CGPoint, event: UIEvent?) -> Any? {
         voNoteAccessibilityHitTest(point, in: self)
-        return super.accessibilityHitTest(point, event: event)
+        guard let target = self.target else {
+            return super.accessibilityHitTest(point, event: event)
+        }
+        return target.voAccessibilityHitTest(point, in: self, fallback: {
+            return super.accessibilityHitTest(point, event: event)
+        })
     }
     
     override public func setNeedsLayout() {
@@ -605,6 +610,50 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
 
     fileprivate func voInvalidateAccessibilityElementsCache() {
         self.voAccessibilityElementsCache = nil
+    }
+
+    /// VoiceOver hit-test. iOS 27 после каждого свайпа проверяет курсор
+    /// hit-test'ом по центру сфокусированного элемента и ставит курсор на
+    /// то, что вернул hit-test. В списке чатов после переезда чата наверх
+    /// (новое сообщение) проштампованные фреймы строк протухали — проверка
+    /// по центру строки возвращала строку ВЫШЕ, и курсор через 0.1с
+    /// откатывался назад; свайп вперёд «не проходил» (лог 2026-11-20,
+    /// «Плохие новости» ↔ «Влади» по кругу, каскад 10→9→8 после отправки
+    /// сообщения). Поэтому: штампы обновляем перед проверкой, а если точка
+    /// лежит в живом фрейме строки, на которой УЖЕ стоит курсор, —
+    /// возвращаем её саму.
+    fileprivate func voAccessibilityHitTest(_ point: CGPoint, in view: UIView, fallback: () -> Any?) -> Any? {
+        guard UIAccessibility.isVoiceOverRunning else {
+            return fallback()
+        }
+        self.accessibilityRefreshBarBandFrames()
+        let screenPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: point, size: CGSize(width: 1.0, height: 1.0)), in: view).origin
+        let focused = UIAccessibility.focusedElement(using: nil)
+        if let tracked = focused as? FocusTrackingAccessibilityElement,
+           let localIndex = tracked.pinnedLocalIndex,
+           let pool = self.accessibilityDirectionalElementPool[localIndex],
+           pool.contains(where: { $0 === tracked }),
+           let sourceView = tracked.sourceView, sourceView.window != nil {
+            // Строка из одного элемента (чат в списке) — живой фрейм её
+            // вьюшки. Составная (сообщение с несколькими элементами) — фрейм
+            // самого элемента, чтобы ощупывание внутри сообщения работало.
+            let liveFrame: CGRect
+            if pool.count == 1 {
+                liveFrame = UIAccessibility.convertToScreenCoordinates(sourceView.bounds, in: sourceView)
+            } else {
+                liveFrame = tracked.accessibilityFrame
+            }
+            if !liveFrame.isNull, liveFrame.contains(screenPoint) {
+                return tracked
+            }
+        }
+        let result = fallback()
+        if let focusedObject = focused as AnyObject?, let resultObject = result as AnyObject?, focusedObject !== resultObject {
+            let focusedLabel = (focused as? NSObject)?.accessibilityLabel ?? "-"
+            let resultLabel = (result as? NSObject)?.accessibilityLabel ?? "-"
+            voDiagLog("[VO-DIAG][HIT] point=(\(Int(screenPoint.x)),\(Int(screenPoint.y))) focused=«\(String(focusedLabel.prefix(24)))» result=\(type(of: resultObject)) «\(String(resultLabel.prefix(24)))»")
+        }
+        return result
     }
 
     // Стабильный пул VO-элементов для НЕ-пулового пути (списки без
