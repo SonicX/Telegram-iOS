@@ -697,6 +697,20 @@ public final class ListMessageSnippetItemNode: ListMessageNode {
                     strongSelf.contextSourceNode.contentRect = extractedRect
                     
                     strongSelf.appliedItem = item
+                    // VoiceOver: строка ссылки (вкладка «Ссылки» в профиле/общих
+                    // медиа) — заголовок, описание и адрес; раньше молчала.
+                    let voParts = [title?.string, descriptionText?.string, linkText?.string].compactMap { text -> String? in
+                        guard let text, !text.isEmpty else { return nil }
+                        return text
+                    }
+                    if let voLabel = voParts.first {
+                        strongSelf.isAccessibilityElement = true
+                        strongSelf.accessibilityLabel = voLabel
+                        strongSelf.accessibilityValue = voParts.dropFirst().joined(separator: ", ")
+                        strongSelf.accessibilityTraits = [.button]
+                    } else {
+                        strongSelf.isAccessibilityElement = false
+                    }
                     strongSelf.currentMedia = selectedMedia
                     strongSelf.currentPrimaryUrl = primaryUrl
                     strongSelf.currentIsInstantView = isInstantView

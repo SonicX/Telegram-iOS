@@ -2294,6 +2294,17 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 var voPromotedCount = 0
                 self.forEachItemNode { node in
                     guard let itemNode = node as? ListViewItemNode else { return }
+                    // Строки списка общих медиа (музыка, файлы, ссылки, голосовые
+                    // в профиле) уже подписаны самой строкой — сборщик «пузыря»
+                    // не нашёл бы в них AccessibilityAreaNode и перезаписал бы
+                    // подпись дочерним текстом/кнопкой (отзыв 2026-11-22:
+                    // «список треков не озвучивается»).
+                    if itemNode is ListMessageNode {
+                        if itemNode.isAccessibilityElement, !(itemNode.accessibilityLabel ?? "").isEmpty {
+                            itemNode.view.accessibilityElementsHidden = false
+                        }
+                        return
+                    }
                     guard let payload = self.composeBubbleAccessibilityPayload(for: itemNode, clippedTo: visibleScreenRect),
                           !payload.label.isEmpty else {
                         return

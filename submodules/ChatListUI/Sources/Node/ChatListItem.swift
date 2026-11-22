@@ -1450,6 +1450,22 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         result += item.presentationData.strings.DialogList_SavedMessages
                     } else {
                         result += chatMainPeer.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
+                        // VoiceOver: значки у имени, как в официальном клиенте
+                        // (отзыв 2026-11-22): мошенник/фейк, подтверждённый, Premium.
+                        if peerData.customMessageListData?.hidePeerStatus != true {
+                            if chatMainPeer.isScam {
+                                result += ", мошенник"
+                            } else if chatMainPeer.isFake {
+                                result += ", фейк"
+                            } else {
+                                if chatMainPeer.isVerified || chatMainPeer.verificationIconFileId != nil {
+                                    result += ", подтверждённый"
+                                }
+                                if chatMainPeer.isPremium {
+                                    result += ", \(item.presentationData.strings.Premium_Title)"
+                                }
+                            }
+                        }
                     }
                     if let combinedReadState = peerData.combinedReadState, combinedReadState.count > 0 {
                         result += "\n\(item.presentationData.strings.VoiceOver_Chat_UnreadMessages(combinedReadState.count))"

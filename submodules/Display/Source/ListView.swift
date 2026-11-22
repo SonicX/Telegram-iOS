@@ -622,13 +622,32 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
     /// сообщения). Поэтому: штампы обновляем перед проверкой, а если точка
     /// лежит в живом фрейме строки, на которой УЖЕ стоит курсор, —
     /// возвращаем её саму.
+    private weak var voHitLastTrackedElement: FocusTrackingAccessibilityElement?
+    private var voHitLastTrackedTimestamp: Double = 0.0
+
     fileprivate func voAccessibilityHitTest(_ point: CGPoint, in view: UIView, fallback: () -> Any?) -> Any? {
         guard UIAccessibility.isVoiceOverRunning else {
             return fallback()
         }
         self.accessibilityRefreshBarBandFrames()
         let screenPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: point, size: CGSize(width: 1.0, height: 1.0)), in: view).origin
-        let focused = UIAccessibility.focusedElement(using: nil)
+        let now = CACurrentMediaTime()
+        let systemFocused = UIAccessibility.focusedElement(using: nil)
+        var focused: Any? = systemFocused
+        // Во время пересборки строки (VO-действие «Прочитано» меняет метку)
+        // iOS на миг сбрасывает фокус в nil и выбирает новый элемент
+        // hit-test'ом — по центру ПРЕДЫДУЩЕЙ строки (лог 2026-11-21,
+        // LOVEтамин: «Прочитано» → курсор на чат выше → обратно, ощущение
+        // «не с первого раза»). Берём строку, на которой курсор стоял миг назад.
+        if systemFocused == nil, let last = self.voHitLastTrackedElement, now - self.voHitLastTrackedTimestamp < 1.5 {
+            focused = last
+        }
+        if let tracked = focused as? FocusTrackingAccessibilityElement {
+            if tracked.pinnedLocalIndex != nil {
+                self.voHitLastTrackedElement = tracked
+                self.voHitLastTrackedTimestamp = now
+            }
+        }
         if let tracked = focused as? FocusTrackingAccessibilityElement,
            let localIndex = tracked.pinnedLocalIndex,
            let pool = self.accessibilityDirectionalElementPool[localIndex],
@@ -645,6 +664,17 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             if !liveFrame.isNull, liveFrame.contains(screenPoint) {
                 return tracked
+            }
+            // Служебная проверка iOS 27 бьёт ровно в ЦЕНТР соседней строки
+            // (где курсор стоял до свайпа). Палец так точно не попадает —
+            // считаем это проверкой и оставляем курсор на месте.
+            if let resultElement = fallback() as? FocusTrackingAccessibilityElement, resultElement !== tracked, resultElement.pinnedLocalIndex != nil {
+                let resultFrame = resultElement.accessibilityFrame
+                if !resultFrame.isNull, abs(resultFrame.midX - screenPoint.x) <= 1.5, abs(resultFrame.midY - screenPoint.y) <= 1.5 {
+                    voDiagLog("[VO-DIAG][HIT] stale-probe point=(\(Int(screenPoint.x)),\(Int(screenPoint.y))) keep=«\(String((tracked.accessibilityLabel ?? "-").prefix(24)))» focusNil=\(systemFocused == nil)")
+                    return tracked
+                }
+                return resultElement
             }
         }
         let result = fallback()
