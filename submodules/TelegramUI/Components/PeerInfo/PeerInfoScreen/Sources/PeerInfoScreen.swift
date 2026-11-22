@@ -133,6 +133,9 @@ public enum PeerInfoAvatarEditingMode {
 
 private final class PeerInfoScrollNode: ASScrollNode {
     var itemNodesInVisibleArea: (() -> [ASDisplayNode])?
+    /// VoiceOver: куда ставить курсор, когда страница докрутилась до самого
+    /// верха (шапка развёрнута) — имя в шапке, а не первая строка списка.
+    var topFocusTarget: (() -> NSObject?)?
 
     override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
         let scrollView = self.view
@@ -147,6 +150,10 @@ private final class PeerInfoScrollNode: ASScrollNode {
         guard offset.y != scrollView.contentOffset.y else { return false }
         scrollView.setContentOffset(offset, animated: false)
 
+        if direction != .down, offset.y <= -scrollView.adjustedContentInset.top + 0.5, let target = self.topFocusTarget?() {
+            UIAccessibility.post(notification: .layoutChanged, argument: target)
+            return true
+        }
         if let nodes = itemNodesInVisibleArea?() {
             let target = direction == .down ? nodes.last : nodes.first
             if let target = target {
@@ -3302,6 +3309,28 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
     /// VoiceOver: строка, на которой курсор стоял последней (см.
     /// PeerInfoScreenItemNode.accessibilityElementDidBecomeFocused).
     weak var voLastFocusedItemNode: PeerInfoScreenItemNode?
+    
+    /// VoiceOver: шапка (навбар, фото, имя, кнопки) читается раньше списка.
+    /// По умолчанию ASDK сортирует детей по origin, а у шапки и scrollNode он
+    /// одинаковый (0,0) — порядок между ними не определён.
+    @objc func customAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded, UIAccessibility.isVoiceOverRunning, self.headerNode.isNodeLoaded, self.headerNode.view.superview === self.view else {
+            return nil
+        }
+        var result: [Any] = []
+        var others: [Any] = []
+        for subview in self.view.subviews {
+            if subview.isHidden || subview.alpha < 0.01 || subview.accessibilityElementsHidden {
+                continue
+            }
+            if subview === self.headerNode.view {
+                result.append(subview)
+            } else {
+                others.append(subview)
+            }
+        }
+        return result + others
+    }
     private weak var controller: PeerInfoScreenImpl?
     
     private let context: AccountContext
@@ -3502,6 +3531,9 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     }
                 }
                 return visible.sorted { $0.view.convert(CGPoint.zero, to: self.scrollNode.view).y < $1.view.convert(CGPoint.zero, to: self.scrollNode.view).y }
+            }
+            peerInfoScrollNode.topFocusTarget = { [weak self] in
+                return self?.headerNode.voTitleAccessibilityElement()
             }
         }
 

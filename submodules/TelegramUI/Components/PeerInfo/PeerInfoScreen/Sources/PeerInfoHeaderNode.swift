@@ -414,6 +414,83 @@ final class PeerInfoHeaderNode: ASDisplayNode {
         self.subtitleNodeRawContainer.view.addGestureRecognizer(phoneGestureRecognizer)
     }
     
+    // MARK: VoiceOver — порядок шапки профиля
+    //
+    // ASDK сортировал детей шапки по origin их контейнеров (regularContent,
+    // кнопки, аватар, навбар — у контейнеров фреймы не совпадают с
+    // содержимым), и VoiceOver ходил «Звонок…Ещё → Фото → навбар → список»,
+    // а с края шапки перескакивал на строку «мобильный» (отзыв 2026-11-20,
+    // лог 261048). Имя и статус не озвучивались вовсе. Отдаём плоский список
+    // листьев в визуальном порядке (навбар → фото → имя → кнопки) через
+    // прокси с одним контейнером — шапкой.
+    private var voTitleText: String?
+    private var voSubtitleText: String?
+    private var voForwardingElements: [ObjectIdentifier: AccessibilityForwardingElement] = [:]
+    private var voTitleElement: UIAccessibilityElement?
+    
+    /// Элемент «имя, статус» — сюда ставим курсор, когда VoiceOver докручивает
+    /// профиль до верха.
+    func voTitleAccessibilityElement() -> UIAccessibilityElement? {
+        guard self.isNodeLoaded, let title = self.voTitleText, !title.isEmpty else {
+            return nil
+        }
+        let element: UIAccessibilityElement
+        if let current = self.voTitleElement {
+            element = current
+        } else {
+            element = UIAccessibilityElement(accessibilityContainer: self.view)
+            self.voTitleElement = element
+        }
+        element.accessibilityLabel = title
+        element.accessibilityValue = self.voSubtitleText
+        element.accessibilityTraits = .header
+        var frame = CGRect()
+        if let stateNode = self.titleNode.stateNode(forKey: TitleNodeStateRegular), stateNode.isNodeLoaded, stateNode.bounds.width >= 1.0 {
+            frame = UIAccessibility.convertToScreenCoordinates(stateNode.bounds, in: stateNode.view)
+        }
+        if frame.width < 1.0 || frame.height < 1.0 {
+            let center = self.titleNode.view.convert(CGPoint(), to: self.view)
+            frame = UIAccessibility.convertToScreenCoordinates(CGRect(x: 16.0, y: center.y - 14.0, width: max(1.0, self.bounds.width - 32.0), height: 28.0), in: self.view)
+        }
+        element.accessibilityFrame = frame
+        return element
+    }
+    
+    @objc func customAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded, UIAccessibility.isVoiceOverRunning else {
+            return nil
+        }
+        if self.state?.isEditing ?? false || self.customNavigationContentNode != nil {
+            return nil
+        }
+        var leaves = collectAccessibilityLeaves(inSubviewsOf: self.view)
+        if let titleElement = self.voTitleAccessibilityElement(), !leaves.contains(where: { $0.accessibilityLabel == titleElement.accessibilityLabel }) {
+            leaves.append(titleElement)
+        }
+        if leaves.isEmpty {
+            return nil
+        }
+        var updatedProxies: [ObjectIdentifier: AccessibilityForwardingElement] = [:]
+        var result: [Any] = []
+        for leaf in sortAccessibilityElementsInVisualRows(leaves) {
+            if leaf === self.voTitleElement || leaf is UITextField || leaf is UITextView {
+                result.append(leaf)
+                continue
+            }
+            let key = ObjectIdentifier(leaf)
+            let proxy: AccessibilityForwardingElement
+            if let current = self.voForwardingElements[key], current.target === leaf {
+                proxy = current
+            } else {
+                proxy = AccessibilityForwardingElement(container: self.view, target: leaf)
+            }
+            updatedProxies[key] = proxy
+            result.append(proxy)
+        }
+        self.voForwardingElements = updatedProxies
+        return result
+    }
+    
     @objc private func handleUsernameLongPress(_ gestureRecognizer: UILongPressGestureRecognizer) {
         if gestureRecognizer.state == .began {
             self.displayCopyContextMenu?(self.usernameNodeRawContainer, !self.isAvatarExpanded, true)
@@ -1466,6 +1543,8 @@ final class PeerInfoHeaderNode: ASDisplayNode {
             TitleNodeStateExpanded: MultiScaleTextState(attributes: smallSubtitleAttributes, constrainedSize: titleConstrainedSize)
         ], mainState: TitleNodeStateRegular)
         self.subtitleNode.accessibilityLabel = subtitleStringText
+        self.voTitleText = titleStringText
+        self.voSubtitleText = subtitleIsButton ? nil : subtitleStringText
         
         if subtitleIsButton {
             let subtitleBackgroundNode: ASDisplayNode

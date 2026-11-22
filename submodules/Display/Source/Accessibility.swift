@@ -315,3 +315,133 @@ public func isBoldTextEnabled() -> Signal<Bool, NoError> {
 public func isReduceTransparencyEnabled() -> Bool {
     UIAccessibility.isReduceTransparencyEnabled
 }
+
+/// Прокси-элемент VoiceOver: живьём пересылает метку/значение/фрейм/действия
+/// исходному элементу (UIView или UIAccessibilityElement). Нужен, когда
+/// контейнер отдаёт VoiceOver плоский список листьев из вложенных
+/// контейнеров: у прокси один явный `accessibilityContainer`, и VoiceOver
+/// не путается во вложенных массивах с неверными фреймами контейнеров.
+public final class AccessibilityForwardingElement: UIAccessibilityElement {
+    public private(set) weak var target: NSObject?
+
+    public init(container: Any, target: NSObject) {
+        self.target = target
+        super.init(accessibilityContainer: container)
+    }
+
+    override public var accessibilityLabel: String? {
+        get { return self.target?.accessibilityLabel }
+        set { }
+    }
+
+    override public var accessibilityValue: String? {
+        get { return self.target?.accessibilityValue }
+        set { }
+    }
+
+    override public var accessibilityHint: String? {
+        get { return self.target?.accessibilityHint }
+        set { }
+    }
+
+    override public var accessibilityTraits: UIAccessibilityTraits {
+        get { return self.target?.accessibilityTraits ?? .none }
+        set { }
+    }
+
+    override public var accessibilityFrame: CGRect {
+        get { return self.target?.accessibilityFrame ?? .zero }
+        set { }
+    }
+
+    override public var accessibilityActivationPoint: CGPoint {
+        get { return self.target?.accessibilityActivationPoint ?? .zero }
+        set { }
+    }
+
+    override public var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get { return self.target?.accessibilityCustomActions }
+        set { }
+    }
+
+    override public func accessibilityActivate() -> Bool {
+        // false → VoiceOver сам «тапнет» в activation point исходного элемента.
+        return self.target?.accessibilityActivate() ?? false
+    }
+
+    override public func accessibilityIncrement() {
+        self.target?.accessibilityIncrement()
+    }
+
+    override public func accessibilityDecrement() {
+        self.target?.accessibilityDecrement()
+    }
+
+    override public func accessibilityElementDidBecomeFocused() {
+        super.accessibilityElementDidBecomeFocused()
+        self.target?.accessibilityElementDidBecomeFocused()
+    }
+}
+
+/// Собирает конечные VO-элементы под `view` (саму `view` не опрашивает —
+/// безопасно звать из её же accessibilityElements). Пропускает скрытые,
+/// пустые (без метки и значения) и нулевого размера.
+public func collectAccessibilityLeaves(inSubviewsOf view: UIView) -> [NSObject] {
+    var result: [NSObject] = []
+    for subview in view.subviews {
+        collectAccessibilityLeaves(of: subview, depth: 0, into: &result)
+    }
+    return result
+}
+
+private func collectAccessibilityLeaves(of view: UIView, depth: Int, into result: inout [NSObject]) {
+    if depth > 24 || view.isHidden || view.alpha < 0.01 || view.accessibilityElementsHidden {
+        return
+    }
+    if view.isAccessibilityElement {
+        appendAccessibilityLeafIfMeaningful(view, into: &result)
+        return
+    }
+    if let elements = view.accessibilityElements {
+        for element in elements {
+            if let subview = element as? UIView {
+                collectAccessibilityLeaves(of: subview, depth: depth + 1, into: &result)
+            } else if let object = element as? NSObject, object.isAccessibilityElement {
+                appendAccessibilityLeafIfMeaningful(object, into: &result)
+            }
+        }
+    } else {
+        for subview in view.subviews {
+            collectAccessibilityLeaves(of: subview, depth: depth + 1, into: &result)
+        }
+    }
+}
+
+private func appendAccessibilityLeafIfMeaningful(_ element: NSObject, into result: inout [NSObject]) {
+    if (element.accessibilityLabel ?? "").isEmpty && (element.accessibilityValue ?? "").isEmpty {
+        return
+    }
+    let frame = element.accessibilityFrame
+    if frame.isNull || frame.width < 1.0 || frame.height < 1.0 {
+        return
+    }
+    result.append(element)
+}
+
+/// Порядок чтения «как глазами»: строки сверху вниз (элементы, чьи верхние
+/// края ближе `rowTolerance`, — одна строка), внутри строки слева направо.
+public func sortAccessibilityElementsInVisualRows(_ elements: [NSObject], rowTolerance: CGFloat = 10.0) -> [NSObject] {
+    let byTop = elements.sorted { $0.accessibilityFrame.minY < $1.accessibilityFrame.minY }
+    var rows: [[NSObject]] = []
+    var rowTop: CGFloat = -.greatestFiniteMagnitude
+    for element in byTop {
+        let top = element.accessibilityFrame.minY
+        if rows.isEmpty || top - rowTop > rowTolerance {
+            rows.append([element])
+            rowTop = top
+        } else {
+            rows[rows.count - 1].append(element)
+        }
+    }
+    return rows.flatMap { row in row.sorted { $0.accessibilityFrame.minX < $1.accessibilityFrame.minX } }
+}
