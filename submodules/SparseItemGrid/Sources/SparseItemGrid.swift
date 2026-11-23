@@ -2220,6 +2220,15 @@ public final class SparseItemGrid: ASDisplayNode {
         return self.view.convert(currentViewport.frameForItem(layer: layer), from: currentViewport.view)
     }
 
+    /// Кадр ячейки по индексу (в координатах view сетки) — в том числе для
+    /// ячеек вне экрана; нужен элементам VoiceOver.
+    public func frameForItem(at index: Int) -> CGRect? {
+        guard let currentViewport = self.currentViewport, let frame = currentViewport.frameForItem(at: index) else {
+            return nil
+        }
+        return self.view.convert(frame, from: currentViewport.view)
+    }
+
     public func item(at point: CGPoint) -> SparseItemGridDisplayItem? {
         guard let currentViewport = self.currentViewport else {
             return nil

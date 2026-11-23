@@ -4545,10 +4545,30 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     markItems.append((EngineChatList.Group(additionalGroupId), filterPredicate))
                 }
                 
+                let unreadBefore = self.voFilterUnreadCount(id: id)
+                voDiagLog("[VO-DIAG][FOLDER-READ] filter=\(id) before=\(unreadBefore.map(String.init) ?? "-")")
                 let _ = self.context.engine.messages.markAllChatsAsReadInteractively(items: markItems).startStandalone()
+                Queue.mainQueue().after(3.0) { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    voDiagLog("[VO-DIAG][FOLDER-READ] filter=\(id) after3s=\(self.voFilterUnreadCount(id: id).map(String.init) ?? "-")")
+                }
                 break
             }
         }
+    }
+
+    private func voFilterUnreadCount(id: Int32) -> Int? {
+        guard let filterEntries = self.tabContainerData?.0 else {
+            return nil
+        }
+        for filter in filterEntries {
+            if case let .filter(filterId, _, unread) = filter, filterId == id {
+                return Int(unread.value)
+            }
+        }
+        return nil
     }
     
     private func shareFolder(filterId: Int32, data: ChatListFilterData, title: ChatFolderTitle) {

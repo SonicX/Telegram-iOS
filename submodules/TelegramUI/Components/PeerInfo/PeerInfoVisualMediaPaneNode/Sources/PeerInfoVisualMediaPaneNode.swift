@@ -1163,6 +1163,8 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
 
     private var presentationData: PresentationData
     private var presentationDataDisposable: Disposable?
+    fileprivate var voAccessibilityElementCache: [MessageId: UIAccessibilityElement] = [:]
+    fileprivate var voAccessibilitySignature: String?
         
     public init(context: AccountContext, chatControllerInteraction: ChatControllerInteraction, peerId: PeerId, chatLocation: ChatLocation, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>, contentType: ContentType, captureProtected: Bool) {
         self.context = context
@@ -2369,5 +2371,203 @@ private class MediaListSelectionRecognizer: UIPanGestureRecognizer {
         if let recognized = self.recognized, recognized {
             super.touchesMoved(touches, with: event)
         }
+    }
+}
+
+// MARK: - VoiceOver
+
+/// Элемент VoiceOver для одной ячейки общей медиа-сетки профиля
+/// (Медиа / Файлы / Музыка / Голосовые). Сетка SparseItemGrid рисует ячейки
+/// слоями CALayer и обычными UIView внутри своего scroll view, а ASDK собирает
+/// элементы только из нод — VoiceOver не видел содержимое вкладок вовсе
+/// (лог 261052, Tim_music: «на вкладке музыка ничего не отображается, то же
+/// с файлами, медиа и голосовыми»).
+private final class VisualMediaAccessibilityElement: UIAccessibilityElement {
+    let index: Int
+    let messageId: MessageId
+    weak var paneNode: PeerInfoVisualMediaPaneNode?
+
+    init(container: Any, paneNode: PeerInfoVisualMediaPaneNode, index: Int, messageId: MessageId) {
+        self.index = index
+        self.messageId = messageId
+        self.paneNode = paneNode
+        super.init(accessibilityContainer: container)
+    }
+
+    override var accessibilityFrame: CGRect {
+        get {
+            return self.paneNode?.voScreenFrameForItem(index: self.index) ?? .zero
+        }
+        set {
+        }
+    }
+
+    override func accessibilityElementDidBecomeFocused() {
+        super.accessibilityElementDidBecomeFocused()
+        self.paneNode?.voItemFocused(index: self.index)
+    }
+
+    override func accessibilityActivate() -> Bool {
+        return self.paneNode?.voActivateItem(index: self.index, messageId: self.messageId) ?? false
+    }
+}
+
+private let voSpokenDurationFormatter: DateComponentsFormatter = {
+    let formatter = DateComponentsFormatter()
+    formatter.unitsStyle = .full
+    formatter.allowedUnits = [.hour, .minute, .second]
+    return formatter
+}()
+
+extension PeerInfoVisualMediaPaneNode {
+    @objc func customAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded, UIAccessibility.isVoiceOverRunning else {
+            return nil
+        }
+        guard let items = self.items else {
+            return []
+        }
+        var cache = self.voAccessibilityElementCache
+        var result: [Any] = []
+        var usedKeys = Set<MessageId>()
+        for item in items.items {
+            guard let item = item as? VisualMediaItem else {
+                continue
+            }
+            let element: VisualMediaAccessibilityElement
+            if let current = cache[item.message.id] as? VisualMediaAccessibilityElement, current.index == item.index {
+                element = current
+            } else {
+                element = VisualMediaAccessibilityElement(container: self.view, paneNode: self, index: item.index, messageId: item.message.id)
+                cache[item.message.id] = element
+            }
+            let (label, value) = self.voLabel(message: item.message)
+            element.accessibilityLabel = label
+            element.accessibilityValue = value
+            element.accessibilityTraits = .button
+            usedKeys.insert(item.message.id)
+            result.append(element)
+        }
+        for key in Array(cache.keys) where !usedKeys.contains(key) {
+            cache.removeValue(forKey: key)
+        }
+        self.voAccessibilityElementCache = cache
+        let signature = "type=\(self.contentType) loaded=\(result.count) total=\(items.count)"
+        if signature != self.voAccessibilitySignature {
+            self.voAccessibilitySignature = signature
+            voDiagLog("[VO-DIAG][MEDIA-GRID] \(signature)")
+        }
+        return result
+    }
+
+    fileprivate func voScreenFrameForItem(index: Int) -> CGRect {
+        guard self.isNodeLoaded, let frame = self.itemGrid.frameForItem(at: index) else {
+            return .zero
+        }
+        let localFrame = self.view.convert(frame, from: self.itemGrid.view)
+        return UIAccessibility.convertToScreenCoordinates(localFrame, in: self.view)
+    }
+
+    fileprivate func voItemFocused(index: Int) {
+        self.itemGrid.ensureItemVisible(index: index, anyAmount: false)
+    }
+
+    fileprivate func voActivateItem(index: Int, messageId: MessageId) -> Bool {
+        guard let items = self.items, let item = items.items.first(where: { ($0 as? VisualMediaItem)?.message.id == messageId }) as? VisualMediaItem else {
+            voDiagLog("[VO-DIAG][MEDIA-GRID] activate miss index=\(index)")
+            return false
+        }
+        self.itemGrid.ensureItemVisible(index: index, anyAmount: false)
+        if let displayItem = self.itemGrid.item(at: index), let itemView = displayItem.view as? ItemView, itemView.item?.message.id == messageId {
+            voDiagLog("[VO-DIAG][MEDIA-GRID] activate index=\(index) via=list-row")
+            itemView.pressed()
+            return true
+        }
+        voDiagLog("[VO-DIAG][MEDIA-GRID] activate index=\(index) via=open-message")
+        self.itemGridBinding.onTapImpl?(item)
+        return true
+    }
+
+    private func voLabel(message: Message) -> (String, String?) {
+        let strings = self.presentationData.strings
+        let isRu = strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let dateText = stringForMediumDate(timestamp: message.timestamp, strings: strings, dateTimeFormat: self.presentationData.dateTimeFormat)
+        var authorText: String?
+        if let author = message.author {
+            let name = EnginePeer(author).displayTitle(strings: strings, displayOrder: self.presentationData.nameDisplayOrder)
+            if !name.isEmpty {
+                authorText = name
+            }
+        }
+        func durationText(_ seconds: Double) -> String? {
+            guard seconds >= 1.0 else {
+                return nil
+            }
+            return voSpokenDurationFormatter.string(from: seconds.rounded())
+        }
+
+        var label: String = isRu ? "Сообщение" : "Message"
+        var details: [String] = []
+        var isSelected: Bool?
+        if let selectionState = self.chatControllerInteraction.selectionState {
+            isSelected = selectionState.selectedIds.contains(message.id)
+        }
+
+        for media in message.media {
+            if media is TelegramMediaImage {
+                label = isRu ? "Фото" : "Photo"
+                break
+            } else if let file = media as? TelegramMediaFile {
+                var audioInfo: (isVoice: Bool, duration: Int, title: String?, performer: String?)?
+                var videoInfo: (duration: Double, isRound: Bool)?
+                for attribute in file.attributes {
+                    switch attribute {
+                    case let .Audio(isVoice, duration, title, performer, _):
+                        audioInfo = (isVoice, duration, title, performer)
+                    case let .Video(duration, _, flags, _, _, _):
+                        videoInfo = (duration, flags.contains(.instantRoundVideo))
+                    default:
+                        break
+                    }
+                }
+                if let videoInfo {
+                    label = videoInfo.isRound ? (isRu ? "Видеосообщение" : "Video message") : (isRu ? "Видео" : "Video")
+                    if let duration = durationText(videoInfo.duration) {
+                        details.append(duration)
+                    }
+                    if videoInfo.isRound, let authorText {
+                        details.insert((isRu ? "от " : "from ") + authorText, at: 0)
+                    }
+                } else if let audioInfo {
+                    if audioInfo.isVoice {
+                        label = isRu ? "Голосовое сообщение" : "Voice message"
+                        if let authorText {
+                            details.append((isRu ? "от " : "from ") + authorText)
+                        }
+                    } else {
+                        let parts = [audioInfo.performer, audioInfo.title].compactMap { $0 }.filter { !$0.isEmpty }
+                        if !parts.isEmpty {
+                            label = parts.joined(separator: " — ")
+                        } else {
+                            label = file.fileName ?? (isRu ? "Аудио" : "Audio")
+                        }
+                    }
+                    if let duration = durationText(Double(audioInfo.duration)) {
+                        details.append(duration)
+                    }
+                } else {
+                    label = file.fileName ?? (isRu ? "Файл" : "File")
+                    if let size = file.size, size > 0 {
+                        details.append(dataSizeString(size, formatting: DataSizeStringFormatting(presentationData: self.presentationData)))
+                    }
+                }
+                break
+            }
+        }
+        details.append(dateText)
+        if let isSelected {
+            details.append(isSelected ? (isRu ? "выбрано" : "selected") : (isRu ? "не выбрано" : "not selected"))
+        }
+        return (label, details.joined(separator: ", "))
     }
 }

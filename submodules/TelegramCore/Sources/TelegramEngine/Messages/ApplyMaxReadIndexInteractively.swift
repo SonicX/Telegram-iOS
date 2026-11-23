@@ -239,14 +239,20 @@ func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, netwo
     }
     
     if peer.isForumOrMonoForum, !displayAsRegularChat {
-        for item in transaction.getMessageHistoryThreadIndex(peerId: peerId, limit: 20) {
+        // «Прочитать всё» для группы с темами: раньше брались только 20 тем
+        // и только с ненулевым счётчиком — темы дальше 20-й и помеченные
+        // непрочитанными вручную оставались, и папка продолжала показывать
+        // «N непрочитанных» (тестировщики 2026-11-23).
+        var readThreads = 0
+        for item in transaction.getMessageHistoryThreadIndex(peerId: peerId, limit: 1000) {
             guard var data = transaction.getMessageHistoryThreadInfo(peerId: peerId, threadId: item.threadId)?.data.get(MessageHistoryThreadData.self) else {
                 continue
             }
             guard let messageIndex = transaction.getMessageHistoryThreadTopMessage(peerId: peerId, threadId: item.threadId, namespaces: Set([Namespaces.Message.Cloud])) else {
                 continue
             }
-            if data.incomingUnreadCount != 0 {
+            if data.incomingUnreadCount != 0 || (setToValue == false && data.isMarkedUnread) {
+                readThreads += 1
                 data.incomingUnreadCount = 0
                 data.isMarkedUnread = false
                 data.maxIncomingReadId = max(messageIndex.id.id, data.maxIncomingReadId)
@@ -267,6 +273,11 @@ func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, netwo
                 }
             }
         }
+        if setToValue == false, let states = transaction.getPeerReadStates(peerId), states.contains(where: { $0.1.isUnread }) {
+            // У самой группы тоже может остаться отметка «непрочитано».
+            transaction.applyMarkUnread(peerId: peerId, namespace: Namespaces.Message.Cloud, value: false, interactive: true)
+        }
+        Logger.shared.log("ReadAll", "forum peer=\(peerId.id._internalGetInt64Value()) readThreads=\(readThreads)")
     } else {
         let principalNamespace: MessageId.Namespace
         if peerId.namespace == Namespaces.Peer.SecretChat {
@@ -297,6 +308,12 @@ func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, netwo
                 if let index = transaction.getTopPeerMessageIndex(peerId: peerId) {
                     let _ = transaction.applyInteractiveReadMaxIndex(index)
                 } else {
+                    transaction.applyMarkUnread(peerId: peerId, namespace: principalNamespace, value: false, interactive: true)
+                }
+                if setToValue == false, let states = transaction.getPeerReadStates(peerId), states.contains(where: { $0.1.isUnread }) {
+                    // Прочтение до последнего сообщения не сняло «непрочитано»
+                    // (например, ручная отметка) — снимаем явно.
+                    Logger.shared.log("ReadAll", "peer=\(peerId.id._internalGetInt64Value()) still unread after read-max, clearing mark")
                     transaction.applyMarkUnread(peerId: peerId, namespace: principalNamespace, value: false, interactive: true)
                 }
                 viewTracker.updateMarkAllMentionsSeen(peerId: peerId, threadId: nil)
@@ -330,7 +347,9 @@ public func clearPeerUnseenReactionsInteractively(account: Account, peerId: Peer
 }
 
 func _internal_markAllChatsAsReadInteractively(transaction: Transaction, network: Network, viewTracker: AccountViewTracker, groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate?) {
-    for peerId in transaction.getUnreadChatListPeerIds(groupId: groupId, filterPredicate: filterPredicate, additionalFilter: nil, stopOnFirstMatch: false) {
+    let peerIds = transaction.getUnreadChatListPeerIds(groupId: groupId, filterPredicate: filterPredicate, additionalFilter: nil, stopOnFirstMatch: false)
+    Logger.shared.log("ReadAll", "group=\(groupId) unreadPeers=\(peerIds.map { "\($0.namespace._internalGetInt32Value()):\($0.id._internalGetInt64Value())" })")
+    for peerId in peerIds {
         _internal_togglePeerUnreadMarkInteractively(transaction: transaction, network: network, viewTracker: viewTracker, peerId: peerId, setToValue: false)
     }
 }

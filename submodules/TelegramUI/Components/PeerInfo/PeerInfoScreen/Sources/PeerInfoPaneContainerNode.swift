@@ -925,7 +925,7 @@ final class PeerInfoPaneContainerNode: ASDisplayNode, ASGestureRecognizerDelegat
         if let actionPanelView = self.actionPanel?.view, actionPanelView.superview != nil, !actionPanelView.isHidden, actionPanelView.alpha >= 0.01 {
             result.append(actionPanelView)
         }
-        let signature = "tabs=\(tabsState) panes=\(self.currentAvailablePanes?.count ?? -1) pane=\(paneState) frame=\(Int(self.frame.minY))h\(Int(self.frame.height))"
+        let signature = "key=\(self.currentPaneKey.map { "\($0)" } ?? "nil") tabs=\(tabsState) panes=\(self.currentAvailablePanes?.count ?? -1) pane=\(paneState) frame=\(Int(self.frame.minY))h\(Int(self.frame.height))"
         if signature != self.voLastAccessibilitySignature {
             self.voLastAccessibilitySignature = signature
             voDiagLog("[VO-DIAG][PROFILE-PANES] \(signature)")
