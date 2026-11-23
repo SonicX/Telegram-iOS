@@ -892,6 +892,47 @@ final class PeerInfoPaneContainerNode: ASDisplayNode, ASGestureRecognizerDelegat
     var pendingSwitchToPaneKey: PeerInfoPaneKey?
     var expandOnSwitch = false
     
+    private var voLastAccessibilitySignature: String?
+
+    /// VoiceOver: полоса вкладок (Медиа/Файлы/Музыка/Ссылки/Голосовые) —
+    /// обычная UIView компонента, а ASDK собирает элементы только из НОД.
+    /// Вкладки и список под ними VoiceOver не видел вовсе: курсор после
+    /// последней строки профиля уходил по кругу на «Назад» (лог 2026-11-23,
+    /// Tim_music: «не вижу кнопок музыка, ссылки, файлы»).
+    @objc func customAccessibilityElements() -> [Any]? {
+        guard self.isNodeLoaded, UIAccessibility.isVoiceOverRunning else {
+            return nil
+        }
+        var result: [Any] = []
+        var tabsState = "none"
+        if let tabsView = self.tabsContainer.view, tabsView.superview === self.view {
+            if !tabsView.isHidden, tabsView.alpha >= 0.01 {
+                result.append(tabsView)
+                tabsState = "shown"
+            } else {
+                tabsState = "hidden"
+            }
+        }
+        var paneState = "none"
+        if let currentPane = self.currentPane, currentPane.node.isNodeLoaded {
+            if !currentPane.node.isHidden {
+                result.append(currentPane.node.view)
+                paneState = "\(type(of: currentPane.node))"
+            } else {
+                paneState = "hidden"
+            }
+        }
+        if let actionPanelView = self.actionPanel?.view, actionPanelView.superview != nil, !actionPanelView.isHidden, actionPanelView.alpha >= 0.01 {
+            result.append(actionPanelView)
+        }
+        let signature = "tabs=\(tabsState) panes=\(self.currentAvailablePanes?.count ?? -1) pane=\(paneState) frame=\(Int(self.frame.minY))h\(Int(self.frame.height))"
+        if signature != self.voLastAccessibilitySignature {
+            self.voLastAccessibilitySignature = signature
+            voDiagLog("[VO-DIAG][PROFILE-PANES] \(signature)")
+        }
+        return result
+    }
+
     var currentPane: PeerInfoPaneWrapper? {
         if let currentPaneKey = self.currentPaneKey {
             return self.currentPanes[currentPaneKey]
