@@ -43,6 +43,13 @@ public var voAccessibilityLastTouchExplorationPoint: CGPoint?
 /// Момент последнего ВКЛЮЧЕНИЯ VoiceOver (см. ListView.voTrackVoiceOverEnabling).
 public var voAccessibilityVoiceOverEnabledTimestamp: Double = 0.0
 
+/// Элемент списка, по которому VoiceOver последний раз сделал двойной тап,
+/// и момент тапа. Запуск кружка/видео меняет раскладку, iOS 27 тут же
+/// перевыбирает фокус hit-test'ом и уводил курсор на соседнее сообщение
+/// (лог 2026-11-20, LOVEтамин: «кружки не открываются, сколько ни жми»).
+public weak var voAccessibilityLastActivatedElement: FocusTrackingAccessibilityElement?
+public var voAccessibilityLastActivatedTimestamp: Double = 0.0
+
 public func voNoteAccessibilityHitTest(_ point: CGPoint, in view: UIView) {
     voAccessibilityLastTouchExplorationTimestamp = CACurrentMediaTime()
     voAccessibilityLastTouchExplorationPoint = UIAccessibility.convertToScreenCoordinates(CGRect(origin: point, size: CGSize(width: 1.0, height: 1.0)), in: view).origin
@@ -126,6 +133,9 @@ public final class FocusTrackingAccessibilityElement: UIAccessibilityElement {
     public var activateRow: (() -> Bool)?
 
     override public func accessibilityActivate() -> Bool {
+        voAccessibilityLastActivatedElement = self
+        voAccessibilityLastActivatedTimestamp = CACurrentMediaTime()
+        voDiagLog("[VO-DIAG][ACT] activate pin=\(self.pinnedLocalIndex.map(String.init) ?? "-") label=«\(String((self.accessibilityLabel ?? "-").prefix(32)))»")
         if let activateRow = self.activateRow, activateRow() {
             return true
         }

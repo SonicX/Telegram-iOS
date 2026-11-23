@@ -642,6 +642,9 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         if systemFocused == nil, let last = self.voHitLastTrackedElement, now - self.voHitLastTrackedTimestamp < 1.5 {
             focused = last
         }
+        if systemFocused == nil, let activated = voAccessibilityLastActivatedElement, now - voAccessibilityLastActivatedTimestamp < 1.5 {
+            focused = activated
+        }
         if let tracked = focused as? FocusTrackingAccessibilityElement {
             if tracked.pinnedLocalIndex != nil {
                 self.voHitLastTrackedElement = tracked
@@ -664,6 +667,20 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
             }
             if !liveFrame.isNull, liveFrame.contains(screenPoint) {
                 return tracked
+            }
+            // Проверка iOS 27 сразу после НАШЕГО подскролла к сообщению (свайп)
+            // или после двойного тапа (кружок/видео запустился и вырос): точка
+            // берётся из старой раскладки и попадает в соседнее сообщение —
+            // курсор через 0,3с уезжал с кружка, двойной тап шёл не туда
+            // (лог 2026-11-20, канал с кружками). Палец за это время на экран
+            // не ставят — оставляем курсор на месте.
+            let afterOwnScroll = self.accessibilityLastFocusScrollIndex == localIndex && now - self.accessibilityLastProgrammaticEdgeScrollTimestamp < 0.8
+            let afterActivate = voAccessibilityLastActivatedElement === tracked && now - voAccessibilityLastActivatedTimestamp < 1.5
+            if afterOwnScroll || afterActivate {
+                if let resultElement = fallback() as? FocusTrackingAccessibilityElement, !self.accessibilityIsSameRow(resultElement, tracked) {
+                    voDiagLog("[VO-DIAG][HIT] keep-after-\(afterActivate ? "activate" : "scroll") point=(\(Int(screenPoint.x)),\(Int(screenPoint.y))) keep=«\(String((tracked.accessibilityLabel ?? "-").prefix(24)))» drop=«\(String((resultElement.accessibilityLabel ?? "-").prefix(24)))»")
+                    return tracked
+                }
             }
             // Служебная проверка iOS 27 бьёт ровно в ЦЕНТР соседней строки
             // (где курсор стоял до свайпа). Палец так точно не попадает —
@@ -7143,6 +7160,10 @@ open class ListView: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDel
         self.accessibilityLastFocusedScreenMidY = focusedData.frame.isNull ? nil : focusedData.frame.midY
         self.accessibilityLastSystemFocusedIndex = toIndex
         self.accessibilityLastInListFocusTimestamp = CACurrentMediaTime()
+        if let focusedTracked = elementData.first(where: { $0.index == toIndex })?.element as? FocusTrackingAccessibilityElement, focusedTracked.pinnedLocalIndex != nil {
+            self.voHitLastTrackedElement = focusedTracked
+            self.voHitLastTrackedTimestamp = CACurrentMediaTime()
+        }
         if let didFocusItem = self.accessibilityDidFocusItemAtLocalIndex,
            let focusedElement = elementData.first(where: { $0.index == toIndex })?.element as? FocusTrackingAccessibilityElement,
            let localIndex = focusedElement.pinnedLocalIndex {

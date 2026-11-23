@@ -1697,17 +1697,32 @@ public class ChatMessageInteractiveInstantVideoNode: ASDisplayNode {
         // ОТМЕНЯЛ, а для загруженного переключал чужой плейлист — кружки «не
         // воспроизводились по нажатию» (отзыв 2026-11-14).
         guard let item = self.item else {
+            voDiagLog("[VO-DIAG][ROUND] activate no-item")
             return true
         }
+        let statusString: String
+        if let status = self.status {
+            switch status.mediaStatus {
+            case let .fetchStatus(fetchStatus):
+                statusString = "fetch:\(fetchStatus)"
+            case let .playbackStatus(playbackStatus):
+                statusString = "playback:\(playbackStatus)"
+            }
+        } else {
+            statusString = "nil"
+        }
         if item.message.flags.isSending {
+            voDiagLog("[VO-DIAG][ROUND] activate msg=\(item.message.id.id) sending status=\(statusString)")
             self.progressPressed()
             return true
         }
         if let status = self.status, case .playbackStatus = status.mediaStatus {
+            voDiagLog("[VO-DIAG][ROUND] activate msg=\(item.message.id.id) toggle status=\(statusString)")
             item.context.sharedContext.mediaManager.playlistControl(.playback(.togglePlayPause), type: .voice)
             return true
         }
-        let _ = item.controllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
+        let opened = item.controllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
+        voDiagLog("[VO-DIAG][ROUND] activate msg=\(item.message.id.id) open=\(opened) status=\(statusString)")
         return true
     }
     
