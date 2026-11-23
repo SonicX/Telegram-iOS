@@ -5552,6 +5552,14 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     // iOS получала мусор вместо результата.
     @objc private func performLocalAccessibilityCustomAction(_ action: UIAccessibilityCustomAction) -> Bool {
         if let action = action as? ChatListItemAccessibilityCustomAction {
+            // VO-диагностика «Прочитано не с первого раза» (лог 2026-11-23:
+            // readHistory уходил только с 3-4 попытки): видно, дошло ли
+            // действие и до КАКОГО чата.
+            var peerString = "-"
+            if let item = self.item, case let .peer(peerData) = item.content {
+                peerString = "\(peerData.peer.peerId.id._internalGetInt64Value()) unread=\(peerData.combinedReadState?.count ?? -1) marked=\(peerData.combinedReadState?.markedUnread ?? false)"
+            }
+            voDiagLog("[VO-DIAG][CHAT-ACTION] key=\(action.key) name=«\(action.name)» peer=\(peerString) label=«\(String((self.view.accessibilityLabel ?? "-").prefix(24)))»")
             self.revealOptionSelected(ItemListRevealOption(key: action.key, title: "", icon: .none, color: .black, textColor: .white), animated: false)
             return true
         }

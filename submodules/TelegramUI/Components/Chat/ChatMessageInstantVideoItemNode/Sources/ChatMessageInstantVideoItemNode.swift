@@ -186,6 +186,18 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
     required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    // VoiceOver: строка ленты (пуловый элемент) активирует саму ноду кружка.
+    // Без этого override двойной тап уходил в ASDisplayNode по умолчанию и
+    // терялся — кружки не запускались ни с какого раза (лог 2026-11-23,
+    // LOVEтамин: 13 двойных тапов [ACT] и ни одного [ROUND]). Пузырь
+    // (ChatMessageBubbleItemNode) делает то же самое через свою область.
+    override public func accessibilityActivate() -> Bool {
+        if let activate = self.messageAccessibilityArea.activate, activate() {
+            return true
+        }
+        return self.interactiveVideoNode.accessibilityActivate()
+    }
     
     override public func didLoad() {
         super.didLoad()

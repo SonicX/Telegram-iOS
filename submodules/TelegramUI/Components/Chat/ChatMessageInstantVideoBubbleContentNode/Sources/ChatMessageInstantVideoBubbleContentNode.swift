@@ -166,10 +166,9 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
     }
     
     override public func accessibilityActivate() -> Bool {
-        if let item = self.item {
-            let _ = item.controllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
-        }
-        return true
+        // Тот же путь, что у кружка без пузыря: воспроизведение/пауза, а для
+        // незагруженного — открытие (и запись [ROUND] в лог).
+        return self.interactiveVideoNode.accessibilityActivate()
     }
     
     required public init?(coder aDecoder: NSCoder) {
