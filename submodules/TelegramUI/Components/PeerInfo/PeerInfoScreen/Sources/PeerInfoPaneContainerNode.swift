@@ -85,7 +85,10 @@ private final class GiftsTabItemComponent: Component {
                 
         func update(component: GiftsTabItemComponent, availableSize: CGSize, state: State, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.component = component
-            
+            // VoiceOver: TabSelectorComponent берёт подпись вкладки-компонента из
+            // accessibilityLabel этого view — без неё вкладка «Подарки» звучала как «кнопка».
+            self.accessibilityLabel = component.title
+
             let environment = environment[EnvironmentType.self].value
             
             let textSpacing: CGFloat = 2.0
